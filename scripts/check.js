@@ -1,6 +1,7 @@
 // Syntax check for everything that ships: every JS file, every inline
-// <script> block in the HTML pages, and every SQL migration.
-// Run with: npm run check
+// <script> block in the HTML pages, and every SQL migration, plus the policy
+// pairs, the dead code check (scripts/deadcode.js) and the page weight budgets
+// (scripts/page-budgets.js). Run with: npm run check
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -83,6 +84,13 @@ for (const file of sqlFiles) {
     if (!drop.test(sql)) fail(file, new Error(`create policy ${name} on ${table} has no matching drop policy if exists`));
   }
 }
+
+// 5. Dead code (new findings only, see scripts/deadcode-baseline.json) and page weight
+// budgets (scripts/page-budgets.json). Both print their own lines.
+const dead = require('./deadcode');
+failures += dead.fresh.length;
+const budgets = require('./page-budgets');
+failures += budgets.over.length;
 
 console.log(`${checked} checked, ${failures} failed`);
 process.exit(failures ? 1 : 0);
