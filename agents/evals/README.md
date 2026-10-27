@@ -13,4 +13,4 @@ A case holds the input as the agent would see it (names and private details remo
 
 Runners are written per agent because each one's inputs differ (an email thread, a chat message, a PDF). Until an agent has a runner, its `cases.json` is still the list a chat checks by hand after a change, and the PR says so.
 
-Sets today: `postie/` (filing and labels, 4 cases from the GCW dispute label on 27 Oct 2026, runner not yet written: it comes with the Postie filing fix, backlog item 37).
+Sets today: `postie/` (filing and labels: 6 cases, the GCW dispute emails that were right and the 4 that were wrong on 27 Oct 2026, plus one topic label; `run.js` runs the code checks anywhere and the model cases with `ANTHROPIC_API_KEY` set).

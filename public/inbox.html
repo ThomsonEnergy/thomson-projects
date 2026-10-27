@@ -619,7 +619,7 @@
           <button type="button" class="secondary" id="done-btn">${thread.is_done ? 'Move back to inbox' : 'Done'}</button>
           <a href="${gmailUrl}" target="_blank" rel="noopener" style="font-size:12px; margin-left:auto;">Open in Gmail</a>
         </div>
-        ${thread.suggested_label ? `<div class="suggest">${escapeHtml(S.assistant)} suggests a new label: <strong>${escapeHtml(thread.suggested_label)}</strong><button type="button" id="accept-label">Add</button><button type="button" class="secondary" id="dismiss-label">No</button></div>` : ''}
+        ${thread.suggested_label ? `<div class="suggest">${escapeHtml(S.assistant)} suggests a label: <strong>${escapeHtml(thread.suggested_label)}</strong><button type="button" id="accept-label">Add</button><button type="button" class="secondary" id="dismiss-label">No</button></div>` : ''}
         ${thread.projects ? `<div class="suggest">${escapeHtml(S.assistant)} thinks this is about <strong>${escapeHtml(projectRef(thread.projects))} ${escapeHtml(thread.projects.name || '')}</strong><button type="button" id="accept-job">Tag it</button><button type="button" class="secondary" id="dismiss-job">No</button></div>` : ''}
         <div id="thread-labels" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 8px;"></div>
         <div id="thread-tags" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 14px;"></div>
