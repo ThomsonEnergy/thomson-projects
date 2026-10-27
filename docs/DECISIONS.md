@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 27 Oct 2026
+
+- Planned, waiting on yes: software factory (isolate, build, prove, ship, weekly cleanup) drafted for Fable to review in `docs/SOFTWARE_FACTORY.md` (backlog item 36). Agents: Sparky and the ops manager become one assistant with a company view and a personal view; workers report events the ops manager routes; Postie filing fix (4 of 8 emails under the GCW label were wrong), learning from edited drafts, My Plan page, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`, backlog item 37).
+
 ## 26 Oct 2026
 
 - Feature on `staging` (PR 223, waiting for release): "Edit quote" removed; a quote is edited only in the Quote tab steps. New "Quote and client" card above step 1 (quote name, client, email, phone, site, payment terms, internal notes), proposal type change in step 1 swaps the cover photos, Create job in Pylon works from the steps. Jobs keep "Edit stages". `docs/PROJECT_SPEC.md` updated on `staging` with it.
