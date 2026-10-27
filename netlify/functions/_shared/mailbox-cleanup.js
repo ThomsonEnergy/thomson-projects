@@ -12,6 +12,7 @@ const { gmailRequest } = require('./google-client');
 const { getIntegrationKey } = require('./get-integration-key');
 const { buildMimeMessage } = require('./build-mime-message');
 const { canMirror } = require('./mailboxes');
+const { claudeJson } = require('./claude-json');
 
 const SUGGEST_MODEL = 'claude-haiku-5-5';
 const CONCURRENCY = 8;
@@ -138,7 +139,7 @@ async function suggestForSenders(admin, mailbox, usage) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
+      body: claudeJson({
         model: SUGGEST_MODEL,
         max_tokens: 8000,
         output_config: { effort: 'low', format: { type: 'json_schema', schema: SUGGEST_SCHEMA } },

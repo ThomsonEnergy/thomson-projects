@@ -12,6 +12,7 @@
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { claudeJson } = require('./_shared/claude-json');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -53,7 +54,7 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
         max_tokens: 1000,
         messages: [{

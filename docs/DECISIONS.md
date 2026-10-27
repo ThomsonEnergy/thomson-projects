@@ -7,6 +7,10 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 - Owner: software factory agreed (`docs/SOFTWARE_FACTORY.md`): features branch from `staging`, fixes from `main`; automatic dead code and page weight checks go into `npm run check` (overrides backlog item 16); smoke run reported in the PR first, required check later. Build of the setup waits on the owner's yes.
 - Planned, waiting on yes: software factory (isolate, build, prove, ship, weekly cleanup) drafted for Fable to review in `docs/SOFTWARE_FACTORY.md` (backlog item 36). Agents: Sparky and the ops manager become one assistant with a company view and a personal view; workers report events the ops manager routes; Postie filing fix (4 of 8 emails under the GCW label were wrong), learning from edited drafts, My Plan page, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`, backlog item 37).
 
+## 27 Oct 2026
+
+- Bug fix, LIVE: Postie (the email agent) had failed most runs since 23 Oct 9:35am: one email cut at 1,500 characters ended on half an emoji, JSON.stringify wrote a lone surrogate and the Anthropic API refused the whole request ("The request body is not valid"), so the run died and the same conversation came back next run. New `_shared/claude-json.js` (`claudeJson` strips lone surrogates from every string in a request body, `safeSlice` never cuts inside an emoji); every Claude call in `netlify/functions` goes through it (25 files), Postie's `clip` uses `safeSlice`. Found with the stuck conversations' text run through Postie's own cut.
+
 ## 26 Oct 2026
 
 - Feature on `staging` (PR 223, waiting for release): "Edit quote" removed; a quote is edited only in the Quote tab steps. New "Quote and client" card above step 1 (quote name, client, email, phone, site, payment terms, internal notes), proposal type change in step 1 swaps the cover photos, Create job in Pylon works from the steps. Jobs keep "Edit stages". `docs/PROJECT_SPEC.md` updated on `staging` with it.

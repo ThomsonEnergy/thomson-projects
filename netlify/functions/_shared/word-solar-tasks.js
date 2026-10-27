@@ -12,6 +12,7 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 
 async function wordSolarTasks({ missing, equipment = {} }) {
   if (!Array.isArray(missing) || !missing.length) return [];
@@ -44,7 +45,7 @@ Respond with ONLY a JSON array, no other text, no markdown fences. One object pe
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
+    body: claudeJson({
       model: 'claude-sonnet-5-5',
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],

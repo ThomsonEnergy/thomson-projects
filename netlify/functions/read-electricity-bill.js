@@ -11,6 +11,7 @@ const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { suggestSizes, billMetrics } = require('../../public/js/solar-roi.js');
+const { claudeJson } = require('./_shared/claude-json');
 
 const BILL_FOLDER = 'Electricity bill';
 // Files past this many are not sent (one request, one reading); their names come back as left_out_files
@@ -98,7 +99,7 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
         max_tokens: 2000,
         messages: [{ role: 'user', content: [...blocks, { type: 'text', text: PROMPT }] }],

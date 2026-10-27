@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
+const { claudeJson } = require('./_shared/claude-json');
 
 // Drafts a prebuild's client-facing description in the house format: an
 // ALL CAPS "SUPPLY AND INSTALL NEW ..." title line, then a short trade-
@@ -66,7 +67,7 @@ Respond with ONLY the description text (title line, blank line, paragraph) - no 
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],

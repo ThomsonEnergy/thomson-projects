@@ -4,6 +4,7 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 
 async function extractStatement({ fileBase64, mediaType }) {
   const apiKey = await getIntegrationKey('anthropic');
@@ -40,7 +41,7 @@ If a field genuinely isn't visible, use null rather than guessing. Respond with 
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
+    body: claudeJson({
       model: 'claude-sonnet-5-5',
       max_tokens: 8000,
       messages: [{
