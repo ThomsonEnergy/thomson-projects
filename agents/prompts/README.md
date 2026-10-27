@@ -5,10 +5,10 @@ One file per agent, the system prompt and rules it runs with, separate from the 
 Layout:
 
 ```
-agents/prompts/<agent>.md      the prompt, plain text, in the owner's style (no em dashes)
-agents/evals/<agent>/          real cases (names removed) with the right answer
+agents/prompts/<agent>-<job>.js   the prompt as a JS module exporting one template string, in the owner's style (no em dashes)
+agents/evals/<agent>/             real cases (names removed) with the right answer
 ```
 
-Code loads a prompt with `fs.readFileSync(path.join(__dirname, '..', '..', 'agents', 'prompts', '<agent>.md'), 'utf8')` and fills the live parts (label list, job list, mailbox owner) in from the database at run time. Anything a person should be able to change without a deploy (question sets, label rules) is not in the prompt at all: it is a settings table with a screen.
+A JS module, not a text file, so the Netlify function bundler ships it with the function by itself (a text file read at run time needs `included_files` in `netlify.toml` and a path that survives bundling). Code loads it with `require('../../../agents/prompts/<agent>-<job>.js')` and fills the live parts (`{{labels}}`, `{{who}}`, job list) in from the database at run time. First one: `postie-labels.js` (27 Oct 2026). Anything a person should be able to change without a deploy (question sets, label rules) is not in the prompt at all: it is a settings table with a screen.
 
 Agents today: Postie (email), Tally (supplier bills), the price list reader, the Knowledge Base reader, the chat tagger, Sparky (chat and Ask AI, also the ops manager view), the sweeps (job booked, quote expiry, licence expiry, booking reminders).

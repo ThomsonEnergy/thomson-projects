@@ -39,6 +39,7 @@ const sources = [
   ...walk(path.join(root, 'public'), ['.html', '.js', '.css', '.json', '.webmanifest']),
   ...walk(path.join(root, 'netlify'), ['.js', '.json']),
   ...walk(path.join(root, 'scripts'), ['.js', '.sh']),
+  ...walk(path.join(root, 'agents'), ['.js', '.json', '.md']),
   ...walk(path.join(root, 'tego-app', 'native-shell'), ['.html', '.js']),
   ...walk(path.join(root, 'supabase'), ['.sql']),
   path.join(root, 'netlify.toml'),

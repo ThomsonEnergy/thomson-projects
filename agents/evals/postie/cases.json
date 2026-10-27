@@ -1,41 +1,107 @@
 {
   "agent": "Postie (email agent, _shared/email-agent.js)",
   "written": "2026-10-27",
-  "about": "Filing under labels. On 27 Oct 2026 the sales@ mailbox had two labels: 'GCW dispute' (All emails regarding GC Wind Services) and 'New Solar Products'. Postie put 8 threads under GCW dispute; 4 did not belong. Cause: an email that looked legal or formal with no fitting label was given the nearest one instead of none. Each case lists the labels on offer and the answer Postie must give.",
+  "about": "Filing under labels. On 27 Oct 2026 the sales@ mailbox had two labels: 'GCW dispute' (All emails regarding GC Wind Services) and 'New Solar Products'. Postie put 8 threads under GCW dispute; 4 did not belong. Cause: an email that looked legal or formal with no fitting label was given the nearest one instead of none. A sixth case checks the topic label still works. Each case lists the labels on offer and the answer Postie must give.",
   "labels": [
-    { "name": "GCW dispute", "description": "All emails regarding GC Wind Services" },
-    { "name": "New Solar Products", "description": "Emails from suppliers showing new products that might interest us, brands we use" }
+    {
+      "name": "GCW dispute",
+      "description": "All emails regarding GC Wind Services"
+    },
+    {
+      "name": "New Solar Products",
+      "description": "Emails from suppliers showing new products that might interest us, brands we use"
+    }
   ],
   "cases": [
     {
       "id": "gcw-supreme-court",
-      "input": { "from": "solicitor at a law firm", "subject": "Thomson Energy Solutions Pty Limited (Subject to Restructuring Plan) & Anor ats GC Wind Services Pty Ltd - Supreme Court of NSW proceeding", "body_gist": "Court correspondence in the GC Wind Services matter, orders and dates." },
-      "expect": { "labels": ["GCW dispute"], "section": "Priority", "job": null },
+      "input": {
+        "from": "solicitor at a law firm",
+        "subject": "Thomson Energy Solutions Pty Limited (Subject to Restructuring Plan) & Anor ats GC Wind Services Pty Ltd - Supreme Court of NSW proceeding",
+        "body_gist": "Court correspondence in the GC Wind Services matter, orders and dates."
+      },
+      "expect": {
+        "labels": [
+          "GCW dispute"
+        ],
+        "section": "Priority",
+        "job": null
+      },
       "why": "The sender and subject name GC Wind Services: the label's description matches word for word."
     },
     {
       "id": "workers-comp-case-conference",
-      "input": { "from": "case manager at the workers compensation insurer", "subject": "Fwd: Subsequent Case Conference Summary Email - Mr [staff member] - [claim number]", "body_gist": "Summary of a case conference about an injured staff member's return to work plan." },
-      "expect": { "labels": [], "new_label": "", "section": "Priority", "job": null },
+      "input": {
+        "from": "case manager at the workers compensation insurer",
+        "subject": "Fwd: Subsequent Case Conference Summary Email - Mr [staff member] - [claim number]",
+        "body_gist": "Summary of a case conference about an injured staff member's return to work plan."
+      },
+      "expect": {
+        "labels": [],
+        "new_label": "",
+        "section": "Priority",
+        "job": null
+      },
       "why": "Formal and legal-looking, but nothing to do with GC Wind Services. No label fits, so none. A new label for the staff member's claim is private HR and not for the shared inbox's label list."
     },
     {
       "id": "workers-comp-rtw-plan",
-      "input": { "from": "case manager at the workers compensation insurer", "subject": "Fwd: Mr [staff member] [claim number] - RTW Plan Submission", "body_gist": "Return to work plan submitted for the injured staff member." },
-      "expect": { "labels": [], "new_label": "", "section": "Priority", "job": null },
+      "input": {
+        "from": "case manager at the workers compensation insurer",
+        "subject": "Fwd: Mr [staff member] [claim number] - RTW Plan Submission",
+        "body_gist": "Return to work plan submitted for the injured staff member."
+      },
+      "expect": {
+        "labels": [],
+        "new_label": "",
+        "section": "Priority",
+        "job": null
+      },
       "why": "Same matter as the case conference email, same answer: no label."
     },
     {
       "id": "battery-recall-notice",
-      "input": { "from": "battery manufacturer's support desk", "subject": "[Sigenergy] Re: Action Required - Outstanding Recall Cases Transferred to CSP", "body_gist": "A manufacturer moving open recall cases to a service partner, asks for action on outstanding units." },
-      "expect": { "labels": [], "section": "Priority", "job": null },
+      "input": {
+        "from": "battery manufacturer's support desk",
+        "subject": "[Sigenergy] Re: Action Required - Outstanding Recall Cases Transferred to CSP",
+        "body_gist": "A manufacturer moving open recall cases to a service partner, asks for action on outstanding units."
+      },
+      "expect": {
+        "labels": [],
+        "section": "Priority",
+        "job": null
+      },
       "why": "A product recall from a supplier is not a dispute with GC Wind Services and not a new product. No label; it needs a person (installed units may be affected) so it stays Priority."
     },
     {
       "id": "panel-clean-photo",
-      "input": { "from": "a customer", "subject": "panel clean photo", "body_gist": "A photo of cleaned solar panels, one line of text." },
-      "expect": { "labels": [], "section": "Other", "job": null },
+      "input": {
+        "from": "a customer",
+        "subject": "panel clean photo",
+        "body_gist": "A photo of cleaned solar panels, one line of text."
+      },
+      "expect": {
+        "labels": [],
+        "section": "Other",
+        "job": null
+      },
       "why": "A customer photo. No label fits and nothing legal about it; if the customer has a job it should be tagged to the job, never to a dispute label."
+    },
+    {
+      "id": "supplier-new-inverter",
+      "input": {
+        "from": "account manager at a solar wholesaler we buy from",
+        "subject": "Now available: Fronius GEN24 Plus 10kW, stock arriving next week",
+        "body_gist": "A supplier presenting a new inverter model they now stock, with datasheet attached and pricing on request."
+      },
+      "expect": {
+        "labels": [
+          "New Solar Products"
+        ],
+        "section": "Other",
+        "job": null
+      },
+      "why": "A topic label: a supplier presenting a product it sells, from a brand we use. The label's description matches, so it is applied."
     }
   ]
 }

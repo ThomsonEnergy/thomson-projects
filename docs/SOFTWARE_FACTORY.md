@@ -1,6 +1,6 @@
 # Software factory: how every chat builds
 
-**Status: agreed 27 Oct 2026 (owner's answers below), waiting on the owner's yes to build the setup.** Once agreed, the short rules move into `CLAUDE.md` and each step becomes a skill in `.claude/skills/`. Backlog item 36.
+**Status: built 27 Oct 2026 (skills, scripts, PR template, agents folders), on `staging`. Backlog item 36.** Once agreed, the short rules move into `CLAUDE.md` and each step becomes a skill in `.claude/skills/`. Backlog item 36.
 
 ## Why
 

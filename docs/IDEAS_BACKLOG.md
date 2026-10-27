@@ -27,8 +27,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
 | 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
 | 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
-| 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Agreed 27 Oct 2026, waiting on yes to build | N | None |
-| 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Planned, waiting on owner's yes | N | Item 36 eval sets; staff notice for per-person email |
+| 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
+| 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 
 ## High lead time, start now
 

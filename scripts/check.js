@@ -37,7 +37,7 @@ function checkJs(code, file, isModule) {
 }
 
 // 1. JS files (functions are CommonJS, browser files are classic scripts).
-for (const file of [...walk(path.join(root, 'netlify'), '.js'), ...walk(path.join(root, 'public', 'js'), '.js'), ...walk(path.join(root, 'scripts'), '.js')]) {
+for (const file of [...walk(path.join(root, 'netlify'), '.js'), ...walk(path.join(root, 'public', 'js'), '.js'), ...walk(path.join(root, 'scripts'), '.js'), ...walk(path.join(root, 'agents'), '.js')]) {
   if (file.includes(`${path.sep}vendor${path.sep}`)) continue;
   const code = fs.readFileSync(file, 'utf8');
   const isModule = /^\s*(import|export)\s/m.test(code);
