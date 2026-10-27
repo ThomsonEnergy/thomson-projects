@@ -2514,18 +2514,18 @@ function setNavOpenGroup(key) {
   try { if (key) localStorage.setItem(NAV_OPEN_GROUP_KEY, key); else localStorage.removeItem(NAV_OPEN_GROUP_KEY); } catch (e) { /* storage blocked: just not remembered */ }
 }
 
-// Pipeline icon in the top bar, before Schedule. Pages' top bars are
-// hand-written HTML, so it is added here rather than on each page.
+// Pipeline icon in the top bar, before Settings (Schedule left the bar 27 Oct 2026, it
+// is in the Team menu). Pages' top bars are hand-written HTML, so it is added here.
 function addPipelineTopbarIcon() {
   const right = document.querySelector('.topbar-right');
   if (!right || document.getElementById('pipeline-topbar-link')) return;
   const link = document.createElement('a');
   link.href = '/dashboard.html'; link.id = 'pipeline-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Pipeline';
   link.innerHTML = '&#128203;';
-  const before = right.querySelector('a.topbar-icon-link[href="/schedule.html"]') || right.querySelector('a.topbar-icon-link[href="/settings.html"]');
+  const before = right.querySelector('a.topbar-icon-link[href="/settings.html"]');
   right.insertBefore(link, before || right.firstChild);
 }
-// Lights up the top bar icon (Pipeline, Schedule, Settings) for the page you are on.
+// Lights up the top bar icon (Messages, Mail, Pipeline, Settings) for the page you are on.
 function markActiveTopbarIcon() {
   const here = window.location.pathname;
   document.querySelectorAll('.topbar-right a.topbar-icon-link[href^="/"]').forEach(a => {
@@ -2540,7 +2540,7 @@ function markActiveTopbarIcon() {
 async function renderMainNav(activeKey) {
   const tabsEl = document.getElementById('topbar-tabs');
   const dropdownEl = document.getElementById('mobile-menu-dropdown');
-  // Pages with no key of their own (Schedule, Settings, Updates and ideas) are found by address.
+  // Pages with no key of their own (Settings, Updates and ideas) are found by address.
   if (!activeKey) {
     const here = MAIN_NAV_ITEMS.find(item => item.href === window.location.pathname);
     activeKey = here ? here.key : null;
@@ -2677,7 +2677,7 @@ async function renderMainNav(activeKey) {
 // shrinks to an icon, then the icons tighten up. Re-checked whenever the
 // bar changes size or something is added to it (bell, search, a star).
 // Spoken labels for the top bar icons (from their title text) and the menu button, so
-// VoiceOver reads Menu, Search everything, Chat, Notifications, Schedule, Settings.
+// VoiceOver reads Menu, Search everything, Messages, Mail, Notifications, Pipeline, Settings.
 function labelTopbarIcons() {
   document.querySelectorAll('.topbar-icon-link[title]:not([aria-label])').forEach(a => a.setAttribute('aria-label', a.title.replace(/\s*\(.*\)$/, '')));
   const m = document.getElementById('mobile-menu-btn');
@@ -2729,33 +2729,37 @@ function loadGlobalSearch() {
 
 // The notification bell + phone push setup live in their own file, loaded once
 // on any page that shows the top bar.
-// Messages icon in the top bar (the Chat icon): unread chats (not muted, from
-// chat_unread_total) plus unread shared inbox emails (the `messages` channel rows of
-// the notifications table, migration 20261120000000). Kept up to date by Realtime and a
-// once-a-minute refresh. Tap opens a panel with Chats and Emails; a row opens the chat
-// or the Inbox thread. The bell (notifications.js) never shows chats or emails.
-let _msgOpen = false, _msgMe = null, _chatBadgeBusy = false;
+// Messages and Mail icons in the top bar, each with its own badge (one count until
+// 27 Oct 2026). Messages: unread chats (chat_unread_total), tap lists them. Mail:
+// unread emails (`messages` channel rows of notifications, migration 20261120000000),
+// tap lists them. Realtime plus a minute refresh. The bell never shows either.
+let _msgOpen = null, _msgMe = null, _chatBadgeBusy = false;
+function topbarIconLink(id, href, title, icon, badgeId) {
+  const a = document.createElement('a');
+  a.href = href; a.id = id; a.className = 'topbar-icon-link'; a.title = title; a.style.position = 'relative';
+  a.innerHTML = `${icon}<span id="${badgeId}" class="topbar-count"></span>`;
+  return a;
+}
 function loadChatBadge() {
   const right = document.querySelector('.topbar-right');
   if (!right || document.getElementById('chat-topbar-link')) return;
-  const link = document.createElement('a');
-  link.href = '/chat.html'; link.id = 'chat-topbar-link'; link.className = 'topbar-icon-link'; link.title = 'Messages';
-  link.style.position = 'relative';
-  link.innerHTML = '&#128172;<span id="chat-topbar-badge" style="position:absolute; top:-5px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#e5484d; color:#fff; font-size:11px; font-weight:700; display:none; align-items:center; justify-content:center; line-height:1;"></span>';
+  const link = topbarIconLink('chat-topbar-link', '/chat.html', 'Messages', '&#128172;', 'chat-topbar-badge');
+  const mailLink = topbarIconLink('mail-topbar-link', '/inbox.html', 'Mail', '&#128231;', 'mail-topbar-badge');
   right.insertBefore(link, right.firstChild);
+  right.insertBefore(mailLink, link.nextSibling);
 
   const panel = document.createElement('div');
   panel.id = 'msg-panel';
-  panel.style.cssText = 'position:fixed; top:56px; right:10px; width:min(400px, 94vw); max-height:78vh; overflow-y:auto; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.45); z-index:250; display:none;';
   document.body.appendChild(panel);
   if (!document.getElementById('msg-styles')) {
     const st = document.createElement('style');
     st.id = 'msg-styles';
     st.textContent = `
+      .topbar-count { position:absolute; top:-5px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#e5484d; color:#fff; font-size:11px; font-weight:700; display:none; align-items:center; justify-content:center; line-height:1; }
+      #msg-panel { position:fixed; top:56px; right:10px; width:min(400px, 94vw); max-height:78vh; overflow-y:auto; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.45); z-index:250; display:none; }
       .msg-head { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--surface); }
       .msg-head h3 { margin:0; font-size:15px; }
       .msg-head a, .msg-link { color:var(--accent); font-size:12px; text-decoration:none; background:none; border:none; cursor:pointer; padding:2px 4px; }
-      .msg-sec { display:flex; justify-content:space-between; align-items:center; padding:8px 14px 4px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
       .msg-row { display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); cursor:pointer; color:inherit; text-decoration:none; }
       .msg-row:hover { background:var(--surface-2); }
       .msg-dot { width:9px; height:9px; border-radius:50%; background:var(--accent); margin-top:5px; flex-shrink:0; }
@@ -2765,8 +2769,10 @@ function loadChatBadge() {
     `;
     document.head.appendChild(st);
   }
-  link.addEventListener('click', async (e) => { e.preventDefault(); e.stopPropagation(); if (_msgOpen) closeMessagesPanel(); else await openMessagesPanel(); });
-  document.addEventListener('click', (e) => { if (_msgOpen && !panel.contains(e.target) && !link.contains(e.target)) closeMessagesPanel(); });
+  const toggle = (which) => (e) => { e.preventDefault(); e.stopPropagation(); if (_msgOpen === which) closeMessagesPanel(); else openMessagesPanel(which); };
+  link.addEventListener('click', toggle('chat'));
+  mailLink.addEventListener('click', toggle('mail'));
+  document.addEventListener('click', (e) => { if (_msgOpen && e.target.isConnected && !panel.contains(e.target) && !link.contains(e.target) && !mailLink.contains(e.target)) closeMessagesPanel(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMessagesPanel(); });
   panel.addEventListener('click', onMessagesPanelClick);
 
@@ -2784,36 +2790,38 @@ function loadChatBadge() {
     } catch (e) { /* the minute refresh still keeps it current */ }
   });
 }
-function unreadEmailsQuery() {
-  return supabaseClient.from('notifications').select('id, title, body, link, created_at').eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null).order('created_at', { ascending: false });
+function setTopbarBadge(id, n) {
+  const badge = document.getElementById(id);
+  if (!badge) return;
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.style.display = n ? 'flex' : 'none';
 }
+// Both badges. Also called by chat.js and inbox.html once something is read.
 async function refreshChatBadge() {
-  const badge = document.getElementById('chat-topbar-badge');
-  if (!badge || _chatBadgeBusy) return;
+  if (!document.getElementById('chat-topbar-badge') || _chatBadgeBusy) return;
   _chatBadgeBusy = true;
   try {
     const [chat, mail] = await Promise.all([
       supabaseClient.rpc('chat_unread_total'),
       _msgMe ? supabaseClient.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null) : Promise.resolve({ count: 0 }),
     ]);
-    const n = (chat.error ? 0 : (chat.data || 0)) + (mail.error ? 0 : (mail.count || 0));
-    badge.textContent = n > 99 ? '99+' : String(n);
-    badge.style.display = n ? 'flex' : 'none';
+    setTopbarBadge('chat-topbar-badge', chat.error ? 0 : (chat.data || 0));
+    setTopbarBadge('mail-topbar-badge', mail.error ? 0 : (mail.count || 0));
     if (_msgOpen) renderMessagesPanel();
   } finally {
     _chatBadgeBusy = false;
   }
 }
-async function openMessagesPanel() {
+async function openMessagesPanel(which) {
   const panel = document.getElementById('msg-panel');
   if (!panel) return;
-  _msgOpen = true;
+  _msgOpen = which === 'mail' ? 'mail' : 'chat';
   panel.style.display = 'block';
-  panel.innerHTML = '<div class="msg-head"><h3>Messages</h3></div><p class="msg-empty">Loading...</p>';
+  panel.innerHTML = `<div class="msg-head"><h3>${_msgOpen === 'mail' ? 'Mail' : 'Messages'}</h3></div><p class="msg-empty">Loading...</p>`;
   await renderMessagesPanel();
 }
 function closeMessagesPanel() {
-  _msgOpen = false;
+  _msgOpen = null;
   const panel = document.getElementById('msg-panel');
   if (panel) panel.style.display = 'none';
 }
@@ -2828,25 +2836,29 @@ function msgAgo(iso) {
 async function renderMessagesPanel() {
   const panel = document.getElementById('msg-panel');
   if (!panel || !_msgOpen) return;
-  const [chans, mails] = await Promise.all([
-    supabaseClient.rpc('chat_my_channels'),
-    _msgMe ? unreadEmailsQuery().limit(30) : Promise.resolve({ data: [] }),
-  ]);
-  const chats = (chans.data || []).filter(c => c.unread > 0 && !c.muted && !c.archived_at);
-  const emails = mails.data || [];
-  const chatTitle = (c) => c.kind === 'dm' ? ((c.members || []).map(m => m.full_name).join(', ') || 'Direct message') : '#' + c.name;
+  const which = _msgOpen;
   const row = (href, title, body, time, extra) => `<a class="msg-row" href="${escapeHtml(href)}" ${extra || ''}><span class="msg-dot"></span><div style="min-width:0;"><div class="msg-title">${escapeHtml(title)}</div>${body ? `<div class="msg-body">${escapeHtml(body)}</div>` : ''}<div class="msg-body">${escapeHtml(time)}</div></div></a>`;
+  if (which === 'mail') {
+    const mails = _msgMe ? await supabaseClient.from('notifications').select('id, title, body, link, created_at').eq('user_id', _msgMe).eq('channel', 'messages').eq('kind', 'email').is('read_at', null).order('created_at', { ascending: false }).limit(30) : { data: [] };
+    if (_msgOpen !== which) return;
+    const emails = mails.data || [];
+    panel.innerHTML = `
+      <div class="msg-head"><h3>Mail</h3><span>${emails.length ? '<button type="button" class="msg-link" id="msg-mail-readall">Mark all read</button> ' : ''}<a href="/inbox.html">Open Inbox</a></span></div>
+      ${emails.length ? emails.map(n => row(n.link || '/inbox.html', n.title, n.body, msgAgo(n.created_at), `data-mail="${n.id}"`)).join('') : '<p class="msg-empty">No unread emails.</p>'}`;
+    return;
+  }
+  const chans = await supabaseClient.rpc('chat_my_channels');
+  if (_msgOpen !== which) return;
+  const chats = (chans.data || []).filter(c => c.unread > 0 && !c.muted && !c.archived_at);
+  const chatTitle = (c) => c.kind === 'dm' ? ((c.members || []).map(m => m.full_name).join(', ') || 'Direct message') : '#' + c.name;
   panel.innerHTML = `
-    <div class="msg-head"><h3>Messages</h3><span><a href="/chat.html">Open Chat</a> <a href="/inbox.html">Open Inbox</a></span></div>
-    <div class="msg-sec"><span>Chats</span></div>
-    ${chats.length ? chats.map(c => row('/chat.html?c=' + c.id, chatTitle(c) + (c.unread > 1 ? ` (${c.unread})` : ''), (c.last_author ? c.last_author + ': ' : '') + (c.last_body || ''), c.last_message_at ? msgAgo(c.last_message_at) : '')).join('') : '<p class="msg-empty">No unread chats.</p>'}
-    <div class="msg-sec"><span>Emails</span>${emails.length ? '<button type="button" class="msg-link" id="msg-mail-readall">Mark all read</button>' : ''}</div>
-    ${emails.length ? emails.map(n => row(n.link || '/inbox.html', n.title, n.body, msgAgo(n.created_at), `data-mail="${n.id}"`)).join('') : '<p class="msg-empty">No unread emails.</p>'}`;
+    <div class="msg-head"><h3>Messages</h3><span><a href="/chat.html">Open Chat</a></span></div>
+    ${chats.length ? chats.map(c => row('/chat.html?c=' + c.id, chatTitle(c) + (c.unread > 1 ? ` (${c.unread})` : ''), (c.last_author ? c.last_author + ': ' : '') + (c.last_body || ''), c.last_message_at ? msgAgo(c.last_message_at) : '')).join('') : '<p class="msg-empty">No unread chats.</p>'}`;
 }
 async function onMessagesPanelClick(e) {
   const mail = e.target.closest('[data-mail]');
   if (mail) {
-    // read now, then go (the Inbox would mark it read too, but the badge should drop straight away)
+    // read now, then go, so the badge drops straight away
     e.preventDefault();
     await supabaseClient.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', mail.dataset.mail).eq('user_id', _msgMe);
     window.location.href = mail.getAttribute('href');

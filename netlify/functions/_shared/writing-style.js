@@ -16,6 +16,7 @@
 // prompt uses (_shared/email-agent.js).
 
 const { getIntegrationKey } = require('./get-integration-key');
+const { claudeJson } = require('./claude-json');
 
 const LEARN_MODEL = 'claude-opus-5-5';
 // The model's thinking counts against max_tokens, so the guide gets a wide ceiling and one more go with
@@ -89,7 +90,7 @@ async function claude(apiKey, body) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: claudeJson(body),
   });
   if (!res.ok) throw new Error(`Anthropic API error: ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`);
   return res.json();

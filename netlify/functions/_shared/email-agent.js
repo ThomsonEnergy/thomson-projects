@@ -27,6 +27,7 @@ const { labelInGmail, saveGmailDraft } = require('./mailboxes');
 const { gmailRequest } = require('./google-client');
 const { routingReply, replyMode, INVOICE_ADDRESS } = require('./routing-replies');
 const { stylePrompt, resolveStyle } = require('./writing-style');
+const { claudeJson, safeSlice } = require('./claude-json');
 
 const TRIAGE_MODEL = 'claude-haiku-5-5';
 const DRAFT_MODEL = 'claude-opus-5-5';
@@ -54,7 +55,7 @@ async function claude(apiKey, body) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: claudeJson(body),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
@@ -66,7 +67,7 @@ const textOf = (data) => (data.content || []).filter((b) => b.type === 'text').m
 const jobRef = (p) => (p.job_number ? `J${p.job_number}` : p.quote_number ? `Q${p.quote_number}` : null);
 const addrOf = (raw) => { const m = String(raw || '').match(/<([^>]+)>/); return (m ? m[1] : String(raw || '')).trim().toLowerCase(); };
 const nameOf = (raw) => { const m = String(raw || '').match(/^\s*"?([^"<]*?)"?\s*</); return (m && m[1].trim()) || addrOf(raw); };
-const clip = (s, n) => String(s || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').slice(0, n);
+const clip = (s, n) => safeSlice(String(s || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n'), n);
 
 function addUsage(total, data) {
   total.input_tokens += data?.usage?.input_tokens || 0;

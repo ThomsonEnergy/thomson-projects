@@ -4,8 +4,14 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 27 Oct 2026
 
+- LIVE (owner's "just go straight to main", PR 229): top bar Messages badge counts unread team chats only; a new Mail icon (envelope) with its own badge counts unread emails and opens the email list that used to sit inside Messages; the Schedule icon is gone from the top bar (Schedule stays in the Team menu and pinned in the phone menu). No migration. Code: `public/js/supabase-client.js` (`loadChatBadge`), every page's top bar. Detail: `docs/PROJECT_SPEC.md` A20.
 - Built (feature, into `staging`): the software factory. Skills `/new-feature`, `/code-structure`, `/prove`, `/ship`, `/weekly-cleanup`; `npm run check` now fails on new dead code (`scripts/deadcode.js`, baseline of 50 today) and on a page over budget (`scripts/page-budgets.js`); `scripts/smoke.js` browser smoke run with before and after screenshots; PR template; `agents/prompts/` and `agents/evals/` with Postie's first 5 cases; rules in `CLAUDE.md`. Owner step: allow `*.netlify.app` on the cloud environment. Detail: `docs/SOFTWARE_FACTORY.md`, backlog item 36.
+- Owner: software factory agreed (`docs/SOFTWARE_FACTORY.md`): features branch from `staging`, fixes from `main`; automatic dead code and page weight checks go into `npm run check` (overrides backlog item 16); smoke run reported in the PR first, required check later. Build of the setup waits on the owner's yes.
 - Planned, waiting on yes: software factory (isolate, build, prove, ship, weekly cleanup) drafted for Fable to review in `docs/SOFTWARE_FACTORY.md` (backlog item 36). Agents: Sparky and the ops manager become one assistant with a company view and a personal view; workers report events the ops manager routes; Postie filing fix (4 of 8 emails under the GCW label were wrong), learning from edited drafts, My Plan page, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`, backlog item 37).
+
+## 27 Oct 2026
+
+- Bug fix, LIVE: Postie (the email agent) had failed most runs since 23 Oct 9:35am: one email cut at 1,500 characters ended on half an emoji, JSON.stringify wrote a lone surrogate and the Anthropic API refused the whole request ("The request body is not valid"), so the run died and the same conversation came back next run. New `_shared/claude-json.js` (`claudeJson` strips lone surrogates from every string in a request body, `safeSlice` never cuts inside an emoji); every Claude call in `netlify/functions` goes through it (25 files), Postie's `clip` uses `safeSlice`. Found with the stuck conversations' text run through Postie's own cut.
 
 ## 26 Oct 2026
 
