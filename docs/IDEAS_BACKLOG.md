@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 23 Oct 2026 (simpler purchase orders built, item 31)
+Last updated 27 Oct 2026 (items 36 and 37 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -27,6 +27,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
 | 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
 | 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
+| 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Draft, waiting on Fable review and owner's yes | N | Owner's call on automatic checks (reverses item 16) |
+| 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Planned, waiting on owner's yes | N | Item 36 eval sets; staff notice for per-person email |
 
 ## High lead time, start now
 
@@ -837,3 +839,15 @@ Owner chose option C from item 34, to build later. Until then the app says "We d
 6. **Wording:** a range labelled as an estimate from past prices, with the same disclaimer as the other plans plus "wholesale prices change every 5 minutes; past prices do not promise future ones".
 
 Size: a bigger build (two tables, a monthly download, model changes, proposal wording). Do it only if wholesale plans come up in enough battery sales. Best model: Fable 5.1, effort xhigh (money shown to customers, new data source, model change).
+
+## 36. Software factory (planned 27 Oct 2026, waiting on Fable review and the owner's yes)
+
+Owner's ask: one way for every chat to build so code is easy to add to, easy for a person to step in, with no dead code, no half-working features and no slow pages. Steps: isolate (`/new-feature`, own worktree), build (`/code-structure`), prove (`/prove`: check, dead code, page weight, Playwright smoke run with screenshots, agent evals, fresh review), ship (`/ship`: PR with before and after screenshots), weekly cleanup. Full draft and open questions: `docs/SOFTWARE_FACTORY.md`.
+
+Touches: `CLAUDE.md`, `.claude/skills/` (new), `scripts/deadcode.js`, `scripts/page-budgets.json`, `scripts/smoke.js` (new), `scripts/check.js`, `.github/pull_request_template.md` (new), `agents/prompts/`, `agents/evals/` (new). Size: medium. Best model: Fable 5.1, effort high (sets the rules every later build follows).
+
+## 37. One brain, many workers (planned 27 Oct 2026, waiting on the owner's yes)
+
+Owner's asks (27 Oct 2026): agents that see the whole app, report to one ops manager that routes work (no workflow per agent), job tasks ticked when the awaited email arrives, Postie learning from edited drafts and filing emails properly, emails tagged to jobs, bills and the person who must act, a personal planner page (My Plan) for sales and above, an automation spotter, and enquiries turned into draft quotes for sales to approve. Plan, answers and build order: `docs/AI_AGENTS_PLAN.md` "Proposed 27 Oct 2026".
+
+Touches (whole item, built in phases): `netlify/functions/_shared/email-agent.js`, `_shared/sparky-tools.js`, `_shared/chat-ai.js`, `ai-chat-background.js`, `mailbox-work-background.js`, `learn-writing-style.js`, `ops-digest.js`, `_shared/ops-actions.js`, `public/settings.html`, `public/inbox.html`, new `public/my-plan.html`, new migrations (`agent_events`, routes, table registry, job task waiting-on, draft and sent pairs). Size: large, in phases. Best model: Fable 5.1, effort xhigh for phase 1 (new agents, production email data).
