@@ -82,6 +82,45 @@ Build on the existing feeds:
 
 Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Wholesale-price plans are not estimated (the app says so); a proper wholesale estimate is backlogged as item 35. Detail in `docs/IDEAS_BACKLOG.md` item 34.
 
+## Proposed 27 Oct 2026: one brain, many workers (waiting on the owner's yes, backlog item 37)
+
+### How it works today (from the code, 27 Oct 2026)
+
+- **Sparky** is the chat brain: the Ask AI widget (`ai-chat-background.js`) and @Sparky in team chat (`_shared/chat-ai.js`). It answers with a read-only `query_database` tool that runs under the asking person's login (RLS applies), plus the Knowledge Base, a calculator and web search.
+- **The ops manager is not a separate AI.** It is Sparky with an extra paragraph of instructions for admins (the worker tables, Needs me, three Confirm actions), plus the 5am `ops-digest.js` and the Ops page.
+- **Workers** (Postie, Tally, price list reader, Knowledge reader, sweeps) each run on their own schedule. They do not talk to each other, except Postie handing invoices to Tally. Anything they cannot finish lands in `agent_tasks` (Needs me) for a person.
+- **Dark corners:** Sparky can only query a hand-kept list of about 50 of the roughly 130 tables (`_shared/sparky-tools.js` `QUERYABLE_TABLES`). Ask AI cannot see emails or chat at all (only @Sparky in chat can), and newer tables (energy plans, email labels, notifications, job contacts) are missing because nobody added them to the list.
+
+### Answers to the owner's questions
+
+- **Sparky and the ops manager: one brain, one name.** Two names for one model with different instructions confuses people. Keep the specialist workers separate (they run in the background on cheap models with narrow access, which is safer and cheaper), but everything a person talks to is the one assistant.
+- **One ops manager or one each: both, as two views of the same brain.** The company view (admins) sees everything and decides who is needed where. The personal view (each person, sales and above) is the same brain limited to what that person can see, ranking their work and booking their day (My Plan, below). The company view feeds the personal ones: when it assigns something, it shows up in that person's plan.
+- **Where to give the agents information** (best first):
+  1. **Corrections in place:** undo a tag, move an email to the right label, edit a draft before sending. Captured automatically, so it is the cheapest teacher (needs the learning loops below).
+  2. **Rules on Settings screens:** label descriptions, Postie's question sets per enquiry type, what we already know about a client.
+  3. **Knowledge Base:** company procedures, product sheets, pricing rules.
+  4. **Prebuild library with clear descriptions:** the AI quotes from prebuilds, so good names and descriptions there mean better draft quotes.
+
+### What to build
+
+1. **See everywhere.** Replace the hand-kept table list with a registry: every table has a one-line Postgres comment saying what it holds, and is marked visible to the assistant or hidden (passwords, keys, tokens). `npm run check` fails when a new table is neither, so no dark corner can appear again. RLS still decides what each person's assistant sees. Ask AI also gets the page and record the person is looking at.
+2. **Workers report events, the ops manager routes them.** New `agent_events` (type, from which worker, job, quote, supplier or email it relates to, one-line summary) and a routing table (event type to: a person or role, a job task, a tag, or another worker). Examples: subscription renewal failed goes to Finance; licence renewal notice goes to the licence register and Finance; a supplier's reply on a job waiting for it ticks that job task. Unknown event types go to Needs me and the ops manager suggests a route for the owner to approve, so routes grow without building a workflow per agent.
+3. **Job tasks that wait on an email.** A job task can say what it waits on (supplier, email address or domain, PO or quote number). When Postie sees a matching email it tags the thread to the job, marks the task "reply received" and tells the task's owner. No extra drafts.
+4. **Postie learns from edits.** When a Postie draft is sent after a person changed it, the draft and the sent text are kept as a pair. Weekly, Sonnet turns the differences into short lessons in the mailbox's style notes (Settings > Email Agent, editable). Today `learn-writing-style.js` only learns from sent replies in general, not from what people change in Postie's drafts.
+5. **Postie files emails better.** Checked on production 27 Oct 2026: 4 of the 8 emails Postie put under the "GCW dispute" label do not belong there (two about a staff member's workers compensation case, a battery recall notice, a panel clean photo). Cause: Haiku sorts and labels in one pass, there are only two labels, and `auto_labels` is off on sales@, so when an email looked "legal" and no label fitted, it picked the nearest one instead of none. Fix: labels chosen by Sonnet in a second pass only for emails that might fit one; it must quote the words in the email that match the label's description, or choose none; when unsure it suggests (one tap to accept) instead of applying; moving or removing a label becomes an eval case. Those four emails are the first eval set (`docs/SOFTWARE_FACTORY.md` step 3).
+6. **Emails to the right person.** Postie's sort also picks who must act (from the job's contacts, the role, past replies) and assigns the thread, so the action shows in that person's plan.
+7. **My Plan page (sales and above).** A personal to-do list and an hour-by-hour office calendar (like Motion): emails to answer, quotes ready for approval, DNSP applications, calls, job tasks. The assistant ranks them by urgency and due date and books them into free hours; site work stays on the main schedule and shows here as blocked time. It adds job tasks when it spots them in emails and chat (marked "added by Sparky", one-tap undo). Google Calendar sync later.
+8. **Automation spotter.** Weekly, the ops manager reads `activity_log` for things people do by hand again and again and suggests automations as backlog items for the owner to approve.
+9. **Enquiry to draft quote.** One pipeline, a question set per enquiry type (data on a Settings screen, not code):
+   - Battery: bill, switchboard photo, solar size and install year. Reads the bill (bill reader exists), checks export is enough, checks the switchboard photo for RCDs, adds the battery and any RCD prebuilds, scope of works with the "RCDs found on site are extra" disclaimer, savings from the existing calculator.
+   - New build: thanks the builder, asks timeline, start date, build length. Reads the plans: counts GPOs and lights, floor area, estimates cable from area and point count, adds prebuilds, flags what is missing (main switchboard or meter board not shown, no lighting plan).
+   - Solar: reads the bill, suggests a system size, prices and scopes it; sales still does the Pylon design and checks the roof.
+   - Electrical (switchboard upgrade): asks for a switchboard photo, counts circuits, quotes from prebuilds.
+   - Every type: **never asks what we already know** (lead form, client record, past jobs, files already sent). The finished draft quote goes into the sales team's My Plan as "Ready for approval"; a person always checks and sends.
+   - Rollout: Postie's question emails start as drafts a person sends. Auto reply is switched on per enquiry type only after its questions are approved without edits for a set number of weeks.
+
+Order: 5 and 1 first (fix filing, see everywhere), then 2 and 3, 4, 6 and 7, then 9 one enquiry type at a time (battery first, the bill reader and quote steps already exist), 8 last.
+
 ## Safety
 
 - **Staging first:** a Supabase persistent branch with fake data. Every agent, migration and prompt change is tested there before production.
