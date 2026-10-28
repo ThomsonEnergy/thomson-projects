@@ -11,7 +11,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 1 | Payment reconciliation, receipts, tools register | Partly built | N | Airwallex read-only key, accountant sign-off |
 | 2 | Voice messages in team chat + Siri Shortcut | Voice messages built with team chat (PROJECT_SPEC A19a), Siri not started | N | Personal tokens for the Siri Shortcut |
 | 3 | Native iPhone app (TEgo, Capacitor) | Stage 1 built, waiting on Apple | Y | Apple Developer enrolment approval, then `docs/IOS_APP.md` setup; offline sync design for stage 2 |
-| 4 | Weather-aware scheduling worker | Not started | N | Job lat/long (not stored today), work type field |
+| 4 | Weather-aware scheduling worker and Weather page | Not started | N | Job lat/long (not stored today), work type field |
 | 5 | Per-user inboxes with job tagging | Built 18 Oct 2026 (spec A18), on staging | N | Per-user Gmail OAuth, tagger agent, staff notice |
 | 6 | Policy sign-off, AI consent, location tracking | Partly built | Y | Adviser review of notice, 14 days' notice, job lat/long |
 | 7 | SMS and calls via Twilio | Not started | Y | Native app (3), Telstra port (Twilio bundle approved) |
@@ -152,7 +152,19 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 ---
 
-## 4. Weather-aware scheduling worker
+## 4. Weather-aware scheduling worker and Weather page (design agreed 28 Oct 2026, build waiting on the owner's yes)
+
+### Design agreed 28 Oct 2026
+- **Source:** Willy Weather API (BOM forecasts and BOM warnings, pay per call). Key in `api_keys` (`willyweather`), read with `get-integration-key.js`. Open-Meteo only if hourly detail proves thin.
+- **No twice-daily pull of every job.** Forecasts are fetched on demand (opening the Weather page, the schedule week view, or dropping a job on a day) and cached per Willy Weather location for 3 hours in a `weather_cache` table (location id, fetched_at, forecast json, warnings json). Jobs that resolve to the same Willy Weather location (suburb or town, BOM's own grouping) share one forecast; no 50 km radius maths. A call takes roughly half a second through the Netlify function.
+- **One morning sweep** (`sweep-weather.js`, 6am Sydney, pg_cron) over jobs booked in the next 3 days, so a change (rain chance jumps, wind or heat warning) pushes "Thu J7006 roof install now 80% chance of 15mm, suggest swapping with indoor J7010" to the booker and the ops manager. This is the only scheduled pull. Tens of calls a day at most.
+- **Job lat/long:** `projects.lat`, `projects.lng`, `projects.weather_location_id` saved from the existing Google Places autocomplete on the job address (`project.html` `p-address`, add `geometry` to the fields) and backfilled once by geocoding existing addresses.
+- **Weather page** (`public/weather.html`, Team menu, every signed-in user): search a job (J number, client or address, the same picker as elsewhere) or type a suburb, and it shows that area's 7-day forecast (rain chance and mm, wind, min and max, UV) with BOM warnings on top, rain/wind/heat flags against the roof and heat limits from Settings, and the jobs booked there in the next 7 days. Defaults to the user's next booked job. Pull to refresh re-fetches past the cache.
+- **Schedule:** rain/wind/heat icon per day on `schedule.html` and the job Schedule tab, from the same cache.
+- **Phases:** 1 lat/long plus Weather page plus cache (ships alone); 2 schedule icons plus morning sweep plus alerts; 3 booking guard through the scheduling agent (suggestions only).
+
+Touches: `public/weather.html` (new), `netlify/functions/weather-forecast.js` (new, `requireActiveUser`), `netlify/functions/_shared/weather.js` (new), `netlify/functions/sweep-weather.js` (new, phase 2), `public/project.html` (save lat/lng), `public/schedule.html` (phase 2), `public/settings.html` (thresholds, phase 2), `public/js/supabase-client.js` (nav item), one migration (`projects.lat`, `lng`, `weather_location_id`, `weather_cache` table with fast RLS, pg_cron in phase 2). Overlaps: none on main or staging; item 37 touches `settings.html` later (phase 2 only). Kind: feature (into `staging`); migration yes; money, stock, RLS or payroll: RLS yes (new table). Size: phase 1 medium, phase 2 medium. Test on staging: any staff login, Team, Weather, search J7006, see the 7-day forecast and the booked jobs; needs a Willy Weather key in the staging `api_keys`. Best model: Opus 5.5, effort high, because it is a feature build with a known design and one small migration.
+
 
 **Goal:** flag rain, wind and heat risk on each booked job's site and stop outdoor work being booked on bad days. Small worker reporting to the ops manager, feeding the scheduling agent.
 
