@@ -173,6 +173,8 @@ Rain probability % and mm, wind limit for roof (km/h), heat limit for roof (°C)
 ### Data source
 Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather API (paid, AU-focused). A few dollars a month.
 
+28 Oct 2026 recommendation (waiting on the owner's yes): **Willy Weather API** first. BOM forecasts for 17,000 Australian locations plus official BOM warnings in the same API, pay per call (our volume is roughly 2,000 calls a month, a few dollars at most; confirm on their cost calculator, the published rates are old), lat/long resolved to a location ID with one search call. Open-Meteo (BOM ACCESS-G and other models, hourly, 16 days, fixed monthly commercial fee, free tier is non-commercial only) as the second source if Willy Weather's hourly detail is thin. Ruled out: Early Warning Network (earlywarningnetwork.com.au), a quote-priced alerting service for councils, mines and insurers; we need a per-site forecast feed, not meteorologist alerts. BOM direct feeds: free but FTP/XML, not for third-party API use, and the 2025 site rebuild broke integrations.
+
 **Dependencies**
 - **Job lat/long is not stored today** (only `leads` has lat/lng). Build: save coordinates from address autocomplete on jobs, backfill existing jobs by geocoding. Shared with item 6 geofence.
 - Work type field on jobs/stages (new).
