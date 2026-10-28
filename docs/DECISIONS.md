@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 28 Oct 2026
+
+- Idea: Support links on the Team page (TIACS, Lifeline, Beyond Blue, MATES in Construction, 13YARN, 000) for anyone struggling; admin-editable, waiting on the owner's yes. Detail: `docs/IDEAS_BACKLOG.md` item 38.
+
 ## 27 Oct 2026
 
 - Built (feature, into `staging`): Postie files emails better (agents plan step 5, spec A18). Labels are a Sonnet second pass with quoted evidence the code checks; unsure becomes a suggestion, never an applied label; the sweep follows the same rule. First prompt out of the code (`agents/prompts/postie-labels.js`), first eval set with a runner (`agents/evals/postie/`). Still to do: owner's yes to remove the 4 wrong GCW labels on production.
