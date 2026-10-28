@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 28 Oct 2026
 
+- Owner: weather design agreed (item 4): Willy Weather, on-demand fetch cached 3 hours per BOM location (no twice-daily pull), one 6am sweep for alerts, job lat/long from Places, and a new Weather page (search a job or suburb, 7-day forecast and warnings). Build waits on the owner's yes. Detail: `docs/IDEAS_BACKLOG.md` item 4.
 - Weather source for backlog item 4: Willy Weather API recommended (BOM forecasts plus warnings, pay per call), Open-Meteo second, Early Warning Network ruled out (alerting service, quote-priced). Waiting on the owner's yes. Detail: `docs/IDEAS_BACKLOG.md` item 4.
 - Idea: Support links on the Team page (TIACS, Lifeline, Beyond Blue, MATES in Construction, 13YARN, 000) for anyone struggling; admin-editable, waiting on the owner's yes. Detail: `docs/IDEAS_BACKLOG.md` item 38.
 
