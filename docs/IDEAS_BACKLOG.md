@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 27 Oct 2026 (items 36 and 37 planned)
+Last updated 30 Oct 2026 (item 40 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -29,6 +29,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
 | 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Agreed 27 Oct 2026, waiting on yes to build | N | None |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Planned, waiting on owner's yes | N | Item 36 eval sets; staff notice for per-person email |
+| 40 | Delete button on the Emailed bills page for duplicates and things that are not bills | Planned 30 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
 
@@ -887,3 +888,14 @@ Owner's ask: a tab to the left of Active on `quotes.html` listing the pending le
 - **Nothing gets lost:** a 7am Sydney scheduled function `remind-leads.js` re-notifies the same people once a day for each lead still new after 48 hours and each call request still pending past its requested time, one row per lead per day, same `lead` kind.
 
 Touches: `public/quotes.html`, `public/js/notifications.js` (bump `?v=` where it is loaded, `supabase-client.js` `renderMainNav`), `netlify/functions/remind-leads.js` (new), `netlify.toml` (schedule), one migration (two triggers, `set search_path = public`). Overlaps: none. Kind: feature (into `staging`); migration yes (triggers only, no table changes); money, stock, RLS or payroll: no. Size: small. Test on staging: a pricing login, Quotes, the Leads tab is first with the count, tap a lead and it opens on the Leads page; submit the staging website lead form and the bell and phone get "New lead" within a minute; a staff login sees no Leads tab and no lead notifications. Best model: Opus 5.5, effort high, because it now carries a migration with triggers and a scheduled function beside the page work.
+
+## 40. Delete button on the Emailed bills page (planned 30 Oct 2026, waiting on the owner's yes)
+
+Owner's ask: a Delete button on `supplier-bills.html` for duplicate bills and emails that are not bills, so they stop cluttering the list.
+
+- **Delete** on every emailed bill that is not saved (To check, Could not be read, Duplicate, Not a bill), with a confirm tap. A saved one has no Delete: its bill already sits on the supplier's page.
+- The row stays in `supplier_bill_inbox` with status `deleted` (the intake searches the invoice@ label for the last 30 days and would pull the email back in if the row were removed). The stored file is removed from `project-documents` and `file_path` cleared.
+- The page hides deleted rows, under All too; the ops digest, Sparky and the ops manager already filter by status so they never see them.
+- New `delete` action in `netlify/functions/supplier-bill-inbox.js` (pricing roles, same as the other buttons).
+
+Touches: `public/supplier-bills.html`, `netlify/functions/supplier-bill-inbox.js`, one migration (`deleted` added to `supplier_bill_inbox_status_check`). Overlaps: none (`feat/simpler-purchase-orders` only bumps a `?v=` on the page and is stale). Kind: feature (into `staging`); migration yes (one check constraint); money, stock, RLS or payroll: no. Size: small. Test on staging: finance@staging.test, Purchases, Emailed bills, Put aside, Delete on one, confirm, it is gone and All does not list it; a Saved one shows no Delete. Best model: Fable 5.1, effort xhigh, because it carries a migration and code in one go.
