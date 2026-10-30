@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 30 Oct 2026
 
+- Owner: item 39 also notifies every admin, finance and sales user of each new website lead and call request (insert triggers, kind `lead`, phone push), with a 7am nudge for leads still new after 48 hours. Detail: `docs/IDEAS_BACKLOG.md` item 39.
 - Planned, waiting on yes: Leads (n) tab first on the Quotes page listing pending leads and open callback requests, age-coloured, pricing roles only. Detail: `docs/IDEAS_BACKLOG.md` item 39.
 
 ## 28 Oct 2026
