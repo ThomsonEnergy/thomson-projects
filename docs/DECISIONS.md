@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 30 Oct 2026
 
+- Built (feature into `staging`, migration 20261127000000): item 39, Leads (n) tab first on the Quotes page, instant phone notification of every new website lead and call request to Admin, Finance and Sales, and the 7am `remind-leads` nudge. Quotes page budget raised 650 to 660 KB for the tab. Detail: `docs/PROJECT_SPEC.md` A28.
 - Owner: item 39 also notifies every admin, finance and sales user of each new website lead and call request (insert triggers, kind `lead`, phone push), with a 7am nudge for leads still new after 48 hours. Detail: `docs/IDEAS_BACKLOG.md` item 39.
 - Planned, waiting on yes: Leads (n) tab first on the Quotes page listing pending leads and open callback requests, age-coloured, pricing roles only. Detail: `docs/IDEAS_BACKLOG.md` item 39.
 
