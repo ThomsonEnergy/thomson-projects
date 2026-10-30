@@ -875,7 +875,7 @@ Owner's ask: a Support section on `public/team.html` for anyone struggling, with
 
 Touches: `public/team.html`, `public/settings.html` (admin edit), one migration if a table is used. Overlaps: none. Kind: feature (into `staging`); migration maybe; money, stock, RLS or payroll: RLS yes if a table. Size: small. Test on staging: any staff login, Team, scroll to Support, tap a number. Best model: Sonnet 5.5, effort medium, because it is a small well-specified page addition.
 
-## 39. Pending leads tab on the Quotes page (planned 30 Oct 2026, waiting on the owner's yes)
+## 39. Pending leads tab on the Quotes page and lead notifications (planned 30 Oct 2026, waiting on the owner's yes)
 
 Owner's ask: a tab to the left of Active on `quotes.html` listing the pending leads, so a lead that has not become a quote yet is never lost.
 
@@ -883,6 +883,7 @@ Owner's ask: a tab to the left of Active on `quotes.html` listing the pending le
 - Each row: name (or AI title), suburb, source, "needs site visit" badge, age ("3 days", amber past 48 hours, red past 7 days). Tapping a row opens `leads.html?id=<lead>` (the existing deep link opens the lead with Create quote, Create job and site visit).
 - The tab label carries the count; an amber dot on the tab when any lead is past 48 hours. Active stays the default tab.
 - Website callback requests (`callback_requests` not completed) listed under the leads in the same tab, same amber rule, tap opens the Leads page.
-- No migration, no new RLS, read-only.
+- **Notified of every lead (owner, 30 Oct 2026):** today nothing fires when a website lead or call request lands (the forms insert straight into `leads` and `callback_requests`, no trigger). Add an after-insert trigger on each table that calls `create_notification` (kind `lead`, bell channel by default, pushed to the phone by the existing push sweep) for every active admin, finance and sales user: "New lead: Jane Smith, Penrith (website)" linking to `leads.html?id=<lead>`; "Call request: Jane Smith, Thu 2pm" linking to the Leads page. New tick box `lead` ("New website leads and call requests", pricing) in `NOTIF_GROUPS` so anyone can turn it off.
+- **Nothing gets lost:** a 7am Sydney scheduled function `remind-leads.js` re-notifies the same people once a day for each lead still new after 48 hours and each call request still pending past its requested time, one row per lead per day, same `lead` kind.
 
-Touches: `public/quotes.html`. Overlaps: none. Kind: feature (into `staging`); migration no; money, stock, RLS or payroll: no. Size: small. Test on staging: a pricing login, Quotes, the Leads tab is first with the count, tap a lead and it opens on the Leads page; a staff login sees no Leads tab. Best model: Sonnet 5.5, effort medium, because it is a one-file, well-specified list.
+Touches: `public/quotes.html`, `public/js/notifications.js` (bump `?v=` where it is loaded, `supabase-client.js` `renderMainNav`), `netlify/functions/remind-leads.js` (new), `netlify.toml` (schedule), one migration (two triggers, `set search_path = public`). Overlaps: none. Kind: feature (into `staging`); migration yes (triggers only, no table changes); money, stock, RLS or payroll: no. Size: small. Test on staging: a pricing login, Quotes, the Leads tab is first with the count, tap a lead and it opens on the Leads page; submit the staging website lead form and the bell and phone get "New lead" within a minute; a staff login sees no Leads tab and no lead notifications. Best model: Opus 5.5, effort high, because it now carries a migration with triggers and a scheduled function beside the page work.
