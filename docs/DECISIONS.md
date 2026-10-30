@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 30 Oct 2026
 
+- Built (feature into `staging`, migration 20261127000000): item 39, Leads (n) tab first on the Quotes page, instant phone notification of every new website lead and call request to Admin, Finance and Sales, and the 7am `remind-leads` nudge. Quotes page budget raised 650 to 660 KB for the tab. Detail: `docs/PROJECT_SPEC.md` A28.
 - Owner: item 40 also gets an Already paid button on the Emailed bills page (save the bill and record it paid in one go, Admin and Finance, through `supplier_bills_mark_paid`). Detail: `docs/IDEAS_BACKLOG.md` item 40.
 - Planned, waiting on yes: Delete button on the Emailed bills page for duplicates and emails that are not bills (row kept as status `deleted` so the intake does not re-import it, file removed). Detail: `docs/IDEAS_BACKLOG.md` item 40.
 - Owner: item 39 also notifies every admin, finance and sales user of each new website lead and call request (insert triggers, kind `lead`, phone push), with a 7am nudge for leads still new after 48 hours. Detail: `docs/IDEAS_BACKLOG.md` item 39.

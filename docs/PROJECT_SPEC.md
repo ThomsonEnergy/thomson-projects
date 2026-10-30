@@ -370,6 +370,7 @@ Manual steps only a person can do (the code is live):
 ### A28. Other built features
 - Invoices page: search (invoice number, job number, job name, client) and a status select (Unpaid, Overdue, Paid, Not yet in Xero, All), opens on Unpaid; `/invoices.html?q=` prefills the search (19 Oct 2026, UX 123). Stat tiles count every invoice. Every figure on the page (Total, This month, Outstanding, Overdue, the Amount column) is the same number: the invoice total inc GST less STC credits and credit notes, from `get_invoice_balance_due`, and the labels say inc GST (24 Oct 2026, M37). Pricing roles only.
 - **Leads and call requests** from the website forms (`leads.html`), converted to quotes or jobs.
+- **Leads tab on Quotes and lead notifications (built 30 Oct 2026, migration 20261127000000, backlog item 39):** `quotes.html` has a Leads (n) tab first, pricing roles only: leads still new with a phone or email and no quote or job made from them (`projects.lead_id`), newest first, age amber past 48 hours and red past 7 days, a "site visit" badge, tap opens `leads.html?id=`; open website call requests (pending or scheduled) underneath, amber once their time has passed; an amber dot on the tab when anything is late. Active stays the default tab. Insert triggers on `leads` and `callback_requests` (`trg_notify_lead`, `trg_notify_callback_request`) notify every active Admin, Finance and Sales user (kind `lead`, bell, pushed to the phone; tick box "New website leads and call requests"). `remind-leads.js` at 7am Sydney re-notifies once a day per lead still waiting after 48 hours (up to 30 days old) and per call request past its time (up to 7 days).
 - **Site inspections** (migration 104): "Needs a site visit" on a lead, quote or job; checklist filled on site (`site-inspection.html`); templates in Settings > Inspection Checklists.
 - **Customer assets** with warranty and service reminders (`assets.html`).
 - **Licence sharing:** a live link to a chosen set of company and employee licences (`share-licences.html`); licences and insurance with AI-extracted expiry on the Team page.
@@ -427,6 +428,7 @@ Manual steps only a person can do (the code is live):
 | sweep-job-booked | 13:05 and 14:05 UTC (00:05 Sydney with and without daylight saving, A6) |
 | sync-overheads-nightly | daily |
 | remind-client-bookings | 20:05 and 21:05 UTC, works only at 7am Sydney (bookings within 3 days with the client not told, A34) |
+| remind-leads | 20:20 and 21:20 UTC, works only at 7am Sydney (leads still new after 48 hours, call requests past their time, A28) |
 
 ---
 

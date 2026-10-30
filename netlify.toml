@@ -56,6 +56,11 @@
 [functions.remind-client-bookings]
   schedule = "5 20,21 * * *"
 
+# 7am Sydney: a phone notification to Admin, Finance and Sales for each lead still new after 48 hours
+# and each website call request past its time - see remind-leads.js. Same two runs as above.
+[functions.remind-leads]
+  schedule = "20 20,21 * * *"
+
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
 # sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
 # instead: Netlify does not allow a scheduled function to be called over HTTP.

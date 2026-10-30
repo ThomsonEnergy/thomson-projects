@@ -876,7 +876,7 @@ Owner's ask: a Support section on `public/team.html` for anyone struggling, with
 
 Touches: `public/team.html`, `public/settings.html` (admin edit), one migration if a table is used. Overlaps: none. Kind: feature (into `staging`); migration maybe; money, stock, RLS or payroll: RLS yes if a table. Size: small. Test on staging: any staff login, Team, scroll to Support, tap a number. Best model: Sonnet 5.5, effort medium, because it is a small well-specified page addition.
 
-## 39. Pending leads tab on the Quotes page and lead notifications (planned 30 Oct 2026, waiting on the owner's yes)
+## 39. Pending leads tab on the Quotes page and lead notifications (built 30 Oct 2026, migration 20261127000000, see PROJECT_SPEC.md A28)
 
 Owner's ask: a tab to the left of Active on `quotes.html` listing the pending leads, so a lead that has not become a quote yet is never lost.
 
