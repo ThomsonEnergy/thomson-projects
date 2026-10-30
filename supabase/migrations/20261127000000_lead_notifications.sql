@@ -41,7 +41,7 @@ begin
   v_who := coalesce(nullif(trim(new.name), ''), new.phone);
   for r in select id from profiles where active and role in ('admin', 'finance', 'sales') loop
     perform create_notification(r.id, 'lead',
-      'Call request: ' || v_who || ', ' || to_char(new.requested_date, 'Dy FMDD Mon') || ' ' || lower(to_char(new.requested_time, 'FMHH12:MIam')),
+      'Call request: ' || v_who || ', ' || to_char(new.requested_date, 'Dy FMDD Mon') || ' ' || lower(to_char(new.requested_date + new.requested_time, 'FMHH12:MIam')),
       coalesce(nullif(left(trim(new.message), 200), ''), 'Call ' || new.phone),
       '/leads.html', (select auth.uid()), 'callback:' || new.id);
   end loop;
