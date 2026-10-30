@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 30 Oct 2026
+
+- Planned, waiting on yes: Leads (n) tab first on the Quotes page listing pending leads and open callback requests, age-coloured, pricing roles only. Detail: `docs/IDEAS_BACKLOG.md` item 39.
+
 ## 28 Oct 2026
 
 - Owner: weather phase 1 also shows each booked day's forecast in the job's Schedule tab (`js/job-schedule.js`). Detail: `docs/IDEAS_BACKLOG.md` item 4.

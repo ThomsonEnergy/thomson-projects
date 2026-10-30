@@ -874,3 +874,15 @@ Touches (whole item, built in phases): `netlify/functions/_shared/email-agent.js
 Owner's ask: a Support section on `public/team.html` for anyone struggling, with links and phone numbers to TIACS (This Is A Conversation Starter, free mental health support for tradies, 0488 846 988) and other services (Lifeline 13 11 14, Beyond Blue 1300 22 4636, MATES in Construction 1300 642 111, 13YARN 13 92 76, and 000 in an emergency). Tap to call or open. Visible to every signed-in user, no admin gate. Admin can edit the list (a `company_settings` entry or a small `support_links` table), with a plain line that the links are confidential and outside the app, nothing is logged. Check each number before shipping.
 
 Touches: `public/team.html`, `public/settings.html` (admin edit), one migration if a table is used. Overlaps: none. Kind: feature (into `staging`); migration maybe; money, stock, RLS or payroll: RLS yes if a table. Size: small. Test on staging: any staff login, Team, scroll to Support, tap a number. Best model: Sonnet 5.5, effort medium, because it is a small well-specified page addition.
+
+## 39. Pending leads tab on the Quotes page (planned 30 Oct 2026, waiting on the owner's yes)
+
+Owner's ask: a tab to the left of Active on `quotes.html` listing the pending leads, so a lead that has not become a quote yet is never lost.
+
+- **Leads (n)** is the first tab, pricing roles only (the `leads` table is readable by pricing roles; other roles see the tabs as today). Pending = `leads.status = 'new'` with a phone or email, and no project linked to it (`projects.lead_id`). Newest first, up to 200.
+- Each row: name (or AI title), suburb, source, "needs site visit" badge, age ("3 days", amber past 48 hours, red past 7 days). Tapping a row opens `leads.html?id=<lead>` (the existing deep link opens the lead with Create quote, Create job and site visit).
+- The tab label carries the count; an amber dot on the tab when any lead is past 48 hours. Active stays the default tab.
+- Website callback requests (`callback_requests` not completed) listed under the leads in the same tab, same amber rule, tap opens the Leads page.
+- No migration, no new RLS, read-only.
+
+Touches: `public/quotes.html`. Overlaps: none. Kind: feature (into `staging`); migration no; money, stock, RLS or payroll: no. Size: small. Test on staging: a pricing login, Quotes, the Leads tab is first with the count, tap a lead and it opens on the Leads page; a staff login sees no Leads tab. Best model: Sonnet 5.5, effort medium, because it is a one-file, well-specified list.
