@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 2 Nov 2026
+
+- Planned, waiting on yes: no-quote (Direct Job) invoices show labour as hours at a rate per person (editable, add a row by rate tier), saved as `labour` invoice lines so the invoice prints one line per person and later invoices offer only unbilled hours; one migration. Detail: `docs/IDEAS_BACKLOG.md` item 41.
+
 ## 30 Oct 2026
 
 - Built (feature into `staging`, migration 20261127000000): item 39, Leads (n) tab first on the Quotes page, instant phone notification of every new website lead and call request to Admin, Finance and Sales, and the 7am `remind-leads` nudge. Quotes page budget raised 650 to 660 KB for the tab. Detail: `docs/PROJECT_SPEC.md` A28.
