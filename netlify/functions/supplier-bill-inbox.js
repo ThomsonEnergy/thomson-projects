@@ -14,15 +14,17 @@
 //                                      the stored file is removed)
 //   save_paid     { id, po_id, amount, paid_on, reference }
 //                                      Admin/Finance: a bill paid before the email came (card at the counter).
-//                                      Saves it like 'save' (or takes the saved bill), approves it and records
-//                                      it paid through supplier_bills_mark_paid, so it never shows in Pay bills due.
+//                                      Saves it like 'save' (or takes the saved bill), then approves and records
+//                                      it paid in one database step (supplier_bills_approve_and_mark_paid), so it
+//                                      never shows in Pay bills due.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { analyse, saveInboxItemAsBill, startSupplierBillProcessing } = require('./_shared/supplier-bill-intake');
+const { sydneyToday } = require('./_shared/bill-check');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
-const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+// a real calendar date as YYYY-MM-DD (2026-11-31 is not one)
+const isCalendarDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + 'T00:00:00Z')) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -82,21 +84,27 @@ exports.handler = async (event) => {
 
     if (action === 'delete') {
       if (item.status === 'saved') return json(400, { ok: false, error: 'That bill is saved: it stays. Delete it on the supplier page if it is wrong.' });
+      // only a row nobody is working on: one being read (pending, processing) would be written back by the reader
+      const { data: gone, error } = await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'deleted', file_path: null, ...resolved })
+        .eq('id', id).in('status', ['to_check', 'failed', 'duplicate', 'not_a_bill']).select('id');
+      if (error) throw error;
+      if (!gone?.length) return json(400, { ok: false, error: 'That one is being read right now. Wait a minute, then try again.' });
       if (item.file_path) {
         const { error: rmErr } = await supabaseAdmin.storage.from('project-documents').remove([item.file_path]);
         if (rmErr) console.error('emailed bill file not removed:', item.file_path, rmErr.message);
       }
-      const { error } = await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'deleted', file_path: null, ...resolved }).eq('id', id);
-      if (error) throw error;
       return json(200, { ok: true });
     }
 
     if (action === 'save_paid') {
       // Record as paid is Admin and Finance only (same as the Suppliers page)
-      if (!(await requireFinanceRole(event))) return json(403, { ok: false, error: 'Only Admin or Finance can record a bill as paid.' });
-      const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(paidOnRaw || '') ? paidOnRaw : sydneyToday();
+      const { data: me } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      if (!['admin', 'finance'].includes(me?.role)) return json(403, { ok: false, error: 'Only Admin or Finance can record a bill as paid.' });
+      const paidOn = String(paidOnRaw || '').trim();
+      if (!isCalendarDate(paidOn)) return json(400, { ok: false, error: 'Enter the paid date as YYYY-MM-DD.' });
       if (paidOn > sydneyToday()) return json(400, { ok: false, error: 'The paid date cannot be in the future.' });
       const reference = String(referenceRaw || '').trim().slice(0, 120) || null;
+
       let targetBillId = item.bill_id;
       if (item.status !== 'saved') {
         const confirmedTotal = Number(amount);
@@ -104,22 +112,15 @@ exports.handler = async (event) => {
         targetBillId = await saveInboxItemAsBill(supabaseAdmin, id, { poId: poId || null, userId: user.id, amount: confirmedTotal });
       }
       if (!targetBillId) return json(400, { ok: false, error: 'That emailed bill has no saved bill to mark paid.' });
-      const { data: bill } = await supabaseAdmin.from('supplier_bills').select('id, bill_number, paid, approved_for_payment, supplier_id').eq('id', targetBillId).maybeSingle();
-      if (!bill) return json(404, { ok: false, error: 'That bill was not found.' });
-      if (bill.paid) return json(400, { ok: false, error: `Bill ${bill.bill_number || ''} is already recorded as paid.`.replace(/\s+/g, ' ') });
-      if (!bill.supplier_id) return json(400, { ok: false, error: 'Pick the supplier first.' });
-      // paid already, so approval is a formality: approve it, then the same locked step the Suppliers page uses
-      if (!bill.approved_for_payment) {
-        const { error: apprErr } = await supabaseAdmin.from('supplier_bills')
-          .update({ approved_for_payment: true, approved_by: user.id, approved_at: new Date().toISOString(), pay_on: paidOn }).eq('id', bill.id);
-        if (apprErr) throw apprErr;
-      }
-      const { error: paidErr } = await supabaseAdmin.rpc('supplier_bills_mark_paid', { p_bill_ids: [bill.id], p_paid_on: paidOn, p_reference: reference, p_user: user.id });
+
+      // approve and record paid in one locked database step: on a failure the bill is saved but neither approved
+      // nor paid, so the pay run never picks it up
+      const { error: paidErr } = await supabaseAdmin.rpc('supplier_bills_approve_and_mark_paid', { p_bill_id: targetBillId, p_paid_on: paidOn, p_reference: reference, p_user: user.id });
       if (paidErr) {
         const why = (paidErr.code === 'P0001' ? paidErr.message : 'the payment could not be recorded').replace(/\.?$/, '.');
-        return json(400, { ok: false, error: `The bill is saved but not marked paid: ${why} Record it paid on the supplier page.` });
+        return json(400, { ok: false, error: `The bill is saved but not recorded as paid: ${why} Approve it and record it paid on the supplier page.` });
       }
-      return json(200, { ok: true, bill_id: bill.id });
+      return json(200, { ok: true, bill_id: targetBillId });
     }
 
     return json(400, { ok: false, error: 'Unknown action' });

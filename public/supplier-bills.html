@@ -184,9 +184,24 @@
         try { await callInbox(body); await load(); }
         catch (err) {
           // save_paid can save the bill and then fail to record the payment: show the list as it is now, with the message
-          if (reloadOnError) { await load(); const fresh = document.querySelector(`.sb-item[data-id="${item.id}"] .sb-msg`); if (fresh) fresh.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
+          if (reloadOnError) {
+            try { await load(); } catch (_) { /* the message below still shows on the old list */ }
+            const fresh = document.querySelector(`.sb-item[data-id="${item.id}"] .sb-msg`) || msg;
+            fresh.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+            btn.disabled = false; btn.textContent = text;
+            return;
+          }
           showErr(err); btn.disabled = false; btn.textContent = text;
         }
+      };
+      // the total read off the bill is shown and confirmed (or corrected) by a person before it is saved (M4)
+      const askBillTotal = () => {
+        const ex = item.extracted || {};
+        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
+        if (raw === null) return null;
+        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
+        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return null; }
+        return amount;
       };
 
       el.querySelector('.sb-open')?.addEventListener('click', async () => {
@@ -202,12 +217,8 @@
       el.querySelector('.sb-save')?.addEventListener('click', (e) => {
         const poId = el.querySelector('.sb-po')?.value || null;
         if (!poId && !confirm('Save this bill with no PO?')) return;
-        // the total read off the bill is shown and confirmed (or corrected) by a person before it is saved (M4)
-        const ex = item.extracted || {};
-        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
-        if (raw === null) return;
-        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return; }
+        const amount = askBillTotal();
+        if (amount === null) return;
         run(e.target, { action: 'save', id: item.id, po_id: poId, amount }, 'Saving...');
       });
       el.querySelector('.sb-not-bill')?.addEventListener('click', (e) => run(e.target, { action: 'not_a_bill', id: item.id }, 'Putting aside...'));
@@ -220,14 +231,11 @@
       // paid before the email came in (card at the counter, paid up front): save it and record it paid in one go
       el.querySelector('.sb-paid')?.addEventListener('click', (e) => {
         const body = { action: 'save_paid', id: item.id };
-        const ex = item.extracted || {};
         if (item.status !== 'saved') {
           body.po_id = el.querySelector('.sb-po')?.value || null;
           if (!body.po_id && !confirm('Save this bill with no PO?')) return;
-          const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
-          if (raw === null) return;
-          body.amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-          if (!(body.amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return; }
+          body.amount = askBillTotal();
+          if (body.amount === null) return;
         }
         const paidOn = prompt('Paid on which day? (YYYY-MM-DD)', sydneyDateKey(new Date()));
         if (paidOn === null) return;

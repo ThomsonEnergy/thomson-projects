@@ -14,7 +14,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
-- Feature on `staging` (waiting for release): Delete and Already paid buttons on the Emailed bills page (backlog item 40). Delete keeps the row as status `deleted` and removes the file; Already paid (Admin/Finance) saves the bill and records it paid in one go. Migration 20261128000000 (one check constraint). `supplier-bills.html` page budget raised 5 KB for the new buttons. Detail: `docs/PROJECT_SPEC.md` A11.
+- Feature on `staging` (waiting for release): Delete and Already paid buttons on the Emailed bills page (backlog item 40). Delete keeps the row as status `deleted` and removes the file; Already paid (Admin/Finance) saves the bill, then approves and records it paid in one database step (`supplier_bills_approve_and_mark_paid`). Migration 20261128030919 (one check constraint, one function). `supplier-bills.html` page budget raised 5 KB for the new buttons. Detail: `docs/PROJECT_SPEC.md` A11.
 
 ## 30 Oct 2026
 
