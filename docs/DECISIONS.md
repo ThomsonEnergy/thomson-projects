@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 3 Nov 2026
+
+- Item 41 addition proposed (waiting on yes): no-quote invoice labour rows follow the Schedule of Rates multipliers (after hours, Saturday, Sunday, public holiday) and the 2 hour minimum per person per day. Detail: `docs/IDEAS_BACKLOG.md` item 41.
+
 ## 2 Nov 2026
 
 - Planned, waiting on yes: no-quote (Direct Job) invoices show labour as hours at a rate per person (editable, add a row by rate tier), saved as `labour` invoice lines so the invoice prints one line per person and later invoices offer only unbilled hours; one migration. Detail: `docs/IDEAS_BACKLOG.md` item 41.
