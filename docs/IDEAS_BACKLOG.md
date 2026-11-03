@@ -876,7 +876,7 @@ Owner's ask: a Support section on `public/team.html` for anyone struggling, with
 
 Touches: `public/team.html`, `public/settings.html` (admin edit), one migration if a table is used. Overlaps: none. Kind: feature (into `staging`); migration maybe; money, stock, RLS or payroll: RLS yes if a table. Size: small. Test on staging: any staff login, Team, scroll to Support, tap a number. Best model: Sonnet 5.5, effort medium, because it is a small well-specified page addition.
 
-## 39. Pending leads tab on the Quotes page and lead notifications (built 30 Oct 2026, migration 20261127000000, see PROJECT_SPEC.md A28)
+## 39. Pending leads tab on the Quotes page and lead notifications (LIVE 3 Nov 2026, migration 20261127000000, see PROJECT_SPEC.md A28)
 
 Owner's ask: a tab to the left of Active on `quotes.html` listing the pending leads, so a lead that has not become a quote yet is never lost.
 
@@ -919,7 +919,7 @@ Plan:
 
 Touches: `public/project.html`, `netlify/functions/get-invoiceable-actuals.js`, `netlify/functions/_shared/invoice-items.js`, `netlify/functions/create-invoice.js`, one migration. Overlaps: none. Kind: feature into `staging`; migration yes; money yes (invoices), stock no, RLS no, payroll no. Size: medium.
 
-## 42. Time tab on the job: see every shift and move wrong ones to another job (built into `staging` 3 Nov 2026, PR 253, see PROJECT_SPEC.md A13d)
+## 42. Time tab on the job: see every shift and move wrong ones to another job (LIVE 3 Nov 2026, PR 253, see PROJECT_SPEC.md A13d)
 
 Owner's ask: somewhere in the job to see the times allocated to it and change them to a different job if they are wrong. Today the list exists but is hidden behind clicking the cost figure on the Summary tab, and Edit can only change the stage or category, never the job.
 
