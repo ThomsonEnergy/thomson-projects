@@ -903,7 +903,7 @@ Touches: `public/supplier-bills.html`, `netlify/functions/supplier-bill-inbox.js
 
 ## 41. Labour by the hour per person on no-quote invoices (planned 2 Nov 2026, yes 3 Nov 2026, built the same day as a fix straight into `main`)
 
-Built as planned below, with the toggle, the itemised shifts and the Less line. Spec: `docs/PROJECT_SPEC.md` A22. Follow-up idea: the band rules (standard hours, multipliers, minimum) are constants in `_shared/labour-bands.js`; a Settings screen for them would be the next step if they ever change.
+Built as planned below, with the toggle, the itemised shifts and the Less line. Same day, second fix: materials itemised the same way (each PO line or Stock draw, Itemised or Bulk toggle) and a Bill tick on every shift and material row (unticked rows are marked not billable on the job and stay off the next invoice). Not built: "leave it off this invoice only" (untick marks it not billable; tick it again next time to bill it). Spec: `docs/PROJECT_SPEC.md` A22. Follow-up idea: the band rules (standard hours, multipliers, minimum) are constants in `_shared/labour-bands.js`; a Settings screen for them would be the next step if they ever change.
 
 Owner's report: on a job with no quote (Direct Job), labour cannot be added properly; the invoice panel shows one labour sell amount, not hours at a rate per person.
 

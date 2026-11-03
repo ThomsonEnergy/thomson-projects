@@ -5,15 +5,19 @@
 //            who and their rate tier, hours, $/hr, total. "As per Schedule of Rates" (the
 //            default) prices each shift by its bands (after hours, Saturday, Sunday, public
 //            holiday multipliers) and rounds a person's day up to the 2 hour minimum;
-//            "Flat" is one row per person at the base rate. Every row can be edited or
-//            removed, "+ Add labour" adds a row by rate tier (travel, someone who did not
-//            clock on), and a "Less" line under the rows takes an amount or a percent off,
-//            lawyer style. Each row becomes a labour line on the invoice (invoice_line_items,
-//            kind labour) naming the shifts it billed, so the next invoice offers only what
-//            is left.
-//   Materials  at cost marked up by the cost centre's markup%, as one editable amount, plus
-//            Stock materials and prebuilds added straight onto the invoice (Stock comes out
-//            of the warehouse when the invoice is created).
+//            "Flat" is one row per person at the base rate. Every row can be edited,
+//            "+ Add labour" adds a row by rate tier (travel, someone who did not clock on),
+//            and a "Less" line under the rows takes an amount or a percent off, lawyer
+//            style. Each row becomes a labour line on the invoice (invoice_line_items, kind
+//            labour) naming the shifts it billed, so the next invoice offers only what is left.
+//   Materials  "Itemised" (the default): one row per PO line received to the job or Stock
+//            draw not yet billed (job_material_usage), at cost plus the cost centre's markup,
+//            each editable; "Bulk": one editable Materials amount. Stock materials and
+//            prebuilds can be added straight onto the invoice too (Stock comes out of the
+//            warehouse when the invoice is created).
+//   Bill tick  every clocked shift and costed material has a Bill tick. Unticked, it is left
+//            off this invoice and marked not billable on the job when the invoice is created,
+//            so it stays off the next one (it shows greyed at the bottom: tick it to bill it).
 // Tick the cost centres to invoice, then raise ONE invoice covering all of them (one Xero
 // invoice, a Labour / Materials line per cost centre) or a separate invoice for each.
 // create-invoice.js prices and checks everything again on the server.
@@ -62,22 +66,24 @@ async function openInvoiceActualCostsPanel(project) {
     }, 0));
   };
 
-  let rateMode = 'schedule'; // 'schedule' (as per Schedule of Rates) or 'flat'
+  let rateMode = 'schedule'; // labour: 'schedule' (as per Schedule of Rates) or 'flat'
+  let materialMode = 'itemised'; // materials: 'itemised' or 'bulk'
   let mode = 'combined';
   let rowKey = 0;
 
   const centres = actuals.centres.map((c) => {
-    const unbilledHours = r2((c.labourLines || []).reduce((s, l) => s + l.hours, 0));
-    // Materials not yet invoiced: what has accrued less what earlier invoices took as a lump
-    // (labour lines and Stock items are already left out of both sides by the server).
+    const unbilledHours = r2((c.labourLines || []).filter(l => l.billable).reduce((s, l) => s + l.hours, 0));
+    // Bulk materials not yet invoiced: what has accrued less what earlier invoices took as a lump
+    // (labour lines and itemised materials are already left out of both sides by the server).
     const material = r2(Math.max(0, c.materialSell - c.invoicedAmount));
-    return { ...c, unbilledHours, material, items: [], labourRows: [], less: { value: 0, unit: '$', reason: '' }, include: unbilledHours > 0 || material > 0.004 };
+    const materialRows = (c.materialLines || []).map(m => ({ ...m, key: `m${rowKey++}`, source: 'usage' }));
+    return { ...c, unbilledHours, material, materialRows, items: [], labourRows: [], less: { value: 0, unit: '$', reason: '' }, include: unbilledHours > 0 || material > 0.004 || materialRows.some(m => m.billable) };
   });
   // Nothing accrued anywhere yet (e.g. invoicing straight from a prebuild): start with every cost centre ticked.
   if (!centres.some(c => c.include)) centres.forEach(c => { c.include = true; });
 
   // Labour rows from the clocked shifts, by the chosen rate mode. Hand-added rows and the
-  // Less line survive a switch; edits to clocked rows are rebuilt.
+  // Less line survive a switch; edits to clocked rows are rebuilt. Not-billable rows sort last.
   function buildLabourRows() {
     centres.forEach((c) => {
       const kept = c.labourRows.filter(r => r.source === 'added');
@@ -85,8 +91,9 @@ async function openInvoiceActualCostsPanel(project) {
       if (rateMode === 'flat') {
         const byStaff = new Map();
         (c.labourLines || []).forEach((l) => {
-          if (!byStaff.has(l.staffId)) byStaff.set(l.staffId, { key: `r${rowKey++}`, source: 'shift', timeEntryIds: [], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, hours: 0, rate: l.rate });
-          const row = byStaff.get(l.staffId);
+          const k = `${l.staffId}|${l.billable ? 1 : 0}`;
+          if (!byStaff.has(k)) byStaff.set(k, { key: `r${rowKey++}`, source: 'shift', timeEntryIds: [], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, hours: 0, rate: l.rate, billable: l.billable });
+          const row = byStaff.get(k);
           row.timeEntryIds.push(l.timeEntryId);
           row.hours = r2(row.hours + l.hours);
         });
@@ -97,22 +104,23 @@ async function openInvoiceActualCostsPanel(project) {
             const hours = Number(l.bands?.[band]) || 0;
             if (hours <= 0) return;
             const b = rules.bands[band];
-            rows.push({ key: `r${rowKey++}`, source: 'shift', timeEntryIds: [l.timeEntryId], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, bandLabel: b.label, dateKey: l.dateKey, start: l.start, end: l.end, hours, rate: r2(l.rate * b.multiplier), minTag: false });
+            rows.push({ key: `r${rowKey++}`, source: 'shift', timeEntryIds: [l.timeEntryId], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, bandLabel: b.label, dateKey: l.dateKey, start: l.start, end: l.end, hours, rate: r2(l.rate * b.multiplier), minTag: false, billable: l.billable });
           });
         });
       }
+      rows.sort((a, b) => (a.billable === b.billable ? 0 : a.billable ? -1 : 1));
       c.labourRows = [...rows, ...kept];
     });
     if (rateMode === 'schedule') applyMinimum();
   }
   // Minimum charge per person per day on the job (across its cost centres): a short day is
-  // rounded up on that person's first row of the day.
+  // rounded up on that person's first billable row of the day.
   function applyMinimum() {
     const min = Number(rules.minimumHours) || 0;
     if (!min) return;
     const byDay = new Map();
     centres.forEach(c => c.labourRows.forEach((r) => {
-      if (r.source !== 'shift' || !r.dateKey) return;
+      if (r.source !== 'shift' || !r.dateKey || !r.billable) return;
       const k = `${r.staffId}|${r.dateKey}`;
       if (!byDay.has(k)) byDay.set(k, { total: 0, first: r });
       byDay.get(k).total += r.hours;
@@ -129,7 +137,8 @@ async function openInvoiceActualCostsPanel(project) {
     if (!r.dateKey) return who;
     return `${dateText(r.dateKey)}, ${r.start} to ${r.end}: ${who}${r.minTag ? ` (min. ${rules.minimumHours} hrs)` : ''}`;
   };
-  const rowsTotal = (c) => r2(c.labourRows.reduce((s, r) => s + r2((Number(r.hours) || 0) * (Number(r.rate) || 0)), 0));
+  const billedLabour = (c) => c.labourRows.filter(r => r.billable !== false);
+  const rowsTotal = (c) => r2(billedLabour(c).reduce((s, r) => s + r2((Number(r.hours) || 0) * (Number(r.rate) || 0)), 0));
   // The Less line: a dollar amount or a percent off the labour rows, never more than they add up to.
   const lessAmount = (c) => {
     const v = Number(c.less.value) || 0;
@@ -138,18 +147,27 @@ async function openInvoiceActualCostsPanel(project) {
     return -Math.min(off, rowsTotal(c));
   };
   const labourTotal = (c) => r2(rowsTotal(c) + lessAmount(c));
-  const centreTotal = (c) => r2(labourTotal(c) + (Number(c.material) || 0) + c.items.reduce((s, it) => s + r2(it.quantity * it.unitPrice), 0));
+  const billedMaterials = (c) => c.materialRows.filter(m => m.billable);
+  const materialTotal = (c) => (materialMode === 'bulk'
+    ? r2(Number(c.material) || 0)
+    : r2(billedMaterials(c).reduce((s, m) => s + r2((Number(m.quantity) || 0) * (Number(m.unitPrice) || 0)), 0)));
+  const centreTotal = (c) => r2(labourTotal(c) + materialTotal(c) + c.items.reduce((s, it) => s + r2(it.quantity * it.unitPrice), 0));
 
   overlay.innerHTML = `
-    <div class="card" style="max-width:860px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div class="card" style="max-width:900px; width:100%; max-height:90vh; overflow-y:auto;">
       <h2>Invoice actual costs</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Tick the cost centres to invoice. Labour is every clocked shift not yet billed; change the hours or rate on any line, remove one, add a line, or take some off at the bottom. Add Stock materials or prebuilds straight onto the invoice (Stock comes out of the warehouse when the invoice is created).</p>
-      <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+      <p class="subtitle" style="margin-bottom:10px;">Tick the cost centres to invoice. Labour is every clocked shift not yet billed and materials every PO line or Stock draw costed to the job; change any line, untick Bill to leave one off (it stays off next time too), add a line, or take some off at the bottom. Stock comes out of the warehouse when an added Stock item is invoiced.</p>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
         <span style="font-weight:600;">Labour rates</span>
         <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ia-rate-mode" value="schedule" checked style="width:auto;" /> As per Schedule of Rates</label>
         <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ia-rate-mode" value="flat" style="width:auto;" /> Flat</label>
       </div>
-      <p class="subtitle" id="ia-rate-note" style="font-size:12px; margin:-6px 0 12px;"></p>
+      <p class="subtitle" id="ia-rate-note" style="font-size:12px; margin:0 0 8px;"></p>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+        <span style="font-weight:600;">Materials</span>
+        <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ia-material-mode" value="itemised" checked style="width:auto;" /> Itemised (each PO line and Stock draw)</label>
+        <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ia-material-mode" value="bulk" style="width:auto;" /> Bulk (one amount)</label>
+      </div>
       <div id="ia-centres"></div>
       <div id="ia-mode-wrap" style="margin-top:12px;"></div>
       <div class="grid cols-2">
@@ -180,6 +198,7 @@ async function openInvoiceActualCostsPanel(project) {
     buildLabourRows();
     renderCentres();
   }));
+  overlay.querySelectorAll('input[name="ia-material-mode"]').forEach(r => r.addEventListener('change', () => { materialMode = r.value; renderCentres(); }));
 
   function refreshTotals() {
     const picked = centres.filter(c => c.include);
@@ -191,10 +210,10 @@ async function openInvoiceActualCostsPanel(project) {
       const box = centresEl.querySelector(`[data-ci="${i}"]`);
       if (!box) return;
       box.querySelector('.ia-centre-total').textContent = money(centreTotal(c));
-      const lessEl = box.querySelector('.ia-less-amount');
-      if (lessEl) lessEl.textContent = lessAmount(c) ? money(lessAmount(c)) : '';
-      const labEl = box.querySelector('.ia-labour-total');
-      if (labEl) labEl.textContent = money(labourTotal(c));
+      const set = (sel, text) => { const el = box.querySelector(sel); if (el) el.textContent = text; };
+      set('.ia-less-amount', lessAmount(c) ? money(lessAmount(c)) : '');
+      set('.ia-labour-total', money(labourTotal(c)));
+      set('.ia-material-total', money(materialTotal(c)));
     });
     modeWrap.innerHTML = picked.length > 1 ? `
       <label style="margin-top:0;">How to invoice the ${picked.length} cost centres</label>
@@ -203,26 +222,44 @@ async function openInvoiceActualCostsPanel(project) {
     modeWrap.querySelectorAll('input[name="ia-mode"]').forEach(r => r.addEventListener('change', () => { mode = r.value; refreshTotals(); }));
   }
 
-  const num = (v, step = '0.01') => `type="number" step="${step}" inputmode="decimal" style="padding:4px 6px; margin:0; min-width:70px;"`;
+  const num = (v) => `type="number" step="0.01" inputmode="decimal" value="${v}" style="padding:4px 6px; margin:0; min-width:70px;"`;
+  const billTick = (cls, on) => `<input type="checkbox" class="${cls}" ${on ? 'checked' : ''} title="Bill this line" style="width:auto; margin:0;" />`;
+  const removeBtn = (cls) => `<button type="button" class="secondary ${cls}" aria-label="Remove" title="Remove" style="font-size:14px; padding:2px 8px;">&times;</button>`;
   function labourRowHtml(r, j) {
     const schedule = rateMode === 'schedule';
+    const off = r.billable === false;
     const who = r.source === 'added'
       ? `<select class="ia-row-tier" style="padding:4px 6px; margin:0; min-width:120px;">${rateTiers.map(t => `<option value="${escapeHtml(t.id)}" ${t.id === r.rateTierId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select>
          <input class="ia-row-note" value="${escapeHtml(r.note || '')}" placeholder="Note (e.g. travel)" style="padding:4px 6px; margin:4px 0 0; min-width:120px;" />`
-      : `${escapeHtml(r.staffName)}${r.tierName ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.tierName)}${r.bandLabel ? `, ${escapeHtml(r.bandLabel)}` : ''}</span>` : ''}${r.minTag ? ` <span class="subtitle" style="font-size:11px;">min. ${rules.minimumHours} hrs</span>` : ''}`;
+      : `${escapeHtml(r.staffName)}${r.tierName ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.tierName)}${r.bandLabel ? `, ${escapeHtml(r.bandLabel)}` : ''}</span>` : ''}${r.minTag ? ` <span class="subtitle" style="font-size:11px;">min. ${rules.minimumHours} hrs</span>` : ''}${off ? ` <span class="subtitle" style="font-size:11px;">not billable</span>` : ''}`;
     return `
-      <tr data-lr="${j}">
+      <tr data-lr="${j}" style="${off ? 'opacity:0.5;' : ''}">
+        <td>${r.source === 'added' ? '' : billTick('ia-row-bill', !off)}</td>
         ${schedule ? `<td style="white-space:nowrap;">${r.dateKey ? escapeHtml(dateText(r.dateKey)) : ''}</td><td style="white-space:nowrap;">${r.start ? `${escapeHtml(r.start)} to ${escapeHtml(r.end)}` : ''}</td>` : ''}
         <td>${who}</td>
-        <td class="num"><input class="ia-row-hours" ${num(r.hours)} min="0" value="${r.hours}" /></td>
-        <td class="num"><input class="ia-row-rate" ${num(r.rate)} min="0" value="${r.rate}" /></td>
-        <td class="num ia-row-total" style="white-space:nowrap;">${money(r2(r.hours * r.rate))}</td>
-        <td><button type="button" class="secondary ia-row-remove" aria-label="Remove" title="Remove" style="font-size:14px; padding:2px 8px;">&times;</button></td>
+        <td class="num"><input class="ia-row-hours" ${num(r.hours)} min="0" ${off ? 'disabled' : ''} /></td>
+        <td class="num"><input class="ia-row-rate" ${num(r.rate)} min="0" ${off ? 'disabled' : ''} /></td>
+        <td class="num ia-row-total" style="white-space:nowrap;">${off ? '' : money(r2(r.hours * r.rate))}</td>
+        <td>${r.source === 'added' ? removeBtn('ia-row-remove') : ''}</td>
+      </tr>`;
+  }
+  function materialRowHtml(m, j) {
+    const off = !m.billable;
+    return `
+      <tr data-mr="${j}" style="${off ? 'opacity:0.5;' : ''}">
+        <td>${billTick('ia-mat-bill', !off)}</td>
+        <td>${escapeHtml(m.description)}${off ? ` <span class="subtitle" style="font-size:11px;">not billable</span>` : ''}</td>
+        <td style="white-space:nowrap;">${escapeHtml(m.from || '')}</td>
+        <td class="num"><input class="ia-mat-qty" ${num(m.quantity)} min="0" ${off ? 'disabled' : ''} /></td>
+        <td class="num" style="white-space:nowrap;">${money(m.unitCost)}</td>
+        <td class="num"><input class="ia-mat-price" ${num(m.unitPrice)} min="0" ${off ? 'disabled' : ''} /></td>
+        <td class="num ia-mat-total" style="white-space:nowrap;">${off ? '' : money(r2(m.quantity * m.unitPrice))}</td>
       </tr>`;
   }
 
   function renderCentres() {
     const schedule = rateMode === 'schedule';
+    const labourCols = schedule ? 8 : 6;
     centresEl.innerHTML = centres.map((c, i) => `
       <div data-ci="${i}" style="border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; ${c.include ? '' : 'opacity:0.6;'}">
         <label style="margin-top:0; display:flex; align-items:center; gap:8px; justify-content:space-between;">
@@ -233,12 +270,12 @@ async function openInvoiceActualCostsPanel(project) {
         ${c.include ? `
           <p style="margin:10px 0 4px; font-weight:600;">Labour</p>
           <div style="overflow-x:auto;">
-            <table style="font-size:13px; min-width:${schedule ? '620px' : '420px'};">
-              <thead><tr>${schedule ? '<th>Date</th><th>Time</th>' : ''}<th>Who</th><th class="num" style="width:80px;">Hours</th><th class="num" style="width:90px;">$/hr</th><th class="num">Total</th><th></th></tr></thead>
+            <table style="font-size:13px; min-width:${schedule ? '660px' : '460px'};">
+              <thead><tr><th style="width:36px;">Bill</th>${schedule ? '<th>Date</th><th>Time</th>' : ''}<th>Who</th><th class="num" style="width:80px;">Hours</th><th class="num" style="width:90px;">$/hr</th><th class="num">Total</th><th></th></tr></thead>
               <tbody>
-                ${c.labourRows.length ? c.labourRows.map((r, j) => labourRowHtml(r, j)).join('') : `<tr><td colspan="${schedule ? 7 : 5}" class="subtitle">No labour on this cost centre yet.</td></tr>`}
+                ${c.labourRows.length ? c.labourRows.map((r, j) => labourRowHtml(r, j)).join('') : `<tr><td colspan="${labourCols}" class="subtitle">No labour on this cost centre yet.</td></tr>`}
                 <tr>
-                  <td colspan="${schedule ? 3 : 1}" style="white-space:nowrap;">Less
+                  <td colspan="${labourCols - 4}" style="white-space:nowrap;">Less
                     <input class="ia-less-value" type="number" step="0.01" inputmode="decimal" min="0" value="${c.less.value || ''}" placeholder="0" style="padding:4px 6px; margin:0 4px; width:80px; display:inline-block;" />
                     <select class="ia-less-unit" style="padding:4px 6px; margin:0; width:auto; display:inline-block;"><option value="$" ${c.less.unit === '$' ? 'selected' : ''}>$</option><option value="%" ${c.less.unit === '%' ? 'selected' : ''}>%</option></select>
                     <input class="ia-less-reason" value="${escapeHtml(c.less.reason)}" placeholder="Reason (e.g. goodwill)" style="padding:4px 6px; margin:4px 0 0; min-width:140px; display:inline-block; width:auto;" />
@@ -247,14 +284,26 @@ async function openInvoiceActualCostsPanel(project) {
                   <td class="num ia-less-amount" style="white-space:nowrap;"></td>
                   <td></td>
                 </tr>
-                <tr><td colspan="${schedule ? 5 : 3}" style="text-align:right; font-weight:600;">Labour total</td><td class="num ia-labour-total" style="font-weight:600; white-space:nowrap;"></td><td></td></tr>
+                <tr><td colspan="${labourCols - 2}" style="text-align:right; font-weight:600;">Labour total</td><td class="num ia-labour-total" style="font-weight:600; white-space:nowrap;"></td><td></td></tr>
               </tbody>
             </table>
           </div>
           <button type="button" class="secondary ia-add-labour" style="margin-top:8px; font-size:13px;" ${rateTiers.length ? '' : 'disabled title="Set up Billable Rates first"'}>+ Add labour</button>
-          <div class="grid cols-2" style="margin-top:6px;">
-            <div><label>Materials</label><input type="number" step="0.01" inputmode="decimal" class="ia-material" value="${c.material}" /></div>
-          </div>
+          <p style="margin:14px 0 4px; font-weight:600;">Materials</p>
+          ${materialMode === 'bulk' ? `
+            <div class="grid cols-2">
+              <div><label style="margin-top:0;">Materials (one amount)</label><input type="number" step="0.01" inputmode="decimal" class="ia-material" value="${c.material}" /></div>
+            </div>
+            <p class="subtitle" style="font-size:12px; margin:4px 0 0;">${c.materialRows.filter(m => m.billable).length} costed line${c.materialRows.filter(m => m.billable).length === 1 ? '' : 's'} are billed as this one amount; switch to Itemised to see them.</p>` : `
+            <div style="overflow-x:auto;">
+              <table style="font-size:13px; min-width:620px;">
+                <thead><tr><th style="width:36px;">Bill</th><th>Item</th><th>From</th><th class="num" style="width:80px;">Qty</th><th class="num">Cost each</th><th class="num" style="width:100px;">Price each</th><th class="num">Total</th></tr></thead>
+                <tbody>
+                  ${c.materialRows.length ? c.materialRows.map((m, j) => materialRowHtml(m, j)).join('') : `<tr><td colspan="7" class="subtitle">No materials costed to this cost centre yet.</td></tr>`}
+                  <tr><td colspan="6" style="text-align:right; font-weight:600;">Materials total</td><td class="num ia-material-total" style="font-weight:600; white-space:nowrap;"></td></tr>
+                </tbody>
+              </table>
+            </div>`}
           ${c.items.length ? `
             <table style="margin-top:10px; font-size:13px;">
               <thead><tr><th>Added item</th><th class="num" style="width:70px;">Qty</th><th class="num" style="width:110px;">Price each</th><th class="num">Total</th><th></th></tr></thead>
@@ -265,7 +314,7 @@ async function openInvoiceActualCostsPanel(project) {
                     <td class="num"><input type="number" step="0.01" min="0.01" class="ia-item-qty" value="${it.quantity}" style="padding:4px 6px;" /></td>
                     <td class="num"><input type="number" step="0.01" min="0" class="ia-item-price" value="${it.unitPrice}" style="padding:4px 6px;" /></td>
                     <td class="num ia-item-total">${money(it.quantity * it.unitPrice)}</td>
-                    <td><button type="button" class="secondary ia-item-remove" style="font-size:12px; padding:4px 8px;">Remove</button></td>
+                    <td>${removeBtn('ia-item-remove')}</td>
                   </tr>`).join('')}
               </tbody>
             </table>` : ''}
@@ -282,7 +331,16 @@ async function openInvoiceActualCostsPanel(project) {
         const sync = () => { tr.querySelector('.ia-row-total').textContent = money(r2(r.hours * r.rate)); refreshTotals(); };
         tr.querySelector('.ia-row-hours').addEventListener('input', (e) => { r.hours = parseFloat(e.target.value) || 0; r.minTag = false; sync(); });
         tr.querySelector('.ia-row-rate').addEventListener('input', (e) => { r.rate = parseFloat(e.target.value) || 0; sync(); });
-        tr.querySelector('.ia-row-remove').addEventListener('click', () => { c.labourRows.splice(Number(tr.dataset.lr), 1); renderCentres(); });
+        const bill = tr.querySelector('.ia-row-bill');
+        if (bill) bill.addEventListener('change', (e) => {
+          // The tick is per shift: a shift split into bands (or a person's rows in Flat) moves together.
+          const ids = new Set(r.timeEntryIds);
+          centres.forEach(cc => cc.labourRows.forEach(x => { if (x.source === 'shift' && x.timeEntryIds.some(id => ids.has(id))) x.billable = e.target.checked; }));
+          buildLabourRows();
+          renderCentres();
+        });
+        const rm = tr.querySelector('.ia-row-remove');
+        if (rm) rm.addEventListener('click', () => { c.labourRows.splice(Number(tr.dataset.lr), 1); renderCentres(); });
         const tierSel = tr.querySelector('.ia-row-tier');
         if (tierSel) tierSel.addEventListener('change', (e) => {
           const t = rateTiers.find(x => x.id === e.target.value);
@@ -298,10 +356,22 @@ async function openInvoiceActualCostsPanel(project) {
       box.querySelector('.ia-less-reason').addEventListener('input', (e) => { c.less.reason = e.target.value.trim(); });
       box.querySelector('.ia-add-labour').addEventListener('click', () => {
         const t = rateTiers[0];
-        c.labourRows.push({ key: `r${rowKey++}`, source: 'added', timeEntryIds: [], staffId: null, staffName: '', rateTierId: t.id, tierName: t.name, hours: 1, rate: t.sellRate, note: '' });
+        c.labourRows.push({ key: `r${rowKey++}`, source: 'added', timeEntryIds: [], staffId: null, staffName: '', rateTierId: t.id, tierName: t.name, hours: 1, rate: t.sellRate, note: '', billable: true });
         renderCentres();
       });
-      box.querySelector('.ia-material').addEventListener('input', (e) => { c.material = parseFloat(e.target.value) || 0; refreshTotals(); });
+      const bulk = box.querySelector('.ia-material');
+      if (bulk) bulk.addEventListener('input', (e) => { c.material = parseFloat(e.target.value) || 0; refreshTotals(); });
+      box.querySelectorAll('[data-mr]').forEach((tr) => {
+        const m = c.materialRows[Number(tr.dataset.mr)];
+        const sync = () => { tr.querySelector('.ia-mat-total').textContent = money(r2(m.quantity * m.unitPrice)); refreshTotals(); };
+        tr.querySelector('.ia-mat-qty').addEventListener('input', (e) => { m.quantity = parseFloat(e.target.value) || 0; sync(); });
+        tr.querySelector('.ia-mat-price').addEventListener('input', (e) => { m.unitPrice = parseFloat(e.target.value) || 0; sync(); });
+        tr.querySelector('.ia-mat-bill').addEventListener('change', (e) => {
+          m.billable = e.target.checked;
+          c.materialRows.sort((a, b) => (a.billable === b.billable ? 0 : a.billable ? -1 : 1));
+          renderCentres();
+        });
+      });
       box.querySelectorAll('[data-ii]').forEach((row) => {
         const it = c.items[Number(row.dataset.ii)];
         const sync = () => { row.querySelector('.ia-item-total').textContent = money(it.quantity * it.unitPrice); refreshTotals(); };
@@ -313,8 +383,8 @@ async function openInvoiceActualCostsPanel(project) {
         const picked = await openVariationStockPicker(true);
         if (!picked) return;
         if (picked.kind === 'material') {
-          const m = materials.find(x => x.id === picked.id);
-          c.items.push({ kind: 'material', materialId: picked.id, name: picked.name, quantity: picked.quantity, unitPrice: r2((Number(m?.cost_price) || 0) * (1 + c.markupPercent / 100)) });
+          const mat = materials.find(x => x.id === picked.id);
+          c.items.push({ kind: 'material', materialId: picked.id, name: picked.name, quantity: picked.quantity, unitPrice: r2((Number(mat?.cost_price) || 0) * (1 + c.markupPercent / 100)) });
         } else {
           const p = prebuilds.find(x => x.id === picked.id);
           c.items.push({ kind: 'prebuild', prebuildId: picked.id, name: picked.name, quantity: picked.quantity, unitPrice: p ? prebuildUnitPrice(p, c.markupPercent) : 0 });
@@ -335,30 +405,41 @@ async function openInvoiceActualCostsPanel(project) {
     const empty = picked.find(c => centreTotal(c) <= 0);
     if (empty) { msg.innerHTML = `<div class="error-box">${escapeHtml(empty.name)} has nothing to invoice. Enter an amount, add a line, or untick it.</div>`; return; }
     if (picked.some(c => c.items.some(it => !(it.quantity > 0)))) { msg.innerHTML = `<div class="error-box">Every added item needs a quantity.</div>`; return; }
-    if (picked.some(c => c.labourRows.some(r => !(r.hours > 0) || r.rate < 0))) { msg.innerHTML = `<div class="error-box">Every labour line needs hours and a rate. Remove a line you do not want to bill.</div>`; return; }
+    if (picked.some(c => billedLabour(c).some(r => !(r.hours > 0) || r.rate < 0))) { msg.innerHTML = `<div class="error-box">Every labour line needs hours and a rate. Untick Bill on a line you do not want to bill.</div>`; return; }
+    if (materialMode === 'itemised' && picked.some(c => billedMaterials(c).some(m => !(m.quantity > 0) || m.unitPrice < 0))) { msg.innerHTML = `<div class="error-box">Every material line needs a quantity and a price. Untick Bill on a line you do not want to bill.</div>`; return; }
 
     const toClaim = (c) => ({
-      costCentreId: c.costCentreId, labourAmount: 0, materialAmount: Number(c.material) || 0, claimPercent: null,
+      costCentreId: c.costCentreId, labourAmount: 0, materialAmount: materialMode === 'bulk' ? (Number(c.material) || 0) : 0, claimPercent: null,
       items: [
-        ...c.labourRows.map(r => ({ kind: 'labour', staffId: r.staffId || null, rateTierId: r.rateTierId || null, timeEntryIds: r.timeEntryIds, quantity: r.hours, unitPrice: r.rate, description: rowDescription(r) })),
+        ...billedLabour(c).map(r => ({ kind: 'labour', staffId: r.staffId || null, rateTierId: r.rateTierId || null, timeEntryIds: r.timeEntryIds, quantity: r.hours, unitPrice: r.rate, description: rowDescription(r) })),
         ...(lessAmount(c) < 0 ? [{ kind: 'labour', quantity: 1, unitPrice: lessAmount(c), description: `Less: ${c.less.reason || 'adjustment'}` }] : []),
+        ...(materialMode === 'itemised' ? billedMaterials(c).map(m => ({ kind: 'material', jobMaterialUsageId: m.usageId, materialId: m.materialId || null, quantity: m.quantity, unitPrice: m.unitPrice, description: m.description })) : []),
         ...c.items.map(it => ({ kind: it.kind, materialId: it.materialId || null, prebuildId: it.prebuildId || null, quantity: it.quantity, unitPrice: it.unitPrice })),
       ],
     });
-    const batches = mode === 'separate' ? picked.map(c => [toClaim(c)]) : [picked.map(toClaim)];
+    // The Bill ticks, saved on the job when the invoice is created (create-invoice.js).
+    const marks = (list) => {
+      const on = { timeEntryIds: [], usageIds: [] }, off = { timeEntryIds: [], usageIds: [] };
+      list.forEach((c) => {
+        c.labourRows.filter(r => r.source === 'shift').forEach(r => (r.billable === false ? off : on).timeEntryIds.push(...r.timeEntryIds));
+        c.materialRows.forEach(m => (m.billable ? on : off).usageIds.push(m.usageId));
+      });
+      return { billable: on, notBillable: off };
+    };
+    const batches = mode === 'separate' ? picked.map(c => ({ claims: [toClaim(c)], ...marks([c]) })) : [{ claims: picked.map(toClaim), ...marks(picked) }];
 
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     const created = [];
     try {
       const { data: { session } } = await supabaseClient.auth.getSession();
-      for (const claims of batches) {
+      for (const batch of batches) {
         const res = await fetch('/.netlify/functions/create-invoice', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({
             projectId: project.id,
-            claims,
+            ...batch,
             sentAt: overlay.querySelector('#ia-date').value || null,
             dueDate: overlay.querySelector('#ia-due-date').value || null,
           }),
