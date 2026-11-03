@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
+- Staging database (3 Nov): Supabase shows the `staging` branch as MIGRATIONS_FAILED and it is 44 migrations behind the `staging` git branch (it has up to 20261025000000 plus 20261125000000 and 20261127000000 applied by hand; missing 20261026000000 to 20261124160000 and 20261126000000), so most features since 26 Oct cannot be tested on the staging site. Owner to fix in Supabase Dashboard > Branches > staging before release night. Item 39 (PR 239, in `staging`): migration 20261127000000 applied to staging by hand and tested, a fake lead and call request notified all 3 pricing test logins with the right wording; the fake rows (names `TEST Lead Claude`, `TEST Call Claude`) may still be there because the cleanup delete stalled. Detail: `docs/PROJECT_SPEC.md` A28 on `staging`.
 - Owner: item 41 in Schedule of Rates mode itemises every shift (date, start, finish, hours, rate) with a Less line at the bottom to take some off, lawyer style; labour lines record their time entry. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Owner: item 41 gets a toggle on the invoice panel, As per Schedule of Rates (default) or Flat. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Item 41 addition proposed (waiting on yes): no-quote invoice labour rows follow the Schedule of Rates multipliers (after hours, Saturday, Sunday, public holiday) and the 2 hour minimum per person per day. Detail: `docs/IDEAS_BACKLOG.md` item 41.
