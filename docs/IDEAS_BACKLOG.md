@@ -901,7 +901,9 @@ Owner's ask: a Delete button on `supplier-bills.html` for duplicate bills and em
 
 Touches: `public/supplier-bills.html`, `netlify/functions/supplier-bill-inbox.js`, one migration (`deleted` added to `supplier_bill_inbox_status_check`). Overlaps: none (`feat/simpler-purchase-orders` only bumps a `?v=` on the page and is stale). Kind: feature (into `staging`); migration yes (one check constraint); money yes (records a bill as paid), stock, RLS or payroll: no. Size: small. Test on staging: finance@staging.test, Purchases, Emailed bills, Put aside, Delete on one, confirm, it is gone and All does not list it; a Saved one shows no Delete. Then To check, pick a supplier and PO on one, Already paid, confirm the total, today, reference `card`: it moves to Saved, the supplier page shows the bill Paid with that date and reference, and Suppliers, Pay bills due does not list it. Best model: Fable 5.1, effort xhigh, because it records money paid and carries a migration and code in one go.
 
-## 41. Labour by the hour per person on no-quote invoices (planned 2 Nov 2026, waiting on the owner's yes)
+## 41. Labour by the hour per person on no-quote invoices (planned 2 Nov 2026, yes 3 Nov 2026, built the same day as a fix straight into `main`)
+
+Built as planned below, with the toggle, the itemised shifts and the Less line. Spec: `docs/PROJECT_SPEC.md` A22. Follow-up idea: the band rules (standard hours, multipliers, minimum) are constants in `_shared/labour-bands.js`; a Settings screen for them would be the next step if they ever change.
 
 Owner's report: on a job with no quote (Direct Job), labour cannot be added properly; the invoice panel shows one labour sell amount, not hours at a rate per person.
 
