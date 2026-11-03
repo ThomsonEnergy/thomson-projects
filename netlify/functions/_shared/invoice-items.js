@@ -26,30 +26,58 @@ function prebuildUnitPrice(prebuild, markupPercent) {
   return { labour: r2(labour), material: r2(material), materialCost: r2(materialCost) };
 }
 
-// items: [{ kind: 'material' | 'prebuild', materialId?, prebuildId?, quantity, unitPrice?, description? }]
-// Resolves each against Stock / the prebuild library and returns priced rows
-// ready for invoice_line_items (minus the invoice/claim ids), plus totals.
+// items: [{ kind: 'material' | 'prebuild' | 'labour', materialId?, prebuildId?, quantity, unitPrice?, description?,
+//           staffId?, rateTierId?, timeEntryIds? }]
+// Resolves each against Stock / the prebuild library / the rate tiers and returns priced
+// rows ready for invoice_line_items (minus the invoice/claim ids), plus totals.
 // unitPrice, when given, is the sell price ex GST per unit the person typed
 // in; a prebuild's override is split across labour / materials in the same
 // proportion as its own price.
+//   labour     hours x $/hr (item 41). The rate defaults to the tier's sell rate; a
+//              typed rate wins (Schedule of Rates multipliers come typed from the
+//              panel). The "Less" line is quantity 1 at a negative rate; the claim as
+//              a whole still cannot go negative (create-invoice.js checks).
 async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
   const list = (items || []).filter(i => i && Number(i.quantity) > 0);
   if (!list.length) return { rows: [], labour: 0, material: 0 };
 
   const materialIds = [...new Set(list.filter(i => i.kind === 'material').map(i => i.materialId).filter(Boolean))];
   const prebuildIds = [...new Set(list.filter(i => i.kind === 'prebuild').map(i => i.prebuildId).filter(Boolean))];
-  const [{ data: materials }, { data: prebuilds }] = await Promise.all([
+  const tierIds = [...new Set(list.filter(i => i.kind === 'labour').map(i => i.rateTierId).filter(Boolean))];
+  const staffIds = [...new Set(list.filter(i => i.kind === 'labour').map(i => i.staffId).filter(Boolean))];
+  const [{ data: materials }, { data: prebuilds }, { data: tiers }, { data: staff }] = await Promise.all([
     materialIds.length ? supabaseAdmin.from('materials').select('id, name, cost_price').in('id', materialIds) : Promise.resolve({ data: [] }),
     prebuildIds.length ? supabaseAdmin.from('prebuilds').select('id, name, prebuild_components(*)').in('id', prebuildIds) : Promise.resolve({ data: [] }),
+    tierIds.length ? supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate').in('id', tierIds) : Promise.resolve({ data: [] }),
+    staffIds.length ? supabaseAdmin.from('profiles').select('id').in('id', staffIds) : Promise.resolve({ data: [] }),
   ]);
   const materialById = Object.fromEntries((materials || []).map(m => [m.id, m]));
   const prebuildById = Object.fromEntries((prebuilds || []).map(p => [p.id, p]));
+  const tierById = Object.fromEntries((tiers || []).map(t => [t.id, t]));
+  const staffSet = new Set((staff || []).map(s => s.id));
   const factor = 1 + (Number(markupPercent) || 0) / 100;
   const override = (v) => (v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : null);
+  const isUuid = (v) => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
 
   let labour = 0, material = 0;
   const rows = list.map((item, i) => {
     const qty = Number(item.quantity);
+    if (item.kind === 'labour') {
+      const tier = item.rateTierId ? tierById[item.rateTierId] : null;
+      if (item.rateTierId && !tier) throw new Error('A rate tier on this invoice no longer exists.');
+      if (item.staffId && !staffSet.has(item.staffId)) throw new Error('A person on this invoice no longer exists.');
+      const unitPrice = override(item.unitPrice) ?? (tier ? Number(tier.sell_rate) : null);
+      if (unitPrice == null) throw new Error('A labour line needs a rate per hour.');
+      const labourAmount = r2(qty * unitPrice);
+      labour += labourAmount;
+      const timeEntryIds = [...new Set((Array.isArray(item.timeEntryIds) ? item.timeEntryIds : []).filter(isUuid))];
+      return {
+        kind: 'labour', material_id: null, prebuild_id: null,
+        staff_id: item.staffId || null, rate_tier_id: tier?.id || null, time_entry_ids: timeEntryIds.length ? timeEntryIds : null,
+        description: (item.description || tier?.name || 'Labour').slice(0, 300), quantity: qty,
+        unit_cost: 0, unit_price: unitPrice, labour_amount: labourAmount, material_amount: 0, sort_order: i,
+      };
+    }
     if (item.kind === 'material') {
       const m = materialById[item.materialId];
       if (!m) throw new Error('A Stock material on this invoice no longer exists.');
