@@ -9,6 +9,8 @@
 
 const { getAdminClient, getAuthCheckClient } = require('./require-admin');
 
+const FINANCE_ROLES = ['admin', 'finance'];
+
 async function requireFinanceRole(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -27,9 +29,9 @@ async function requireFinanceRole(event) {
     .single();
 
   if (profileErr || !profile || !profile.active) return null;
-  if (!['admin', 'finance'].includes(profile.role)) return null;
+  if (!FINANCE_ROLES.includes(profile.role)) return null;
 
   return { supabaseAdmin, user: userData.user };
 }
 
-module.exports = { requireFinanceRole };
+module.exports = { requireFinanceRole, FINANCE_ROLES };

@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
+- Staging database is still behind (seen 3 Nov 2026): `supabase_migrations.schema_migrations` on the staging branch stops at 20261025000000 then has only 20261125000000 and 20261127000000. Some later objects were added by hand (leads tables, po_set_closed, approved_by) but `supplier_bills_mark_paid`, `sydney_today`, `pay_on`, `paid_at`, `tools` and `energy_plans` are missing, so Record as paid and Already paid cannot be tested on staging until it catches up (`supabase db push` linked to staging from the laptop, or reset the branch in Supabase Dashboard > Branches). Also two migration files share the number 20261025000000 (`po_upgrades`, `task_needs_subtasks_done`), which `supabase db push` will refuse: renumber one first. Owner to decide.
 - Owner: item 41 in Schedule of Rates mode itemises every shift (date, start, finish, hours, rate) with a Less line at the bottom to take some off, lawyer style; labour lines record their time entry. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Owner: item 41 gets a toggle on the invoice panel, As per Schedule of Rates (default) or Flat. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Item 41 addition proposed (waiting on yes): no-quote invoice labour rows follow the Schedule of Rates multipliers (after hours, Saturday, Sunday, public holiday) and the 2 hour minimum per person per day. Detail: `docs/IDEAS_BACKLOG.md` item 41.
