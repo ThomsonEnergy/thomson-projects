@@ -1249,5 +1249,5 @@ create index if not exists idx_variations_created_by on public.variations (creat
 -- ---------------------------------------------------------------------------------------------------
 -- 11. The hand-made tidy table left on production with RLS off (S5)
 -- ---------------------------------------------------------------------------------------------------
-revoke all on public.notifications_tidy_20261023 from public, anon, authenticated;
+-- (the revoke that stood here failed on any database without the table, such as staging; the drop is enough)
 drop table if exists public.notifications_tidy_20261023;
