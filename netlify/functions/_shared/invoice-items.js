@@ -26,7 +26,7 @@ function prebuildUnitPrice(prebuild, markupPercent) {
   return { labour: r2(labour), material: r2(material), materialCost: r2(materialCost) };
 }
 
-// items: [{ kind: 'material' | 'prebuild' | 'labour', materialId?, prebuildId?, quantity, unitPrice?, description?,
+// items: [{ kind: 'material' | 'prebuild' | 'labour', materialId?, jobMaterialUsageId?, prebuildId?, quantity, unitPrice?, description?,
 //           staffId?, rateTierId?, timeEntryIds? }]
 // Resolves each against Stock / the prebuild library / the rate tiers and returns priced
 // rows ready for invoice_line_items (minus the invoice/claim ids), plus totals.
@@ -41,7 +41,19 @@ async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
   const list = (items || []).filter(i => i && Number(i.quantity) > 0);
   if (!list.length) return { rows: [], labour: 0, material: 0 };
 
-  const materialIds = [...new Set(list.filter(i => i.kind === 'material').map(i => i.materialId).filter(Boolean))];
+  // Materials already costed to the job (a PO line received to it or a Stock draw, job_material_usage)
+  // are billed from that row: its cost, its material, and the row's id on the invoice line so it is
+  // not offered again. Nothing moves in Stock for those. create-invoice.js checks the row is on the
+  // job and not already billed.
+  const usageIds = [...new Set(list.filter(i => i.kind === 'material').map(i => i.jobMaterialUsageId).filter(Boolean))];
+  const { data: usageRows } = usageIds.length
+    ? await supabaseAdmin.from('job_material_usage').select('id, material_id, unit_cost, purchase_order_line_items(description)').in('id', usageIds)
+    : { data: [] };
+  const usageById = Object.fromEntries((usageRows || []).map(u => [u.id, u]));
+  const materialIds = [...new Set([
+    ...list.filter(i => i.kind === 'material' && !i.jobMaterialUsageId).map(i => i.materialId),
+    ...(usageRows || []).map(u => u.material_id),
+  ].filter(Boolean))];
   const prebuildIds = [...new Set(list.filter(i => i.kind === 'prebuild').map(i => i.prebuildId).filter(Boolean))];
   const tierIds = [...new Set(list.filter(i => i.kind === 'labour').map(i => i.rateTierId).filter(Boolean))];
   const staffIds = [...new Set(list.filter(i => i.kind === 'labour').map(i => i.staffId).filter(Boolean))];
@@ -76,6 +88,19 @@ async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
         staff_id: item.staffId || null, rate_tier_id: tier?.id || null, time_entry_ids: timeEntryIds.length ? timeEntryIds : null,
         description: (item.description || tier?.name || 'Labour').slice(0, 300), quantity: qty,
         unit_cost: 0, unit_price: unitPrice, labour_amount: labourAmount, material_amount: 0, sort_order: i,
+      };
+    }
+    if (item.kind === 'material' && item.jobMaterialUsageId) {
+      const u = usageById[item.jobMaterialUsageId];
+      if (!u) throw new Error('A material on this invoice is no longer costed to the job.');
+      const unitCost = Number(u.unit_cost) || 0;
+      const unitPrice = override(item.unitPrice) ?? r2(unitCost * factor);
+      const materialAmount = r2(qty * unitPrice);
+      material += materialAmount;
+      return {
+        kind: 'material', material_id: u.material_id || null, prebuild_id: null, job_material_usage_id: u.id,
+        description: (item.description || u.purchase_order_line_items?.description || materialById[u.material_id]?.name || 'Material').slice(0, 300), quantity: qty,
+        unit_cost: unitCost, unit_price: unitPrice, labour_amount: 0, material_amount: materialAmount, sort_order: i,
       };
     }
     if (item.kind === 'material') {
