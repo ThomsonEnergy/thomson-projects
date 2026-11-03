@@ -201,8 +201,14 @@
           else {
             // Stock / prebuilds added while building the invoice (do-and-charge jobs) are
             // listed on their own; Labour / Materials are whatever's left of the claim.
+            // Labour lines (item 41) are hours at a rate per hour; a "Less" line (negative rate)
+            // shows its amount only, like a lawyer's bill.
             const items = c.invoice_items || [];
-            items.forEach((it) => rows.push(qtyRow(it.description, it.quantity, it.unit_price)));
+            items.forEach((it) => {
+              if (it.kind === 'labour' && Number(it.unit_price) < 0) rows.push({ cells: [esc(it.description), '', '', money(Number(it.labour_amount) || 0)], cls: ['', 'ctr', 'num', 'num'] });
+              else if (it.kind === 'labour') rows.push({ cells: [esc(it.description), `${(Number(it.quantity) || 0).toFixed(2)} hrs`, money(it.unit_price), money((Number(it.quantity) || 0) * (Number(it.unit_price) || 0))], cls: ['', 'ctr', 'num', 'num'] });
+              else rows.push(qtyRow(it.description, it.quantity, it.unit_price));
+            });
             const itemLab = items.reduce((t, it) => t + (Number(it.labour_amount) || 0), 0);
             const itemMat = items.reduce((t, it) => t + (Number(it.material_amount) || 0), 0);
             const restLab = Math.round((lab - itemLab) * 100) / 100, restMat = Math.round((mat - itemMat) * 100) / 100;

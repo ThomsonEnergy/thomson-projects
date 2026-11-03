@@ -1,14 +1,17 @@
 // POST /api/create-invoice
 // Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, items? }],
 //         variationEntryIds? (logged variations being billed on this invoice) }
-// items (do-and-charge invoice builder): Stock materials and prebuilds added
-// straight onto this invoice under that cost centre -
-// [{ kind: 'material' | 'prebuild', materialId?, prebuildId?, quantity, unitPrice?, description? }].
+// items (do-and-charge invoice builder): Stock materials, prebuilds and labour
+// lines (item 41: hours x $/hr per clocked shift, naming the shifts billed)
+// added straight onto this invoice under that cost centre -
+// [{ kind: 'material' | 'prebuild' | 'labour', materialId?, prebuildId?, quantity, unitPrice?, description?,
+//    staffId?, rateTierId?, timeEntryIds? }].
 // Priced by _shared/invoice-items.js and added on top of the claim's
 // labour/material amounts; each is recorded in invoice_line_items, and a
 // Stock material is taken out of the warehouse and costed to the job
-// (job_material_usage), same as any other draw from Stock. Nothing is
-// priced or moved until the request is otherwise valid.
+// (job_material_usage), same as any other draw from Stock. A shift already
+// on an invoice is refused. Nothing is priced or moved until the request
+// is otherwise valid.
 // One invoice, one row per cost centre included (a single-stage claim is
 // just claims.length === 1) - either a % of that stage's quote (the
 // normal claim panel) or, for a no-quote job (proposal_template
@@ -56,6 +59,21 @@ exports.handler = async (event) => {
       const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45);
       return { c, priced };
     }));
+    // Labour lines (item 41) name the clocked shifts they bill: each must be on this job
+    // and not already on an invoice, so a shift can never be billed twice.
+    const billedEntryIds = [...new Set(pricedClaims.flatMap(({ priced }) => priced.rows.flatMap(r => r.time_entry_ids || [])))];
+    if (billedEntryIds.length) {
+      const [{ data: ownEntries }, { data: alreadyBilled }] = await Promise.all([
+        supabaseAdmin.from('time_entries').select('id').eq('project_id', projectId).in('id', billedEntryIds),
+        supabaseAdmin.from('invoice_line_items').select('id, invoices!inner(project_id)').eq('invoices.project_id', projectId).overlaps('time_entry_ids', billedEntryIds).limit(1),
+      ]);
+      if ((ownEntries || []).length !== billedEntryIds.length) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'A shift on this invoice is not on this job.' }) };
+      }
+      if ((alreadyBilled || []).length) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'A shift on this invoice has already been billed. Close the panel and open it again.' }) };
+      }
+    }
     const claimRows = pricedClaims
       .map(({ c, priced }) => ({
         cost_centre_id: c.costCentreId,
