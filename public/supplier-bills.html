@@ -178,10 +178,15 @@
     function wire(el, item) {
       const msg = el.querySelector('.sb-msg');
       const showErr = (err) => { msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; };
-      const run = async (btn, body, busyText) => {
+      const run = async (btn, body, busyText, reloadOnError = false) => {
         const text = btn.textContent;
         btn.disabled = true; btn.textContent = busyText;
-        try { await callInbox(body); await load(); } catch (err) { showErr(err); btn.disabled = false; btn.textContent = text; }
+        try { await callInbox(body); await load(); }
+        catch (err) {
+          // save_paid can save the bill and then fail to record the payment: show the list as it is now, with the message
+          if (reloadOnError) { await load(); const fresh = document.querySelector(`.sb-item[data-id="${item.id}"] .sb-msg`); if (fresh) fresh.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; return; }
+          showErr(err); btn.disabled = false; btn.textContent = text;
+        }
       };
 
       el.querySelector('.sb-open')?.addEventListener('click', async () => {
@@ -231,7 +236,7 @@
         const reference = prompt('How was it paid? (optional, e.g. card, Airwallex, bank reference)', '');
         if (reference === null) return;
         body.reference = reference;
-        run(e.target, body, 'Recording...');
+        run(e.target, body, 'Recording...', true);
       });
 
       // Opens the usual review screen on the supplier's page (stock, material prices, new PO),
