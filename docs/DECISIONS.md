@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
+- LIVE (owner: fix it now, straight to main): item 41, labour by the hour on no-quote invoices. Invoice actual costs lists every unbilled shift (date, start, finish, who, hours, $/hr), As per Schedule of Rates (bands, 2 hour minimum) or Flat, add a line, a Less line at the bottom; labour becomes `invoice_line_items` kind `labour` naming the shifts billed. Migration 20261127000000. The panel moved out of `project.html` into `public/js/project-invoice-actuals.js`. Detail: `docs/PROJECT_SPEC.md` A22.
 - Owner: item 41 in Schedule of Rates mode itemises every shift (date, start, finish, hours, rate) with a Less line at the bottom to take some off, lawyer style; labour lines record their time entry. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Owner: item 41 gets a toggle on the invoice panel, As per Schedule of Rates (default) or Flat. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Item 41 addition proposed (waiting on yes): no-quote invoice labour rows follow the Schedule of Rates multipliers (after hours, Saturday, Sunday, public holiday) and the 2 hour minimum per person per day. Detail: `docs/IDEAS_BACKLOG.md` item 41.
