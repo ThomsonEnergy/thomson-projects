@@ -234,6 +234,12 @@ Manual steps only a person can do (the code is live):
 - A task can only be ticked once all its subtasks are ticked (database trigger, migration 20261025000001); ticking a task no longer ticks its subtasks.
 - Move a subtask to another task or out on its own, or put a task (with no subtasks) under another task: "Move to" in the open task.
 
+### A13d. Time tab on the job (built 3 Nov 2026, backlog item 42, no migration)
+- **Time tab** on every job with a J number (`js/job-time.js`, downloaded the first time the tab or the Summary accrued cost figure is opened, `withJobTime` in `project.html`): every shift on the job grouped by Sydney day, person, start to finish, break, paid hours, stage, "ServiceM8, already paid" and "billed on SI..." badges; totals per person on top. Cost per shift and per person for Admin and Finance only (`get-itemised-labour-cost`). Staff see only their own shifts (RLS); Sales see everyone's hours and the billed badges.
+- **Admin:** Edit a shift's stage or category (and a ServiceM8 shift's times, or delete it); tick one or more shifts and Move them to another job (search by J number, client or job name, then its stages) or to a clocked non-job category (Quoting, Admin, Maintenance, Training; not TAFE). Hours, dates and pay never change, so Xero payroll is untouched.
+- **Server checks** (`admin-update-time-entry.js`, `_shared/time-entry-moves.js`): the stages must belong to the target job; a shift still clocked in cannot move; a shift on an invoice line (`invoice_line_items.time_entry_ids`) cannot leave its job or be deleted; each moved shift writes "Moved Sam's 8h on 3 Nov from J7006 to J7010" to the activity log of both jobs.
+- The Summary accrued cost pop-up now shows received PO materials and an Open the Time tab button; its old time list and edit rows were removed.
+
 ### A13a. Activity log
 - One `activity_log` table (`logActivity()` / `renderActivityLog()`), shown as a sidebar on the job page. Covers POs, jobs/quotes (stage edits), invoices, suppliers, materials, clients, tasks, documents, variations, timesheets. Not yet: settings changes, schedule changes.
 - Timesheet lines name the day the entry was for and read "was X, now Y" (e.g. `Timesheet edited for Fri 16 Oct: was 7:00 am - 8:45 am, now 1:00 pm - 3:00 pm`). Added entries on a job are logged, and an entry moved between jobs is logged on both jobs. Description sits full width with name and time underneath.
