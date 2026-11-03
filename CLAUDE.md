@@ -63,9 +63,21 @@ Chats that cannot write to GitHub (for example Claude Projects): end with a shor
 - The GitHub Action `check` runs `npm run check` on every PR and is a required check on `main`: wait for the green tick before merging. Nobody approves anything by hand.
 - Docs-only PRs still go straight into `main`, then `main` into `staging`.
 
+## Software factory (owner's rule from 27 Oct 2026)
+
+Every build goes through the same five steps, each a skill in `.claude/skills/` (full reasoning in `docs/SOFTWARE_FACTORY.md`):
+
+1. **Isolate** `/new-feature`: own branch from `origin/staging` (feature) or `origin/main` (fix), overlap check first, "Building in" note on the backlog item. On the laptop, a worktree per chat.
+2. **Build** `/code-structure`: pages and functions decide when and who, `_shared/` and `public/js/` own how. `project.html` and `settings.html` take no new inline code (new tabs are their own file). Reuse before writing, delete what you replace, settings as data not constants, prompts in `agents/prompts/`.
+3. **Prove** `/prove`: before screenshot first, `npm run check` (now also dead code and page budgets), the smoke run (`scripts/smoke.js`) on the PR preview with the plan's Done means as a steps file, agent eval sets, `/code-review` and `/simplify` until clean, a fresh reviewer, a plain-words pass.
+4. **Ship** `/ship`: PR from `.github/pull_request_template.md` with the before and after table, screenshots on the `pr-assets` branch (never a public host), docs written back, merge by the release rules.
+5. **Look after** `/weekly-cleanup`: weekly read-only sweep, worst first, one fix PR after the yes.
+
+Every plan now includes a **Done means** list (3 to 6 checks as clicks a person could do). A page over its budget in `scripts/page-budgets.json` fails `check`; raise a budget only with a reason in the PR, and never for `project.html` or `settings.html`.
+
 ## Delivery standards
 
-- `npm run check` before finishing: syntax checks every JS file, every inline HTML script block, every SQL migration, and the policy pairs below.
+- `npm run check` before finishing: syntax checks every JS file, every inline HTML script block, every SQL migration, the policy pairs below, dead code (new findings against `scripts/deadcode-baseline.json`) and page weight budgets (`scripts/page-budgets.json`).
 - Every `create policy` has a matching `drop policy if exists` right before it.
 - New tables: fast RLS (`(select auth.uid())`, one policy per action), and an index on every FK. Policies are `to authenticated` unless the row is meant for the public (client pages read through token functions, never table policies).
 - Every new or changed database function: `set search_path = public`; `security definer` ones check the caller (`auth.uid()`, `is_admin()`, `is_pricing_role()` or a token) and end with `revoke execute ... from public, anon` plus a `grant` only to who needs it (`authenticated`, or nobody when only the server calls it). No new `security definer` views: use `security_invoker` or a function.

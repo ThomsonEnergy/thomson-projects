@@ -27,6 +27,7 @@ const AGENTS = {
   'sweep-licence-expiry': { label: 'Licence and insurance expiry (nightly)', every: 1440 },
   'ops-digest': { label: 'Ops manager 5am digest', every: 1440 },
   'remind-client-bookings': { label: 'Client not told of booking (7am reminder)', every: 1440 },
+  'remind-leads': { label: 'Leads and call requests still waiting (7am reminder)', every: 1440 },
   'read-knowledge-sweep': { label: 'Knowledge Base reader (every 2 minutes)', every: 2 },
   'sync-energy-plans': { label: 'Retail plan list from Energy Made Easy (refreshed daily)', every: 15 },
 };

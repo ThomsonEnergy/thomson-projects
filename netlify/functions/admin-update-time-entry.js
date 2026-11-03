@@ -1,5 +1,10 @@
 // POST /.netlify/functions/admin-update-time-entry
 // Body: { entryId, project_id, cost_centre_id, selected_cost_centre_ids, time_category }
+//       { entryId, clock_in, clock_out }   ServiceM8 entries only: correct the times
+//       { entryId, delete: true }          ServiceM8 entries only: remove it
+//       { action: 'move', entryIds, project_id, stage_ids, time_category }
+//                                          the job page Time tab: move shifts to the right job
+//                                          (backlog item 42, _shared/time-entry-moves.js)
 //
 // Lets an admin correct which cost centre(s) a logged time_entry is
 // attributed to, or reclassify it as office/training/other time - for
@@ -8,8 +13,16 @@
 // rows via direct client-side Supabase calls; this exists specifically
 // for the cross-staff case, so it goes through the service-role key
 // (requireAdmin) rather than relying on an unconfirmed RLS write policy.
+//
+// ServiceM8 imports (sm8_activity_uuid set, already paid) can be wrong in
+// ServiceM8 itself, so an admin can fix their times or delete them here.
+// Only those: our own staff's times are edited in Timesheets, where the
+// Xero lock applies. A deleted import is remembered by a trigger
+// (sm8_deleted_activities, migration 20261125000000) so a re-run of the
+// ServiceM8 import does not bring it back.
 
 const { requireAdmin } = require('./_shared/require-admin');
+const { moveTimeEntries, checkStages, stagePatch, billedOn } = require('./_shared/time-entry-moves');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -20,21 +33,57 @@ exports.handler = async (event) => {
   if (!auth) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Not authorized' }) };
   }
-  const { supabaseAdmin } = auth;
+  const { supabaseAdmin, user } = auth;
 
   try {
-    const { entryId, project_id, cost_centre_id, selected_cost_centre_ids, time_category } = JSON.parse(event.body || '{}');
+    const body = JSON.parse(event.body || '{}');
+    if (body.action === 'move') {
+      const result = await moveTimeEntries(supabaseAdmin, {
+        entryIds: body.entryIds, projectId: body.project_id, stageIds: body.stage_ids, category: body.time_category, userId: user.id,
+      });
+      return { statusCode: result.ok ? 200 : 400, body: JSON.stringify(result) };
+    }
+    const { entryId, project_id, cost_centre_id, selected_cost_centre_ids, time_category } = body;
     if (!entryId) {
       return { statusCode: 400, body: JSON.stringify({ error: 'entryId is required' }) };
     }
 
     const { data: existing, error: fetchErr } = await supabaseAdmin
       .from('time_entries')
-      .select('id')
+      .select('id, sm8_activity_uuid, project_id')
       .eq('id', entryId)
       .single();
     if (fetchErr || !existing) {
       return { statusCode: 404, body: JSON.stringify({ error: 'Time entry not found' }) };
+    }
+
+    const wantsTimes = body.clock_in !== undefined || body.clock_out !== undefined;
+    if ((body.delete || wantsTimes) && !existing.sm8_activity_uuid) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Only ServiceM8 entries can have their times changed or be deleted here. Edit this one in Timesheets.' }) };
+    }
+
+    if (body.delete) {
+      const billed = await billedOn(supabaseAdmin, [entryId]);
+      if (billed[entryId]) return { statusCode: 400, body: JSON.stringify({ ok: false, error: `This shift is billed on ${billed[entryId]}, so it cannot be deleted. Fix or credit that invoice first.` }) };
+      const { error: delErr } = await supabaseAdmin.from('time_entries').delete().eq('id', entryId);
+      if (delErr) throw delErr;
+      return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    }
+
+    let timePatch = {};
+    if (wantsTimes) {
+      const inMs = Date.parse(body.clock_in);
+      const outMs = Date.parse(body.clock_out);
+      if (!Number.isFinite(inMs) || !Number.isFinite(outMs)) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Start and finish are both needed.' }) };
+      }
+      if (outMs <= inMs) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Finish must be after start.' }) };
+      }
+      if (outMs - inMs > 24 * 3600000) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'One entry cannot be longer than 24 hours.' }) };
+      }
+      timePatch = { clock_in: new Date(inMs).toISOString(), clock_out: new Date(outMs).toISOString() };
     }
 
     // Stored the way the clock-out and the Timesheets editor store it, which is
@@ -45,13 +94,21 @@ exports.handler = async (event) => {
     // when they are read.
     const stageIds = [...new Set((Array.isArray(selected_cost_centre_ids) && selected_cost_centre_ids.length
       ? selected_cost_centre_ids : [cost_centre_id]).filter(Boolean))];
+    if (existing.project_id && existing.project_id !== (project_id || null)) {
+      const billed = await billedOn(supabaseAdmin, [entryId]);
+      if (billed[entryId]) return { statusCode: 400, body: JSON.stringify({ ok: false, error: `This shift is billed on ${billed[entryId]}, so it stays on this job. Fix or credit that invoice first.` }) };
+    }
+    if (project_id) {
+      const bad = await checkStages(supabaseAdmin, project_id, stageIds);
+      if (bad) return { statusCode: 400, body: JSON.stringify({ ok: false, error: bad }) };
+    }
     const { error: updateErr } = await supabaseAdmin
       .from('time_entries')
       .update({
         project_id: project_id || null,
-        cost_centre_id: stageIds.length === 1 ? stageIds[0] : null,
-        selected_cost_centre_ids: stageIds.length > 1 ? stageIds : null,
+        ...stagePatch(stageIds),
         time_category: time_category || 'job',
+        ...timePatch,
       })
       .eq('id', entryId);
     if (updateErr) throw updateErr;

@@ -27,8 +27,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 26 | STCs and BSTCs separate | Folded into item 27 (credits at quote level, not per stage) | N | See 27 |
 | 27 | Quote in steps: create, pre-quote info, site visit, pricing, scope of works, send; STC and BSTC credits at quote level | Built 21 Oct 2026, LIVE (spec A3), migration 20261117000000 | N | None |
 | 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
-| 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Agreed 27 Oct 2026, waiting on yes to build | N | None |
-| 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Planned, waiting on owner's yes | N | Item 36 eval sets; staff notice for per-person email |
+| 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
+| 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 | 40 | Delete and Already paid buttons on the Emailed bills page | Planned 30 Oct 2026, waiting on owner's yes | N | None |
 
 ## High lead time, start now
@@ -858,9 +858,9 @@ Owner chose option C from item 34, to build later. Until then the app says "We d
 
 Size: a bigger build (two tables, a monthly download, model changes, proposal wording). Do it only if wholesale plans come up in enough battery sales. Best model: Fable 5.1, effort xhigh (money shown to customers, new data source, model change).
 
-## 36. Software factory (planned 27 Oct 2026, waiting on Fable review and the owner's yes)
+## 36. Software factory (built 27 Oct 2026, on `staging`, no migration)
 
-Owner's ask: one way for every chat to build so code is easy to add to, easy for a person to step in, with no dead code, no half-working features and no slow pages. Steps: isolate (`/new-feature`, own worktree), build (`/code-structure`), prove (`/prove`: check, dead code, page weight, Playwright smoke run with screenshots, agent evals, fresh review), ship (`/ship`: PR with before and after screenshots), weekly cleanup. Full draft and open questions: `docs/SOFTWARE_FACTORY.md`.
+Owner's ask: one way for every chat to build so code is easy to add to, easy for a person to step in, with no dead code, no half-working features and no slow pages. Steps: isolate (`/new-feature`, own worktree), build (`/code-structure`), prove (`/prove`: check, dead code, page weight, Playwright smoke run with screenshots, agent evals, fresh review), ship (`/ship`: PR with before and after screenshots), weekly cleanup. What was built, and the one owner step (network access for the smoke run): `docs/SOFTWARE_FACTORY.md`.
 
 Touches: `CLAUDE.md`, `.claude/skills/` (new), `scripts/deadcode.js`, `scripts/page-budgets.json`, `scripts/smoke.js` (new), `scripts/check.js`, `.github/pull_request_template.md` (new), `agents/prompts/`, `agents/evals/` (new). Size: medium. Best model: Fable 5.1, effort high (sets the rules every later build follows).
 
@@ -876,7 +876,7 @@ Owner's ask: a Support section on `public/team.html` for anyone struggling, with
 
 Touches: `public/team.html`, `public/settings.html` (admin edit), one migration if a table is used. Overlaps: none. Kind: feature (into `staging`); migration maybe; money, stock, RLS or payroll: RLS yes if a table. Size: small. Test on staging: any staff login, Team, scroll to Support, tap a number. Best model: Sonnet 5.5, effort medium, because it is a small well-specified page addition.
 
-## 39. Pending leads tab on the Quotes page and lead notifications (planned 30 Oct 2026, waiting on the owner's yes)
+## 39. Pending leads tab on the Quotes page and lead notifications (built 30 Oct 2026, migration 20261127000000, see PROJECT_SPEC.md A28)
 
 Owner's ask: a tab to the left of Active on `quotes.html` listing the pending leads, so a lead that has not become a quote yet is never lost.
 
@@ -919,7 +919,7 @@ Plan:
 
 Touches: `public/project.html`, `netlify/functions/get-invoiceable-actuals.js`, `netlify/functions/_shared/invoice-items.js`, `netlify/functions/create-invoice.js`, one migration. Overlaps: none. Kind: feature into `staging`; migration yes; money yes (invoices), stock no, RLS no, payroll no. Size: medium.
 
-## 42. Time tab on the job: see every shift and move wrong ones to another job (built into `staging` 3 Nov 2026, PR 253)
+## 42. Time tab on the job: see every shift and move wrong ones to another job (built into `staging` 3 Nov 2026, PR 253, see PROJECT_SPEC.md A13d)
 
 Owner's ask: somewhere in the job to see the times allocated to it and change them to a different job if they are wrong. Today the list exists but is hidden behind clicking the cost figure on the Summary tab, and Edit can only change the stage or category, never the job.
 

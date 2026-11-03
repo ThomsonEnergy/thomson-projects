@@ -18,6 +18,7 @@ const NOTIF_GROUPS = [
     ['followup_done', 'Meeting follow-ups finished (for meetings I ran)'],
     ['scheduled', 'Booked onto the schedule, or a booking of mine moved or cancelled'],
     ['booking_reminder', 'A booking I made starts soon and the client has not been told; the client picked or declined time options'],
+    ['lead', 'New website leads and call requests, and a 7am reminder for any still waiting', 'pricing'],
     ['quote', 'A quote I made was declined by the client', 'pricing'],
     ['variation', 'A variation I made was approved or declined by the client', 'pricing'],
     ['review', 'Client reviews received'],

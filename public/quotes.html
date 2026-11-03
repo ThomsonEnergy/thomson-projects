@@ -40,7 +40,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=121"></script>
+  <script src="/js/supabase-client.js?v=122"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     (async function () {
@@ -68,10 +68,28 @@
 
       const list = document.getElementById('list');
       if (error) {
-        list.innerHTML = `<div class="error-box">${error.message}</div>`;
+        list.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
         return;
       }
-      if (!projects.length) {
+
+      // Pending leads (backlog item 39): still new, reachable (phone or email), and no quote or
+      // job made from them yet; plus website call requests not done. Pricing roles only (the
+      // leads table is theirs). Read-only: the row opens the lead on the Leads page.
+      let pendingLeads = [], openCalls = [];
+      if (pricingVisible) {
+        const [leadsRes, linkedRes, callsRes] = await Promise.all([
+          supabaseClient.from('leads').select('id, created_at, name, ai_title, email, phone, suburb, source, needs_site_visit, status')
+            .or('status.eq.new,status.is.null').order('created_at', { ascending: false }).limit(200),
+          supabaseClient.from('projects').select('lead_id').not('lead_id', 'is', null),
+          supabaseClient.from('callback_requests').select('id, created_at, name, phone, requested_date, requested_time, message, status')
+            .in('status', ['pending', 'scheduled']).order('requested_date').order('requested_time').limit(100),
+        ]);
+        const taken = new Set((linkedRes.data || []).map(r => r.lead_id));
+        pendingLeads = (leadsRes.data || []).filter(l => (l.email || l.phone) && !taken.has(l.id));
+        openCalls = callsRes.data || [];
+      }
+
+      if (!projects.length && !pendingLeads.length && !openCalls.length) {
         list.innerHTML = `<div class="empty-state">
           <div class="empty-icon">&#128203;</div>
           <h2>No quotes yet</h2>
@@ -148,14 +166,67 @@
           <div class="bulk-delete-msg"></div>`;
       }
 
+      // Age of a lead: amber past 48 hours, red past 7 days, so nothing sits unnoticed.
+      const HOUR = 60 * 60 * 1000;
+      function ageInfo(iso) {
+        const ms = Date.now() - new Date(iso).getTime();
+        const label = ms < HOUR ? 'just now' : ms < 24 * HOUR ? Math.floor(ms / HOUR) + 'h' : Math.floor(ms / (24 * HOUR)) + (Math.floor(ms / (24 * HOUR)) === 1 ? ' day' : ' days');
+        const colour = ms > 7 * 24 * HOUR ? 'var(--red)' : ms > 48 * HOUR ? 'var(--amber)' : 'var(--muted)';
+        return { label, colour, late: ms > 48 * HOUR };
+      }
+      const sydneyToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+      const sydneyHm = new Date().toLocaleTimeString('en-GB', { timeZone: 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      const callLate = c => c.requested_date < sydneyToday || (c.requested_date === sydneyToday && String(c.requested_time).slice(0, 5) <= sydneyHm);
+      const leadsLate = pendingLeads.some(l => ageInfo(l.created_at).late) || openCalls.some(callLate);
+
+      function buildLeadRowsHtml() {
+        const leadRows = pendingLeads.map((l, i) => {
+          const age = ageInfo(l.created_at);
+          const who = l.name || l.ai_title || l.email || l.phone;
+          const meta = [l.suburb, l.source ? 'from ' + l.source : null].filter(Boolean).map(escapeHtml).join(' &middot; ');
+          return `
+            <a class="project-list-item" href="/leads.html?id=${encodeURIComponent(l.id)}" style="${i === pendingLeads.length - 1 ? 'border-bottom:none;' : ''}">
+              <div>
+                <div class="name">${escapeHtml(who)}</div>
+                <div class="meta">${meta || 'Lead'}${l.ai_title && l.name ? ' &middot; ' + escapeHtml(l.ai_title) : ''}</div>
+              </div>
+              <div style="text-align:right; min-width:120px;">
+                ${l.needs_site_visit ? '<span class="badge sent">site visit</span>' : '<span class="badge draft">new</span>'}
+                <div class="meta" style="margin-top:6px; color:${age.colour}; font-weight:${age.late ? 600 : 400};">${age.label}</div>
+              </div>
+            </a>`;
+        }).join('');
+        const callRows = openCalls.map((c, i) => {
+          const late = callLate(c);
+          const when = new Date(c.requested_date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' }) + ' ' + String(c.requested_time).slice(0, 5);
+          return `
+            <a class="project-list-item" href="/leads.html" style="${i === openCalls.length - 1 ? 'border-bottom:none;' : ''}">
+              <div>
+                <div class="name">${escapeHtml(c.name || c.phone)}</div>
+                <div class="meta">${escapeHtml(c.phone)}${c.message ? ' &middot; ' + escapeHtml(String(c.message).slice(0, 80)) : ''}</div>
+              </div>
+              <div style="text-align:right; min-width:120px;">
+                <span class="badge ${c.status === 'scheduled' ? 'sent' : 'draft'}">call ${escapeHtml(c.status)}</span>
+                <div class="meta" style="margin-top:6px; color:${late ? 'var(--amber)' : 'inherit'}; font-weight:${late ? 600 : 400};">${escapeHtml(when)}</div>
+              </div>
+            </a>`;
+        }).join('');
+        return `
+          ${pendingLeads.length ? leadRows : '<p class="subtitle">No leads waiting. New website leads land here until a quote or job is made from them.</p>'}
+          ${openCalls.length ? `<h3 style="margin:18px 0 6px;">Call requests</h3>${callRows}` : ''}
+          <p class="subtitle" style="margin-top:12px;"><a class="link-quiet" href="/leads.html">Open the Leads page</a></p>`;
+      }
+
       list.innerHTML = `
         <div class="settings-tabs" id="quotes-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;">
+          ${pricingVisible ? `<button class="settings-tab" data-panel="leads">Leads (${pendingLeads.length + openCalls.length})${leadsLate ? ' <span title="Waiting over 48 hours" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--amber); vertical-align:middle; margin-left:4px;"></span>' : ''}</button>` : ''}
           <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
           <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
           <button class="settings-tab" data-panel="approved">Approved (${approvedQuotes.length})</button>
           <button class="settings-tab" data-panel="declined">Declined (${declinedQuotes.length})</button>
           <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
         </div>
+        ${pricingVisible ? `<div class="settings-panel" id="panel-leads">${buildLeadRowsHtml()}</div>` : ''}
         <div class="settings-panel active" id="panel-active">
           ${bulkBarHtml()}
           ${pendingQuotes.length ? buildRowsHtml(pendingQuotes) : `<p class="subtitle">No pending quotes - still need to be sent to the client.</p>`}
