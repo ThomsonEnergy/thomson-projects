@@ -919,7 +919,7 @@ Plan:
 
 Touches: `public/project.html`, `netlify/functions/get-invoiceable-actuals.js`, `netlify/functions/_shared/invoice-items.js`, `netlify/functions/create-invoice.js`, one migration. Overlaps: none. Kind: feature into `staging`; migration yes; money yes (invoices), stock no, RLS no, payroll no. Size: medium.
 
-## 42. Time tab on the job: see every shift and move wrong ones to another job (planned 3 Nov 2026, waiting on the owner's yes)
+## 42. Time tab on the job: see every shift and move wrong ones to another job (built 3 Nov 2026, see PROJECT_SPEC.md A13d)
 
 Owner's ask: somewhere in the job to see the times allocated to it and change them to a different job if they are wrong. Today the list exists but is hidden behind clicking the cost figure on the Summary tab, and Edit can only change the stage or category, never the job.
 
