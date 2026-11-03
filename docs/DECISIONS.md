@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
+- Owner: item 41 gets a toggle on the invoice panel, As per Schedule of Rates (default) or Flat. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 - Item 41 addition proposed (waiting on yes): no-quote invoice labour rows follow the Schedule of Rates multipliers (after hours, Saturday, Sunday, public holiday) and the 2 hour minimum per person per day. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 
 ## 2 Nov 2026
