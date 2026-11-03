@@ -25,7 +25,11 @@
 // billed in time_entry_ids): who, their rate tier and $/hr, the date, start
 // and finish, and the hours split into Schedule of Rates bands
 // (_shared/labour-bands.js). The panel builds the rows from these either
-// "as per Schedule of Rates" (multipliers, 2 hour minimum) or flat.
+// "as per Schedule of Rates" (multipliers, 2 hour minimum) or flat. Materials
+// the same way: materialLines, one per PO line received to the job or Stock
+// draw not yet on an invoice (job_material_usage), at cost and marked up.
+// Rows marked not billable (time_entries.billable, job_material_usage.billable)
+// come back flagged so the panel can show them greyed with the tick off.
 // The top-level fields are the whole job's totals (with the first cost
 // centre's id), which is all the warranty close-out panel needs.
 
@@ -64,10 +68,10 @@ exports.handler = async (event) => {
     const centreOf = (id) => (id && centres.some(c => c.id === id) ? id : firstId);
 
     const [{ data: entries }, { data: usage }, { data: invItems }, { data: settings }, { data: holidays }, { data: tiers }] = await Promise.all([
-      supabaseAdmin.from('time_entries').select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids').eq('project_id', projectId).not('clock_out', 'is', null).order('clock_in'),
+      supabaseAdmin.from('time_entries').select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids, billable').eq('project_id', projectId).not('clock_out', 'is', null).order('clock_in'),
       // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
       // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
-      supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost').eq('project_id', projectId),
+      supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost, source, billable, material_id, created_at, materials(name), purchase_order_line_items(description, purchase_orders(po_number))').eq('project_id', projectId).order('created_at'),
       supabaseAdmin.from('invoice_line_items').select('cost_centre_id, kind, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id)').eq('invoices.project_id', projectId),
       supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
       supabaseAdmin.from('public_holidays').select('holiday_date'),
@@ -88,7 +92,7 @@ exports.handler = async (event) => {
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
     const billedEntries = new Set((invItems || []).flatMap(i => i.time_entry_ids || []));
 
-    const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0, labourLines: [] }]));
+    const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0, labourLines: [], materialLines: [] }]));
     (entries || []).forEach(e => {
       // Paid hours (the unpaid break comes off), shared evenly across the stages of a split
       // entry, the same way the job costing reads them.
@@ -117,13 +121,29 @@ exports.handler = async (event) => {
           end: shift.end,
           hours: r2(hours * share),
           bands,
+          billable: e.billable !== false,
         });
       });
     });
 
+    // Materials not yet on an invoice, one line each (item 41): a PO line received to the job
+    // or a Stock draw, at cost and at cost plus the cost centre's markup. A line marked not
+    // billable stays in the list (greyed, tick to bill it) but out of the bulk total.
     const usageOnInvoices = new Set((invItems || []).map(i => i.job_material_usage_id).filter(Boolean));
     (usage || []).filter(u => !usageOnInvoices.has(u.id)).forEach(u => {
-      byCentre[centreOf(u.cost_centre_id)].materialCost += (Number(u.quantity) || 0) * (Number(u.unit_cost) || 0);
+      const b = byCentre[centreOf(u.cost_centre_id)];
+      const billable = u.billable !== false;
+      const poLine = u.purchase_order_line_items;
+      if (billable) b.materialCost += (Number(u.quantity) || 0) * (Number(u.unit_cost) || 0);
+      b.materialLines.push({
+        usageId: u.id,
+        materialId: u.material_id || null,
+        description: poLine?.description || u.materials?.name || 'Material',
+        from: u.source === 'from_po' ? `PO ${poLine?.purchase_orders?.po_number || ''}`.trim() : 'Stock',
+        quantity: Number(u.quantity) || 0,
+        unitCost: r2(u.unit_cost),
+        billable,
+      });
     });
     (invItems || []).forEach(i => {
       byCentre[centreOf(i.cost_centre_id)].itemInvoiced += (Number(i.labour_amount) || 0) + (Number(i.material_amount) || 0);
@@ -144,6 +164,7 @@ exports.handler = async (event) => {
         // Invoiced against what's accrued here - builder-added items (labour lines included) excluded (see above).
         invoicedAmount: r2(Math.max(0, (Number(c.invoiced_amount) || 0) - b.itemInvoiced)),
         labourLines: b.labourLines,
+        materialLines: b.materialLines.map(m => ({ ...m, unitPrice: r2(m.unitCost * (1 + markupPercent / 100)) })),
       };
     });
     const sum = (k) => r2(centreRows.reduce((s, c) => s + c[k], 0));
