@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 30 Oct 2026 (item 40 planned)
+Last updated 3 Nov 2026 (item 40 built)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -29,7 +29,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 31 | Simpler purchase orders (short list, one PO page, tick-to-receive, short Create panel, Show me how tour) | Built 23 Oct 2026, LIVE once merged (spec A10) | N | None |
 | 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
-| 40 | Delete and Already paid buttons on the Emailed bills page | Planned 30 Oct 2026, waiting on owner's yes | N | None |
+| 40 | Delete and Already paid buttons on the Emailed bills page | Built 3 Nov 2026, on `staging` (spec A11), migration 20261128000000 | N | None |
 
 ## High lead time, start now
 
@@ -889,7 +889,7 @@ Owner's ask: a tab to the left of Active on `quotes.html` listing the pending le
 
 Touches: `public/quotes.html`, `public/js/notifications.js` (bump `?v=` where it is loaded, `supabase-client.js` `renderMainNav`), `netlify/functions/remind-leads.js` (new), `netlify.toml` (schedule), one migration (two triggers, `set search_path = public`). Overlaps: none. Kind: feature (into `staging`); migration yes (triggers only, no table changes); money, stock, RLS or payroll: no. Size: small. Test on staging: a pricing login, Quotes, the Leads tab is first with the count, tap a lead and it opens on the Leads page; submit the staging website lead form and the bell and phone get "New lead" within a minute; a staff login sees no Leads tab and no lead notifications. Best model: Opus 5.5, effort high, because it now carries a migration with triggers and a scheduled function beside the page work.
 
-## 40. Delete and Already paid buttons on the Emailed bills page (planned 30 Oct 2026, waiting on the owner's yes)
+## 40. Delete and Already paid buttons on the Emailed bills page (built 3 Nov 2026, on `staging`, migration 20261128000000)
 
 Owner's ask: a Delete button on `supplier-bills.html` for duplicate bills and emails that are not bills, so they stop cluttering the list.
 

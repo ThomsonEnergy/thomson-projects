@@ -12,6 +12,10 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 - Planned, waiting on yes: no-quote (Direct Job) invoices show labour as hours at a rate per person (editable, add a row by rate tier), saved as `labour` invoice lines so the invoice prints one line per person and later invoices offer only unbilled hours; one migration. Detail: `docs/IDEAS_BACKLOG.md` item 41.
 
+## 3 Nov 2026
+
+- Feature on `staging` (waiting for release): Delete and Already paid buttons on the Emailed bills page (backlog item 40). Delete keeps the row as status `deleted` and removes the file; Already paid (Admin/Finance) saves the bill and records it paid in one go. Migration 20261128000000 (one check constraint). `supplier-bills.html` page budget raised 5 KB for the new buttons. Detail: `docs/PROJECT_SPEC.md` A11.
+
 ## 30 Oct 2026
 
 - Built (feature into `staging`, migration 20261127000000): item 39, Leads (n) tab first on the Quotes page, instant phone notification of every new website lead and call request to Admin, Finance and Sales, and the 7am `remind-leads` nudge. Quotes page budget raised 650 to 660 KB for the tab. Detail: `docs/PROJECT_SPEC.md` A28.
