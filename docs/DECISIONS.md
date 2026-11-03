@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 3 Nov 2026
 
+- Planned, waiting on yes: Time tab on every job listing each shift (start, finish, hours, stage, billed badge), Admin can move wrong shifts to another job with server checks (stages belong to the job, billed shifts locked, both activity logs written). Detail: `docs/IDEAS_BACKLOG.md` item 42.
 - Staging database caught up (3 Nov): after the two fixes (PRs 248 and 250) the Supabase staging branch reran every migration, all 64 are applied and its check is green again. Release waiting on the owner's test: PRs 216, 223, 227, 231, 239; production needs migrations 20261125000000 and 20261127000000. The fake rows `TEST Lead Claude` and `TEST Call Claude` are still on staging (useful to see the Leads tab).
 - Fix (main): second staging blocker. Migration 20261124131544 revoked rights on `notifications_tidy_20261023`, a backup table only ever made by hand on production, so it failed on staging. The revoke is removed (the `drop table if exists` after it does the job). Production already ran this migration, so nothing live changes.
 - LIVE (owner: a bug, straight to main): item 41 part 2, Invoice actual costs itemises materials (each PO line received to the job or Stock draw, Itemised or Bulk toggle) and every shift and material row has a Bill tick; unticked rows are marked not billable on the job and stay off the next invoice. Migration 20261127145316 (`billable` on `time_entries` and `job_material_usage`). Detail: `docs/PROJECT_SPEC.md` A22.

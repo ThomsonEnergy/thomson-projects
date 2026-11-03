@@ -918,3 +918,20 @@ Plan:
 6. Not in scope: the warranty close-out panel keeps its single labour box; a hand-added labour line does not create a time entry. On a Direct Job already part-invoiced the old way, the first new invoice offers the full hours (the old invoices have no per-person lines), so check that one by eye.
 
 Touches: `public/project.html`, `netlify/functions/get-invoiceable-actuals.js`, `netlify/functions/_shared/invoice-items.js`, `netlify/functions/create-invoice.js`, one migration. Overlaps: none. Kind: feature into `staging`; migration yes; money yes (invoices), stock no, RLS no, payroll no. Size: medium.
+
+## 42. Time tab on the job: see every shift and move wrong ones to another job (planned 3 Nov 2026, waiting on the owner's yes)
+
+Owner's ask: somewhere in the job to see the times allocated to it and change them to a different job if they are wrong. Today the list exists but is hidden behind clicking the cost figure on the Summary tab, and Edit can only change the stage or category, never the job.
+
+- **Time tab** on every job (new `public/js/job-time.js`, loaded by `project.html` like `job-schedule.js`; no new inline code in `project.html`): every shift on the job, newest first, grouped by day: person, start to finish (Sydney time), break, paid hours, stage, ServiceM8 badge, a "billed on SI-xxxx" badge when an invoice line holds it. Totals per person at the top. Everyone with the job open sees hours; cost per row only for Admin and Finance (as now). The Summary cost figure opens this tab instead of the old pop-up, and the pop-up's code is deleted.
+- **Move to another job** (Admin): on each row, pick the right job (search by J number, client or name), then its stage(s) or a non-job category (office, training), Save. Several rows can be ticked and moved together. Hours, dates and pay never change, so Xero payroll is untouched; only which job carries the cost.
+- **Server checks** in `admin-update-time-entry.js`: the stages sent must belong to the target job; a shift already billed on an invoice line (`invoice_line_items.time_entry_ids`) cannot be moved off its job (credit or edit the invoice first); a shift still clocked in cannot be moved. Each move writes a line to the job's activity log on both jobs ("Moved Sam's 6.5h on 3 Nov from J7006 to J7010").
+- No migration.
+
+Done means:
+1. Admin login, open a job with time, Time tab lists each shift with start, finish and hours.
+2. Tick a shift, Move, pick another job and stage, Save: it disappears here and shows on the other job's Time tab, and both activity logs say so.
+3. A shift billed on an invoice shows the SI badge and Move says why it cannot.
+4. Staff login: Time tab shows hours but no cost and no Move.
+
+Touches: `public/project.html` (load the script, add the tab, point the cost figure at it, delete the old pop-up), `public/js/job-time.js` (new), `netlify/functions/admin-update-time-entry.js`, `scripts/page-budgets.json` only if needed (never raised for `project.html`). Overlaps: PR 216 changed `admin-update-time-entry.js` and the old pop-up; it is merged into `staging`, so build on `staging`. Kind: feature (into `staging`); migration no; money, stock, RLS or payroll: job costing and invoices yes (server checks above), payroll no. Size: medium. Test on staging: admin@staging.test, open J9002, Time tab, move the fake ServiceM8 shift to another job and back. Best model: Opus 5.5, effort high, because it is a feature with a known design that touches invoiced labour checks.
