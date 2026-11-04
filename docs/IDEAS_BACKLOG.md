@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 4 Nov 2026 (item 45 planned)
+Last updated 4 Nov 2026 (item 45 live)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -978,7 +978,7 @@ Done means:
 
 Touches: `public/js/stock-scan.js` (new), `public/stock.html`, `public/vehicle-stock.html`, `public/js/supabase-client.js` (one button in the Used stock panel), `netlify/functions/read-part-label.js` (new), `netlify/functions/_shared/supplier-invoice-ai.js`, `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/_shared/price-list-intake.js`, `netlify/functions/extract-supplier-invoice.js`, `public/price-lists.html` (Changes made shows bill prices too), `netlify/functions/supplier-checks.js` or a small new function for Ask to match, one migration (columns, `material_add_from_scan`, `material_supplier_price_set`, part number matching and price setting in `supplier_bill_save_review`). Overlaps: PR 247 (item 40) touches `bill-check.js`, `supplier-bill-inbox.js` and `supplier-bills.html`, none of these files, so none. Kind: feature (into `staging`); migration yes; money yes (cost prices set from lists and bills), stock yes (counts added by scan), RLS no, payroll no: backup before the production migration. Size: large (a day to a day and a half). Test on staging: staff@staging.test and finance@staging.test, the five clicks above; needs the Anthropic key on staging for the label reading and Tally. Best model: Fable 5.1, effort xhigh, because it sets stock counts and cost prices in one build with a migration.
 
-## 45. ServiceM8 claims count in the job's claimed percentage (bug, planned 4 Nov 2026, waiting on the owner's yes)
+## 45. ServiceM8 claims count in the job's claimed percentage (bug, LIVE 4 Nov 2026, migration 20261128000000, see PROJECT_SPEC.md A27)
 
 Owner (4 Nov 2026): J7002 has two ServiceM8 partial invoices (4515A and 4515B, about 30% of the job). A new claim should be claim 3 and the panel should only let 0 to 70% be claimed.
 
