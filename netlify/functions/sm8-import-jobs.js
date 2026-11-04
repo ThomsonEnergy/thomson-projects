@@ -108,6 +108,14 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   // it is the figure typed on the review screen.
   const quoted = lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst);
   const invoiced = isQuote ? 0 : r2(s.invoicedExGst);
+  // The Completed ServiceM8 claims behind that figure, kept on the stage so the claims card, the
+  // Invoice project panel, the claim numbering and the invoice's Claim summary count them (item 45).
+  const importedClaims = isQuote ? [] : (Array.isArray(s.claims) ? s.claims : []).slice(0, 50).map(c => ({
+    number: str(c.number, 50) || '?', amount: r2(c.amount), source: 'servicem8',
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(c.date || '')) ? c.date : null,
+  }));
+  if (importedClaims.some(c => !(c.amount >= 0))) throw new Error('A ServiceM8 claim has a bad amount');
+  if (importedClaims.length && Math.abs(r2(importedClaims.reduce((t, c) => t + c.amount, 0)) - invoiced) > 0.01) throw new Error('The ServiceM8 claims do not add up to the invoiced figure');
   // ServiceM8's STC rebate lines, kept for staff to enter by hand.
   const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
     type: ['pv', 'bstc', 'swh'].includes(x.type) ? x.type : 'pv',
@@ -184,6 +192,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       estimated_material_cost: calc ? calc.estimatedMaterial : 0,
       quoted_amount: quoted,
       invoiced_amount: invoiced,
+      imported_claims: importedClaims,
       // STCs are not applied here - staff enter them on the job (STCs tab
       // and this stage's STC credit) from projects.sm8_stcs / the notes.
     }).select('id').single();
