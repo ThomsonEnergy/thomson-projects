@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 4 Nov 2026 (item 43 live)
+Last updated 4 Nov 2026 (item 45 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -30,7 +30,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 | 40 | Delete and Already paid buttons on the Emailed bills page | Planned 30 Oct 2026, waiting on owner's yes | N | None |
-| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | Built 4 Nov 2026, on `staging` (spec A12, A11b), migration 20261128050000 | N | Anthropic key on staging |
+| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 | N | Anthropic key on staging |
 
 ## High lead time, start now
 
@@ -955,7 +955,7 @@ Done means:
 
 Touches: `public/project.html` (delete the inline editor, load the new script), `public/js/variation-fixed-editor.js` (new), `public/quote.html`, `netlify/functions/create-variation.js`, `netlify/functions/_shared/approve-variation.js`. Overlaps: none. Kind: feature (into `staging`); migration no; money yes (variation price the client signs, server recomputes it), stock no, RLS no, payroll no. Size: medium. Test on staging: sales@staging.test, the four clicks above. Best model: Fable 5.1, effort high, because it changes a price the client signs and the stage the job is billed from.
 
-## 44. Scan a part into Stock: photo of the part number or barcode, priced per supplier by price lists and bills (planned 4 Nov 2026, yes and built the same day, on `staging`, see PROJECT_SPEC.md A12 and A11b)
+## 44. Scan a part into Stock: photo of the part number or barcode, priced per supplier by price lists and bills (planned, yes, built and LIVE 4 Nov 2026, PR 263 and 265, see PROJECT_SPEC.md A12 and A11b)
 
 Built 4 Nov 2026 in `feat/stock-scan`, migration 20261128050000. The Used stock panel moved out of `supabase-client.js` into `js/used-stock.js` (loaded on demand) so every page got about 13 KB lighter.
 
@@ -981,3 +981,24 @@ Done means:
 5. Vehicle page, Scan a part into this van: the count lands on the van, not the Warehouse.
 
 Touches: `public/js/stock-scan.js` (new), `public/stock.html`, `public/vehicle-stock.html`, `public/js/supabase-client.js` (one button in the Used stock panel), `netlify/functions/read-part-label.js` (new), `netlify/functions/_shared/supplier-invoice-ai.js`, `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/_shared/price-list-intake.js`, `netlify/functions/extract-supplier-invoice.js`, `public/price-lists.html` (Changes made shows bill prices too), `netlify/functions/supplier-checks.js` or a small new function for Ask to match, one migration (columns, `material_add_from_scan`, `material_supplier_price_set`, part number matching and price setting in `supplier_bill_save_review`). Overlaps: PR 247 (item 40) touches `bill-check.js`, `supplier-bill-inbox.js` and `supplier-bills.html`, none of these files, so none. Kind: feature (into `staging`); migration yes; money yes (cost prices set from lists and bills), stock yes (counts added by scan), RLS no, payroll no: backup before the production migration. Size: large (a day to a day and a half). Test on staging: staff@staging.test and finance@staging.test, the five clicks above; needs the Anthropic key on staging for the label reading and Tally. Best model: Fable 5.1, effort xhigh, because it sets stock counts and cost prices in one build with a migration.
+
+## 45. ServiceM8 claims count in the job's claimed percentage (bug, planned 4 Nov 2026, waiting on the owner's yes)
+
+Owner (4 Nov 2026): J7002 has two ServiceM8 partial invoices (4515A and 4515B, about 30% of the job). A new claim should be claim 3 and the panel should only let 0 to 70% be claimed.
+
+Cause: the ServiceM8 import puts the Completed claims into `cost_centres.invoiced_amount` and the job's notes, nothing else. Every "claimed to date" view reads invoice rows instead: the stage claims card ("No claims raised yet", $0 of $78,417.35), the Invoice project panel (offers 100%), the invoice's own Claim summary (`get_invoice_by_token_v3` claimed_before) and the "Progress claim N" counter in `create-invoice.js` (would say claim 1). Only the server's cap reads `invoiced_amount`, so it refuses more than what is left but the page never showed why. The panel's "Claim this % of the total contract value" is also really a % of what is left. Seven live jobs are affected: J7002, J7009, J7018, J7043, J7047, J7048, J7049 (one or two ServiceM8 claims each, listed in each job's notes).
+
+- **Imported claims stored as data:** `cost_centres.imported_claims jsonb` (`[{ number: "4515A", amount: 7841.73, source: "servicem8", date: "2026-07-10" }]`). Migration fills it for the seven jobs from the notes block, and the ServiceM8 import writes it from now on (`sm8-import-jobs.js`, the review screen passes the Completed claims).
+- **Claims card:** imported claims listed first ("4515A, ServiceM8" badge, no View or Push to Xero), counted in Claimed to date and Remaining.
+- **Invoice project panel:** "Claimed so far: $25,641.73 (32.7%)". "Claim this % of the contract value" is now of the contract value, limited to what is left (67.3% on J7002, the default), and the preview says "This claim $X, taking the job to Y% claimed". Choose per stage is unchanged (it already works off Remaining).
+- **Claim number:** `create-invoice.js` counts imported claims, so J7002's next invoice is "Progress claim 3".
+- **Invoice page:** `get_invoice_by_token_v3` adds the stage's imported claims to claimed_before, so the Claim summary on the client's invoice reads 32.7% before this claim, and lists them under Previous invoices on this job.
+
+Done means:
+1. J7002 Summary tab, the stage's claims card lists 4515A $7,841.73 and 4515B $17,800.00 as ServiceM8 claims, Claimed to date $25,641.73 of $78,417.35, Remaining $52,775.62.
+2. Invoice project: shows claimed so far 32.7%, the % box will not go above 67.3, 10% previews $7,841.74 taking the job to 42.7%.
+3. Create the invoice: it is "Progress claim 3"; its invoice page Claim summary says claimed to date 42.7% and lists 4515A and 4515B under previous invoices.
+4. A fresh ServiceM8 import of a job with a Completed claim shows that claim on the card straight away.
+
+Touches: `public/project.html` (claims card, Invoice project panel), `netlify/functions/create-invoice.js`, `netlify/functions/sm8-import-jobs.js`, `public/sm8-import.html`, one migration (`imported_claims` column, data fix for the seven jobs, `get_invoice_by_token_v3`), `public/invoice.html` only if the previous-invoices list needs the badge. Overlaps: none (`feat/stock-scan` is on other files). Kind: bug fix (straight into `main`); migration yes; money yes (what a claim may be and the figures printed on invoices), stock no, RLS no, payroll no; backup of `cost_centres` and `projects` notes before the production migration. Size: medium. Test on staging: finance@staging.test; I put two fake ServiceM8 claims on a staging job by hand first, then the four clicks above on that job. Best model: Fable 5.1, effort xhigh, because it is a migration plus the claim maths on live invoices (type `/effort xhigh` before yes).
+
