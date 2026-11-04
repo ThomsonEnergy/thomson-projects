@@ -97,7 +97,7 @@
        (circuit-background.js) when this function already exists. -->
   <script>window.addCircuitBackground = function () {};</script>
   <script src="/js/supabase-client.js?v=123"></script>
-  <script src="/js/schedule-of-rates.js?v=3"></script>
+  <script src="/js/schedule-of-rates.js?v=4"></script>
   <script>
     const printMode = new URLSearchParams(window.location.search).get('print') === '1';
     if (printMode) document.documentElement.classList.add('as-paper');
@@ -117,7 +117,7 @@
       const esc = escapeHtml;
       const content = document.getElementById('content');
       const [{ data, error }, { data: settings }] = await Promise.all([
-        supabaseClient.rpc('get_schedule_of_rates'),
+        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: new URLSearchParams(location.search).get('project') || null, p_token: new URLSearchParams(location.search).get('token') || null }),  // a job's Company docs PDF prints at the job's level (item 46)
         supabaseClient.rpc('get_public_company_settings'),
       ]);
       if (error || !data) { content.innerHTML = `<div class="error-box" style="margin:24px;">The Schedule of Rates could not be loaded. Please try again or contact us.</div>`; return; }
@@ -139,7 +139,7 @@
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
 
       const head = `<div class="pg-head"><div>${siteLink ? `<a href="${esc(siteLink)}">${logoImg}</a>` : logoImg}</div>${contactHtml}</div>`;
-      const [first, second] = scheduleOfRatesParts(data.rates, data.reviewed_on);
+      const [first, second] = scheduleOfRatesParts(data.rates, data.reviewed_on, data.rate_card_name);
       content.innerHTML = `
         <section class="pg">
           ${SLABS}

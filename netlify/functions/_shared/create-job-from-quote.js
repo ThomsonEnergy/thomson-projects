@@ -241,6 +241,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       .insert({
         name: quote.name,
         client_id: quote.client_id,
+        rate_card_id: quote.rate_card_id,  // the level the client approved at (item 46), not the client's default
         client_name: quote.client_name,
         client_email: quote.client_email,
         client_phone: quote.client_phone,

@@ -15,6 +15,7 @@
 // and server side because a person's rate tier sits on their profile.
 
 const { entryHours, entryCentreIds } = require('./compute-labour-cost');
+const { rateCardFor, rateAt } = require('./rate-cards');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -58,17 +59,18 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
   const materialIds = [...new Set((matRows || []).map(m => m.material_id).filter(Boolean))];
   const prebuildIds = [...new Set((matRows || []).map(m => m.prebuild_id).filter(Boolean))];
 
-  const [{ data: profiles }, { data: tiers }, { data: materials }, { data: prebuilds }] = await Promise.all([
+  const [{ data: profiles }, { data: tiers }, { data: materials }, { data: prebuilds }, rateCard] = await Promise.all([
     staffIds.length ? supabaseAdmin.from('profiles').select('id, full_name, rate_tier_id').in('id', staffIds) : Promise.resolve({ data: [] }),
     supabaseAdmin.from('billable_rate_tiers').select('id, sell_rate'),
     materialIds.length ? supabaseAdmin.from('materials').select('id, name, cost_price').in('id', materialIds) : Promise.resolve({ data: [] }),
     prebuildIds.length ? supabaseAdmin.from('prebuilds').select('id, name, prebuild_components(*)').in('id', prebuildIds) : Promise.resolve({ data: [] }),
+    rateCardFor(supabaseAdmin, projectId),  // the job's charge rate level (item 46)
   ]);
 
   const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
   const sellRateOf = (staffId) => {
     const tier = (tiers || []).find(t => t.id === profileById[staffId]?.rate_tier_id);
-    return tier ? Number(tier.sell_rate) : null;
+    return tier ? rateAt(tier.sell_rate, rateCard.factor) : null;
   };
   const materialById = Object.fromEntries((materials || []).map(m => [m.id, m]));
   const prebuildById = Object.fromEntries((prebuilds || []).map(p => [p.id, p]));

@@ -31,7 +31,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 | 40 | Delete and Already paid buttons on the Emailed bills page | Planned 30 Oct 2026, waiting on owner's yes | N | None |
 | 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 |
-| 46 | Charge rates per client and per job (Standard, Commercial 115%, Mates rates 85%...) applied to quotes, variations, invoice actuals and the Schedule of Rates | Planned 4 Nov 2026, waiting on owner's yes | N | None |
+| 46 | Charge rates per client and per job (Standard, Commercial 115%, Mates rates 85%...) applied to quotes, variations, invoice actuals and the Schedule of Rates | LIVE 4 Nov 2026 (spec D1a), migration 20261128070000 | N | None |
 | 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | Planned 4 Nov 2026, waiting on owner's yes | N | Build after 46 (same page) | N | Anthropic key on staging |
 
 ## High lead time, start now
@@ -1004,7 +1004,7 @@ Done means:
 
 Touches: `public/project.html` (claims card, Invoice project panel), `netlify/functions/create-invoice.js`, `netlify/functions/sm8-import-jobs.js`, `public/sm8-import.html`, one migration (`imported_claims` column, data fix for the seven jobs, `get_invoice_by_token_v3`), `public/invoice.html` only if the previous-invoices list needs the badge. Overlaps: none (`feat/stock-scan` is on other files). Kind: bug fix (straight into `main`); migration yes; money yes (what a claim may be and the figures printed on invoices), stock no, RLS no, payroll no; backup of `cost_centres` and `projects` notes before the production migration. Size: medium. Test on staging: finance@staging.test; I put two fake ServiceM8 claims on a staging job by hand first, then the four clicks above on that job. Best model: Fable 5.1, effort xhigh, because it is a migration plus the claim maths on live invoices (type `/effort xhigh` before yes).
 
-## 46. Charge rates you can pick per client and per job (planned 4 Nov 2026, waiting on the owner's yes)
+## 46. Charge rates you can pick per client and per job (planned, yes and LIVE 4 Nov 2026, see PROJECT_SPEC.md D1a)
 
 Owner's ask (4 Nov 2026): "make the charge rates selectable so if I want to charge someone at a higher rate I can, or lower." Today every client is charged the one set of Billable Rates (Settings > Billable Rates: rate tiers such as Licensed Electrician $120/hr); the only way to charge more or less is to retype each line. Read as: charge a client (and so a job) at a chosen level, not as per-person rates (each person already has a tier).
 

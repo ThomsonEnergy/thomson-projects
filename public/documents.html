@@ -48,7 +48,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=123"></script>
-  <script src="/js/schedule-of-rates.js?v=3"></script>
+  <script src="/js/schedule-of-rates.js?v=4"></script>
   <script>
     const esc = escapeHtml;
     let myRole = null;
@@ -67,7 +67,7 @@
       const listEl = document.getElementById('cd-list');
       const [{ data: docs, error }, { data: sor }] = await Promise.all([
         supabaseClient.from('company_documents').select('*, profiles(full_name)').order('sort_order').order('title'),
-        supabaseClient.rpc('get_schedule_of_rates'),
+        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: null, p_token: null }),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${esc(error.message)}</div>`; return; }
       if (!docs.length) { listEl.innerHTML = `<p class="subtitle">No documents yet.</p>`; return; }
