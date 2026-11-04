@@ -175,7 +175,7 @@ begin
     perform _po_log('project', into_job.id, 'merged', format('J%s (%s) merged into this job: %s stages, %s shifts, %s POs, %s bills, %s invoices, %s variations, %s tasks, %s documents, %s photos, %s bookings',
       from_job.job_number, from_job.name, v_counts->>'stages', v_counts->>'shifts', v_counts->>'purchase_orders', v_counts->>'bills', v_counts->>'invoices',
       v_counts->>'variations', v_counts->>'tasks', v_counts->>'documents', v_counts->>'photos', v_counts->>'bookings')
-      || case when array_length(v_left, 1) > 0 then format('. Left on J%s because this job already has the same (open J%s''s record to see them): %s', from_job.job_number, from_job.job_number, array_to_string(v_left, ', ')) else '' end);
+      || case when array_length(v_left, 1) > 0 then format('. Left on the old J%s because this job already has the same: %s', from_job.job_number, array_to_string(v_left, ', ')) else '' end);
     perform _po_log('project', from_job.id, 'merged', format('Merged into J%s (%s); this J number now opens that job', into_job.job_number, into_job.name));
     v_summary := v_summary || format('J%s', from_job.job_number);
   end loop;
