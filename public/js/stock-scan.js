@@ -7,8 +7,8 @@
 // name) -> a check panel (everything editable, how many, where) -> material_add_from_scan, the one
 // database step that makes the item at $0 flagged Needs a price (or adds the count to the item that
 // already has that barcode or part number) and sets the count where the person is.
-// Writes: materials and the counts through material_add_from_scan only; the photo goes to
-// project-documents/stock/labels/ and is kept on the item (materials.photo_path).
+// Writes: materials and the counts through material_add_from_scan only; on Save the photo goes to
+// project-documents/stock/labels/ and is kept on the item (materials.photo_path) when it has none.
 //
 //   openStockScanPanel({ loc, vehicleId, askTook, onDone })
 //     loc / vehicleId: the place prefilled ('warehouse' or 'vehicle'); the panel lets it be changed
@@ -67,11 +67,10 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
   let small;
   try { small = await compressImage(file, 1600, 0.85); } catch (e) { small = file; }
   const preview = URL.createObjectURL(small);
-  const [vehicles, localCode, read, photoPath] = await Promise.all([
+  const [vehicles, localCode, read] = await Promise.all([
     stockVehicles(),
     stockScanLocalBarcode(small),
     stockScanReadLabel(small).catch(err => ({ error: err.message })),
-    uploadPrivateFile(file, 'stock/labels').catch(() => null),
   ]);
   const label = read.error ? {} : read;
   const barcode = localCode || label.barcode || '';
@@ -82,7 +81,7 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
   if (barcode || partNumber) {
     const { data: id } = await supabaseClient.rpc('_material_by_code', { p_barcode: barcode || null, p_part_number: partNumber || null });
     if (id) {
-      const { data: m } = await supabaseClient.from('materials').select('id, name, part_number, barcode, brand, cost_price, needs_price').eq('id', id).maybeSingle();
+      const { data: m } = await supabaseClient.from('materials').select('id, name, part_number, barcode, brand, cost_price, needs_price, photo_path').eq('id', id).maybeSingle();
       existing = m || null;
     }
   }
@@ -157,13 +156,15 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
     const left = askTook ? Math.max(0, parseInt(q('#ss-left').value, 10) || 0) : null;
     const quantity = askTook ? took + left : Math.max(0, parseInt(q('#ss-qty').value, 10) || 0);
     const payload = {
-      material_id: useExisting && existing ? existing.id : null,
+      material_id: useExisting && existing ? existing.id : null, force_new: !!existing && !useExisting,
       name: q('#ss-name').value.trim(), part_number: q('#ss-part').value.trim() || null, barcode: q('#ss-barcode').value.trim() || null,
-      brand: q('#ss-brand').value.trim() || null, category: label.category || null, photo_path: photoPath,
+      brand: q('#ss-brand').value.trim() || null, category: label.category || null, photo_path: null,
       location_type: place.type, vehicle_id: place.type === 'vehicle' ? place.vehicleId : null, quantity,
     };
     if (!payload.material_id && !payload.name) { msg.innerHTML = '<div class="error-box">Give the part a name.</div>'; return; }
     btn.disabled = true; btn.textContent = 'Saving...';
+    // the photo is kept only once the person saves, and only when the item has none yet
+    if (!(useExisting && existing?.photo_path)) payload.photo_path = await uploadPrivateFile(small, 'stock/labels').catch(() => null);
     const { data, error } = await supabaseClient.rpc('material_add_from_scan', { p: payload });
     if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.disabled = false; btn.textContent = 'Save'; return; }
     URL.revokeObjectURL(preview);

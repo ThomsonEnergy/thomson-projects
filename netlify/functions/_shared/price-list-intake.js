@@ -221,10 +221,11 @@ async function logMaterial(admin, materialId, description, userId) {
 
 // One supplier's list price for one item: the link, the 20% rule, the price_changes row and the
 // log all happen in the database (migration 20261128050000). Returns { applied, waiting, ... }.
-async function setSupplierPrice(admin, { materialId, supplierId, cost, partNumber, description, importId }) {
+async function setSupplierPrice(admin, { materialId, supplierId, cost, partNumber, description, importId, priceItemId }) {
   const { data, error } = await admin.rpc('material_supplier_price_set', {
     p_material_id: materialId, p_supplier_id: supplierId, p_cost: cost, p_source: 'price_list',
     p_part_number: partNumber || null, p_description: description || null, p_bill_id: null, p_import_id: importId || null,
+    p_price_item_id: priceItemId || null, p_checked: false,
   });
   if (error) throw error;
   return data || {};
@@ -283,7 +284,7 @@ async function applyPriceList(admin, importId) {
     if (linkedMaterialIds.has(m.id)) continue;
     const item = byPart.get(partNorm(m.part_number));
     if (!item || linkedKeys.has(item.item_key)) continue;
-    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number, description: item.description, importId: imp.id });
+    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number, description: item.description, importId: imp.id, priceItemId: item.id });
     linkedMaterialIds.add(m.id);
     linkedKeys.add(item.item_key);
   }
@@ -296,7 +297,7 @@ async function applyPriceList(admin, importId) {
     if (!m) continue;
     const item = onList(link.item_key);
     if (!item) { missing.push({ link, m }); continue; }
-    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number || link.part_number, description: item.description, importId: imp.id });
+    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number || link.part_number, description: item.description, importId: imp.id, priceItemId: item.id });
   }
 
   // 2. parts no longer on the list: flag only if not used lately and something similar replaced it
@@ -369,11 +370,11 @@ async function applyChange(admin, changeId, userId) {
   const { data: item } = c.supplier_price_item_id
     ? await admin.from('supplier_price_items').select('item_key, part_number, description, unit_cost').eq('id', c.supplier_price_item_id).maybeSingle()
     : { data: null };
-  if (!item) throw new Error('That item is no longer on the supplier list.');
+  if (!item && c.source !== 'bill') throw new Error('That item is no longer on the supplier list.');
   const { data: sup } = await admin.from('suppliers').select('name').eq('id', c.supplier_id).maybeSingle();
   c.suppliers = sup;
   const now = new Date().toISOString();
-  if (c.kind === 'match' || c.kind === 'superseded') {
+  if (item && (c.kind === 'match' || c.kind === 'superseded')) {
     const { error } = await admin.from('material_supplier_links').upsert({
       material_id: c.material_id, supplier_id: c.supplier_id, item_key: item.item_key, part_number: item.part_number, supplier_description: item.description, confirmed_by: userId,
       last_cost: c.new_cost, last_cost_at: now, last_cost_source: 'price_list',
@@ -384,14 +385,16 @@ async function applyChange(admin, changeId, userId) {
   }
   await setMaterialCost(admin, c.material_id, c.new_cost, c.kind === 'superseded' ? { name: c.new_name } : (c.kind === 'match' ? { supplier_id: c.supplier_id } : {}));
   await admin.from('price_changes').update({ status: 'applied', resolved_by: userId, resolved_at: now }).eq('id', c.id);
-  const what = c.kind === 'superseded' ? `Switched from "${c.old_name}" to "${c.new_name}", cost` : (c.kind === 'match' ? `Linked to ${c.suppliers?.name} ${item.part_number || item.description}, cost` : 'Cost');
-  await logMaterial(admin, c.material_id, `${what} ${money(c.old_cost)} -> ${money(c.new_cost)} from ${c.suppliers?.name || 'a supplier'}'s emailed price list`, userId);
+  const what = c.kind === 'superseded' ? `Switched from "${c.old_name}" to "${c.new_name}", cost` : (c.kind === 'match' ? `Linked to ${c.suppliers?.name} ${item?.part_number || item?.description || c.new_name || ''}, cost` : 'Cost');
+  await logMaterial(admin, c.material_id, `${what} ${money(c.old_cost)} -> ${money(c.new_cost)} from ${c.suppliers?.name || 'a supplier'}'s ${c.source === 'bill' ? 'bill' : 'emailed price list'}`, userId);
   await refreshImportCounts(admin, c.import_id);
 }
 
 async function skipChange(admin, changeId, userId) {
   await admin.from('price_changes').update({ status: 'skipped', resolved_by: userId, resolved_at: new Date().toISOString() }).eq('id', changeId).eq('status', 'waiting');
-  const { data: c } = await admin.from('price_changes').select('import_id').eq('id', changeId).single();
+  const { data: c } = await admin.from('price_changes').select('import_id, kind, source, material_id, supplier_id').eq('id', changeId).single();
+  // "No" to a link the list made by part number: the link goes too (nobody confirmed it)
+  if (c.kind === 'match' && c.source !== 'bill') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id).is('confirmed_by', null);
   await refreshImportCounts(admin, c.import_id);
 }
 
@@ -400,13 +403,15 @@ async function undoChange(admin, changeId, userId) {
   if (c.status !== 'applied') throw new Error('Only an applied change can be undone.');
   const { data: m } = await admin.from('materials').select('cost_price').eq('id', c.material_id).single();
   if (Math.abs((Number(m.cost_price) || 0) - Number(c.new_cost)) > 0.005) throw new Error('The cost has been changed again since, so this cannot be undone safely. Edit it on the Stock page.');
-  if (c.kind === 'match') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
+  // a bill's link stays (we did buy it there) but its price is no longer trusted; a price list link goes
+  if (c.source === 'bill') await admin.from('material_supplier_links').update({ last_cost: null, last_cost_at: null, last_cost_source: null, last_bill_id: null }).eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
+  else if (c.kind === 'match') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
   if (c.kind === 'superseded' && c.old_item_key) {
     await admin.from('material_supplier_links').update({ item_key: c.old_item_key }).eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
   }
   await setMaterialCost(admin, c.material_id, c.old_cost, c.kind === 'superseded' && c.old_name ? { name: c.old_name } : {});
   await admin.from('price_changes').update({ status: 'undone', resolved_by: userId, resolved_at: new Date().toISOString() }).eq('id', c.id);
-  await logMaterial(admin, c.material_id, `Price list change undone: cost back to ${money(c.old_cost)}`, userId);
+  await logMaterial(admin, c.material_id, `${c.source === 'bill' ? 'Bill price' : 'Price list change'} undone: cost back to ${money(c.old_cost)}`, userId);
 }
 
 async function refreshImportCounts(admin, importId) {

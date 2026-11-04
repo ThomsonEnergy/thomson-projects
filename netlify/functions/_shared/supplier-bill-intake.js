@@ -525,6 +525,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     const { error: priceErr } = await supabaseAdmin.rpc('material_supplier_price_set', {
       p_material_id: l.material_id, p_supplier_id: supplier.id, p_cost: l.unit_cost, p_source: 'bill',
       p_part_number: l.part_number, p_description: l.description, p_bill_id: bill.id, p_import_id: null,
+      p_price_item_id: null, p_checked: !!userId,  // the auto-save (nobody looking) follows the 20% rule
     });
     if (priceErr) throw priceErr;
   }

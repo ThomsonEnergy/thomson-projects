@@ -7,9 +7,10 @@
 --  * material_supplier_links keeps each supplier's last price (last_cost, from a price list or a
 --    bill). materials.cost_price follows the item's Buy from supplier (materials.supplier_id).
 --  * material_supplier_price_set: the one way a supplier's price lands on an item. Used by the bill
---    save (reviewed, one tap and automatic), the price list reader and nothing else. A bill price is
---    applied straight away (it is what we paid); a price list price follows the 20% rule
---    (under 20% applied, 20% or more waits for a person, a $0 item is priced straight away).
+--    save (reviewed, one tap and automatic), the price list reader and nothing else. A bill a person
+--    saved is applied straight away (it is what we paid); a bill saved with nobody looking (auto-save)
+--    and a price list follow the 20% rule (under 20% applied, 20% or more waits for a person, a $0
+--    item is priced straight away).
 --    Every applied change is a price_changes row with Undo on the Price lists page.
 --  * material_set_buy_from: "Buy from this one" on the Stock page.
 --  * supplier_bill_line_items.part_number: Tally reads the product code on each bill line.
@@ -69,12 +70,15 @@ grant execute on function public._material_by_code(text, text) to authenticated,
 -- came from), moves materials.cost_price when the supplier is the item's Buy from one (an item with
 -- no Buy from takes this supplier), and writes the price_changes row. Returns
 -- { applied, waiting, buy_from, change_id, new_link }.
---   p_source: 'price_list' or 'bill'; p_bill_id / p_import_id: where the price came from.
+--   p_source: 'price_list' or 'bill'; p_bill_id / p_import_id / p_price_item_id: where the price came
+--   from (the supplier_price_items row lets a person apply a waiting change on the Price lists page);
+--   p_checked: a person saved this bill (false for the unattended auto-save, which follows the 20% rule).
 -- Called from supplier_bill_save_review (a pricing role) and the server (service role).
 create or replace function public.material_supplier_price_set(
   p_material_id uuid, p_supplier_id uuid, p_cost numeric, p_source text,
   p_part_number text default null, p_description text default null,
-  p_bill_id uuid default null, p_import_id uuid default null)
+  p_bill_id uuid default null, p_import_id uuid default null,
+  p_price_item_id uuid default null, p_checked boolean default true)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   m materials;
@@ -127,8 +131,10 @@ begin
 
   v_old := coalesce(m.cost_price, 0);
   if not v_buy then
-    perform _po_log('material', m.id, 'supplier_price', format('%s: $%s from %s (we buy from %s at $%s)', s.name, to_char(p_cost, 'FM999G999G990D00'), v_from,
-      coalesce((select name from suppliers where id = m.supplier_id), 'another supplier'), to_char(v_old, 'FM999G999G990D00')));
+    if v_new_link or v_link.last_cost is null or abs(v_link.last_cost - p_cost) >= 0.005 then
+      perform _po_log('material', m.id, 'supplier_price', format('%s: $%s from %s (we buy from %s at $%s)', s.name, to_char(p_cost, 'FM999G999G990D00'), v_from,
+        coalesce((select name from suppliers where id = m.supplier_id), 'another supplier'), to_char(v_old, 'FM999G999G990D00')));
+    end if;
     return jsonb_build_object('applied', false, 'waiting', false, 'buy_from', false, 'new_link', v_new_link);
   end if;
   if abs(p_cost - v_old) < 0.005 then
@@ -136,19 +142,19 @@ begin
   end if;
 
   v_pct := case when v_old > 0 then round((p_cost - v_old) / v_old * 100, 1) end;
-  if p_source = 'bill' then
+  if p_source = 'bill' and p_checked then
     v_apply := true; v_reason := format('What we paid on %s from %s', v_from, s.name);
   elsif v_old = 0 then
-    v_apply := true; v_reason := format('First price, from %s''s price list', s.name);
+    v_apply := true; v_reason := format('First price, from %s''s %s', s.name, v_from);
   elsif abs(v_pct) < 20 then
     v_apply := true; v_reason := format('Small change (%s%s%%), applied automatically', case when v_pct > 0 then '+' else '' end, v_pct);
   else
-    v_reason := format('Big change (%s%s%%), check before applying', case when v_pct > 0 then '+' else '' end, v_pct);
+    v_reason := format('Big change (%s%s%%)%s, check before applying', case when v_pct > 0 then '+' else '' end, v_pct, case when p_source = 'bill' then ' on ' || v_from || ', saved with nobody looking' else '' end);
   end if;
   if v_new_link and v_key like 'p:%' then v_reason := v_reason || format('. Linked by part number %s', trim(p_part_number)); end if;
 
-  insert into price_changes (import_id, bill_id, source, material_id, supplier_id, kind, old_cost, new_cost, change_pct, old_name, new_name, reason, status, resolved_at, resolved_by)
-  values (p_import_id, p_bill_id, p_source, m.id, s.id, case when v_new_link then 'match' else 'price' end, v_old, p_cost, v_pct, m.name,
+  insert into price_changes (import_id, bill_id, source, supplier_price_item_id, material_id, supplier_id, kind, old_cost, new_cost, change_pct, old_name, new_name, reason, status, resolved_at, resolved_by)
+  values (p_import_id, p_bill_id, p_source, p_price_item_id, m.id, s.id, case when v_new_link then 'match' else 'price' end, v_old, p_cost, v_pct, m.name,
           case when v_new_link then coalesce(nullif(p_description, ''), p_part_number, m.name) end, v_reason,
           case when v_apply then 'applied' else 'waiting' end, case when v_apply then now() end, case when v_apply then auth.uid() end)
   returning id into v_change;
@@ -160,8 +166,8 @@ begin
   return jsonb_build_object('applied', v_apply, 'waiting', not v_apply, 'buy_from', true, 'change_id', v_change, 'new_link', v_new_link);
 end;
 $$;
-revoke all on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid) from public, anon;
-grant execute on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid) to authenticated, service_role;
+revoke all on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean) from public, anon;
+grant execute on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean) to authenticated, service_role;
 
 -- "Buy from this one" on the Stock page: the item's supplier and cost price become that supplier's
 -- last price. Pricing roles only.
@@ -192,10 +198,11 @@ $$;
 revoke all on function public.material_set_buy_from(uuid, uuid) from public, anon;
 grant execute on function public.material_set_buy_from(uuid, uuid) to authenticated;
 
--- A part scanned on site: p = { name, part_number, barcode, brand, category, photo_path,
--- location_type ('warehouse' | 'vehicle'), vehicle_id, quantity }. Makes the item at $0 flagged
--- Needs a price, or uses the item that already has that barcode or part number (filling in blanks),
--- and adds the quantity to the count at that place through the logged count step.
+-- A part scanned on site: p = { material_id, force_new, name, part_number, barcode, brand, category,
+-- photo_path, location_type ('warehouse' | 'vehicle'), vehicle_id, quantity }. Makes the item at $0
+-- flagged Needs a price, or uses the item that already has that barcode or part number (filling in
+-- blanks) unless the person said force_new ("Not the same item?"), and adds the quantity to the
+-- count at that place (one "scanned" line on the item, not a count correction).
 -- Returns { material_id, existed, name, needs_price }. Anyone logged in.
 create or replace function public.material_add_from_scan(p jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -209,14 +216,13 @@ declare
   v_loc text := coalesce(p->>'location_type', 'warehouse');
   v_vehicle uuid := nullif(p->>'vehicle_id', '')::uuid;
   v_qty numeric := coalesce((p->>'quantity')::numeric, 0);
-  v_have numeric;
 begin
   if auth.uid() is null then raise exception 'Log in first.'; end if;
   if v_loc not in ('warehouse', 'vehicle') then raise exception 'Pick Warehouse or a vehicle.'; end if;
   if v_loc = 'vehicle' and not exists (select 1 from fleet_vehicles where id = v_vehicle and holds_stock) then raise exception 'Pick the vehicle.'; end if;
   if v_qty < 0 then raise exception 'The count cannot be below 0.'; end if;
   v_id := nullif(p->>'material_id', '')::uuid;
-  if v_id is null then v_id := _material_by_code(v_barcode, v_part); end if;
+  if v_id is null and not coalesce((p->>'force_new')::boolean, false) then v_id := _material_by_code(v_barcode, v_part); end if;
   if v_id is not null then
     select * into m from materials where id = v_id for update;
     if not found then raise exception 'Stock item not found.'; end if;
@@ -225,18 +231,15 @@ begin
       part_number = coalesce(part_number, v_part), barcode = coalesce(barcode, v_barcode),
       brand = coalesce(brand, nullif(trim(coalesce(p->>'brand', '')), '')), photo_path = coalesce(photo_path, nullif(p->>'photo_path', ''))
     where id = m.id;
-    perform _po_log('material', m.id, 'scanned', format('Scanned on site%s', case when v_qty > 0 then format(': %s added to the %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle)) else '' end));
+    perform _po_log('material', m.id, 'scanned', format('Scanned on site%s', case when v_qty > 0 then format(': %s added to %s (now %s)', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle), _po_qty(_stock_adjust(m.id, v_loc, v_vehicle, v_qty))) else '' end));
   else
     if v_name is null then raise exception 'Give the part a name.'; end if;
     insert into materials (name, part_number, barcode, brand, category, photo_path, cost_price, sell_price, needs_price, created_by)
     values (v_name, v_part, v_barcode, nullif(trim(coalesce(p->>'brand', '')), ''), nullif(trim(coalesce(p->>'category', '')), ''), nullif(p->>'photo_path', ''), 0, 0, true, auth.uid())
     returning * into m;
-    perform _po_log('material', m.id, 'created', format('Added to Stock from a photo of the label%s%s, needs a price', coalesce(' (part ' || v_part || ')', ''), coalesce(' barcode ' || v_barcode, '')));
-  end if;
-  if v_qty > 0 then
-    select coalesce(sum(quantity), 0) into v_have from material_stock_by_location
-      where material_id = m.id and location_type = v_loc and (v_loc = 'warehouse' or vehicle_id = v_vehicle);
-    perform stock_set_count(m.id, v_loc, v_vehicle, v_have + v_qty, 'scanned in');
+    perform _po_log('material', m.id, 'created', format('Added to Stock from a photo of the label%s%s, needs a price%s', coalesce(' (part ' || v_part || ')', ''), coalesce(' barcode ' || v_barcode, ''),
+      case when v_qty > 0 then format('; %s at %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle)) else '' end));
+    if v_qty > 0 then perform _stock_adjust(m.id, v_loc, v_vehicle, v_qty); end if;
   end if;
   return jsonb_build_object('material_id', m.id, 'existed', v_existed, 'name', m.name, 'needs_price', coalesce(m.needs_price, false));
 end;
@@ -244,9 +247,9 @@ $$;
 revoke all on function public.material_add_from_scan(jsonb) from public, anon;
 grant execute on function public.material_add_from_scan(jsonb) to authenticated;
 
--- Reviewed bill save (migration 20261124150000) plus: a line with a part number or barcode finds the
--- Stock item by it when no item was picked, part numbers are kept on the bill lines, and every line
--- on a Stock item sets that supplier's price through material_supplier_price_set.
+-- Reviewed bill save (migration 20261124150000) plus: part numbers are kept on the bill lines (the
+-- review screen matches a line to the Stock item with that part number or barcode, the person's pick
+-- stands), and every line on a Stock item sets that supplier's price through material_supplier_price_set.
 create or replace function public.supplier_bill_save_review(p jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
@@ -312,9 +315,6 @@ begin
     v_cost := coalesce((v_line->>'unit_cost')::numeric, 0);
     v_part := nullif(trim(coalesce(v_line->>'part_number', '')), '');
     v_mat := nullif(v_line->>'material_id', '')::uuid;
-    if v_mat is null and v_part is not null and not coalesce((v_line->>'create_material')::boolean, false) and not _is_freight(v_desc) then
-      v_mat := _material_by_code(v_part, v_part);
-    end if;
     if coalesce((v_line->>'create_material')::boolean, false) and not _is_freight(v_desc) then
       insert into materials (name, part_number, cost_price, sell_price, supplier_id, supplier)
       values (v_desc, v_part, v_cost, round(v_cost * (1 + v_markup / 100), 2), s.id, s.name)
@@ -322,7 +322,7 @@ begin
       perform _po_log('material', v_mat, 'created', format('Added to Stock from bill %s (%s)', coalesce(v_num, ''), s.name));
     end if;
     if v_mat is not null and v_cost > 0 and not _is_freight(v_desc) then
-      perform material_supplier_price_set(v_mat, s.id, v_cost, 'bill', v_part, v_desc, v_bill, null);
+      perform material_supplier_price_set(v_mat, s.id, v_cost, 'bill', v_part, v_desc, v_bill, null, null, true);
     end if;
 
     v_po_line := null;

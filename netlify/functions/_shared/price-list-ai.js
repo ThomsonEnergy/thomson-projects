@@ -176,4 +176,4 @@ async function readWholeDocument({ fileBase64, mediaType, usage, pageBatch = 4 }
   return { is_price_list: isPriceList, supplier, items };
 }
 
-module.exports = { pdfPageCount, readPdfRange, readFirstPages, readSpreadsheet, readWholeDocument, sheetsOf, toNumber };
+module.exports = { callClaude, pdfPageCount, readPdfRange, readFirstPages, readSpreadsheet, readWholeDocument, sheetsOf, toNumber };
