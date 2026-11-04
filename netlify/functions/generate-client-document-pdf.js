@@ -375,7 +375,7 @@ async function handle(event) {
       const { data: project, error } = await supabaseAdmin.from('projects').select('id').eq('id', record_id).single();
       if (error || !project) throw new Error(error?.message || 'Job not found');
 
-      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1`, {
+      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1&project=${project.id}`, {  // at the job's charge rate level (item 46)
         printBackground: true,
         preferCSSPageSize: true,
         margin: { top: 0, right: 0, bottom: 0, left: 0 },

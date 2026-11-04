@@ -11,6 +11,8 @@
 //              are sell rates, material components get the markup
 // Prebuild components aren't linked to Stock, so a prebuild never moves stock.
 
+const { rateAt } = require('./rate-cards');
+
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // One unit of a prebuild: { labour, material, materialCost } (sell labour,
@@ -37,7 +39,8 @@ function prebuildUnitPrice(prebuild, markupPercent) {
 //              typed rate wins (Schedule of Rates multipliers come typed from the
 //              panel). The "Less" line is quantity 1 at a negative rate; the claim as
 //              a whole still cannot go negative (create-invoice.js checks).
-async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
+// rateFactor: the job's charge rate level (_shared/rate-cards.js), applied to a tier's $/hr.
+async function priceInvoiceItems(supabaseAdmin, items, markupPercent, rateFactor = 1) {
   const list = (items || []).filter(i => i && Number(i.quantity) > 0);
   if (!list.length) return { rows: [], labour: 0, material: 0 };
 
@@ -78,7 +81,7 @@ async function priceInvoiceItems(supabaseAdmin, items, markupPercent) {
       const tier = item.rateTierId ? tierById[item.rateTierId] : null;
       if (item.rateTierId && !tier) throw new Error('A rate tier on this invoice no longer exists.');
       if (item.staffId && !staffSet.has(item.staffId)) throw new Error('A person on this invoice no longer exists.');
-      const unitPrice = override(item.unitPrice) ?? (tier ? Number(tier.sell_rate) : null);
+      const unitPrice = override(item.unitPrice) ?? (tier ? rateAt(tier.sell_rate, rateFactor) : null);
       if (unitPrice == null) throw new Error('A labour line needs a rate per hour.');
       const labourAmount = r2(qty * unitPrice);
       labour += labourAmount;

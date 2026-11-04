@@ -486,6 +486,23 @@
             <div id="rate-tiers-msg"></div>
           </div>
           <div class="card">
+            <h2>Charge rate levels</h2>
+            <p class="subtitle" style="margin-bottom:10px;">A client, quote or job is charged at a level: a percent of the rate tiers above. Standard (100%) is the default. Add Commercial 115%, Mates rates 85% and so on, then pick the level on a client (Clients page) or on a job (Summary). Changing a level does not reprice lines already saved.</p>
+            <div id="rate-cards-list"><p class="subtitle">Loading...</p></div>
+            <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+              <div>
+                <label style="margin-top:0">New level</label>
+                <input id="new-rate-card-name" placeholder="e.g. Commercial" />
+              </div>
+              <div>
+                <label style="margin-top:0">% of Billable Rates</label>
+                <input id="new-rate-card-percent" type="number" step="1" min="1" max="500" placeholder="115" style="width:120px;" />
+              </div>
+              <button id="add-rate-card-btn">Add level</button>
+            </div>
+            <div id="rate-cards-msg"></div>
+          </div>
+          <div class="card">
             <h2>Schedule of Rates review</h2>
             <p class="subtitle" style="margin-bottom:10px;">These rates print on the <a href="/rates.html" target="_blank">Schedule of Rates</a> (Documents page and every estimate) as "current as at" this date. Changing a rate above sets it to today. Six months on, the Ops manager adds a "Needs me" reminder to review them.</p>
             <div id="rates-review-status" class="subtitle"></div>
@@ -818,6 +835,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=123"></script>
+  <script src="/js/settings-rate-cards.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
@@ -1254,6 +1272,7 @@
 
     async function loadRateTiers() {
       loadRatesReview();
+      loadRateCardsPanel();
       const listEl = document.getElementById('rate-tiers-list');
       const { data, error } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
 

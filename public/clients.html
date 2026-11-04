@@ -104,6 +104,11 @@
                   <option value="net_30">Net 30 days</option>
                 </select>
               </div>
+              <div>
+                <label>Charge rates</label>
+                <select id="c-rate-card"><option value="">Standard</option></select>
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">The level new quotes and jobs for this client are charged at (Settings &gt; Billable Rates).</p>
+              </div>
             </div>
             <label>Notes</label>
             <textarea id="c-notes" style="min-height:70px;"></textarea>
@@ -174,10 +179,16 @@
   </div>
 
   <script src="/js/supabase-client.js?v=123"></script>
+  <script src="/js/rate-cards.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
     let editingClientId = null;
+    // the charge rate levels (item 46): the Standard one is the blank choice, the client row keeps null
+    loadRateCards().then(cards => {
+      const sel = document.getElementById('c-rate-card');
+      sel.innerHTML = cards.map(c => `<option value="${c.is_default ? '' : escapeHtml(c.id)}">${escapeHtml(rateCardLabel(c))}</option>`).join('') || '<option value="">Standard</option>';
+    }).catch(() => {});
     let contactCount = 0;
     let csvRows = [];
     let csvHeaders = [];
@@ -253,6 +264,7 @@
       document.getElementById('c-address').value = '';
       document.getElementById('c-abn').value = '';
       document.getElementById('c-terms').value = 'cod';
+      document.getElementById('c-rate-card').value = '';
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -441,6 +453,7 @@
       document.getElementById('c-address').value = c.address || '';
       document.getElementById('c-abn').value = c.abn || '';
       document.getElementById('c-terms').value = c.payment_terms || 'cod';
+      document.getElementById('c-rate-card').value = c.rate_card_id || '';
       document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -470,6 +483,7 @@
         address: document.getElementById('c-address').value.trim(),
         abn: document.getElementById('c-abn').value.trim() || null,
         payment_terms: document.getElementById('c-terms').value,
+        rate_card_id: document.getElementById('c-rate-card').value || null,
         client_type: document.getElementById('c-type').value,
         notes: document.getElementById('c-notes').value.trim(),
       };

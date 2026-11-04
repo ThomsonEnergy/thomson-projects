@@ -27,6 +27,7 @@ const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { computeDueDate } = require('./_shared/compute-due-date');
 const { priceInvoiceItems, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
+const { rateCardFor } = require('./_shared/rate-cards');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -54,9 +55,10 @@ exports.handler = async (event) => {
 
     // Items are priced here (server side, from Stock / the prebuild library)
     // and added on top of whatever labour / materials the claim carries.
+    const rateCard = await rateCardFor(supabaseAdmin, projectId);  // labour tiers at the job's charge rate level (item 46)
     const pricedClaims = await Promise.all(claims.map(async (c) => {
       const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
-      const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45);
+      const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45, rateCard.factor);
       return { c, priced };
     }));
     // Labour lines (item 41) name the clocked shifts they bill: each must be on this job

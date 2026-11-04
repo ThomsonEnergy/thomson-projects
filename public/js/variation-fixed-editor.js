@@ -35,11 +35,12 @@
   const blankLine = () => ({ description: '', item_type: 'labour', quantity: '', unit_cost: '', rate_tier_id: '', prebuild_group_id: null, prebuild_client_description: null });
 
   async function openFixedVariationEditor(project, entry, onSaved) {
-    const [{ data: tiers }, { data: cs }] = await Promise.all([
+    const [{ data: tiers }, { data: cs }, cards] = await Promise.all([
       supabaseClient.from('billable_rate_tiers').select('id, name, sell_rate').order('sort_order'),
       supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
+      loadRateCards(),
     ]);
-    const TIERS = tiers || [];
+    const TIERS = tiersAtCard(tiers || [], rateCardOf(project, cards));  // at the job's charge rate level (item 46)
     const tierById = (id) => TIERS.find(t => t.id === id);
     const saved = entry && entry.fixed_lines && entry.fixed_lines.length ? entry.fixed_lines : [];
     const savedMarkup = saved.find(l => l.item_type !== 'labour' && l.markup_percent != null);

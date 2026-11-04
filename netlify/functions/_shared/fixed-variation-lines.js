@@ -3,14 +3,17 @@
 //   labour     hours x the rate tier's sell rate (the Schedule of Rates), or a typed rate when no
 //              tier is picked (a prebuild's labour component carries its own rate)
 //   materials  quantity x cost price x (1 + the variation's markup)
-// Priced here, on the server, from the tier's current rate, so the browser cannot send its own figure.
+// Priced here, on the server, from the tier's current rate at the job's charge rate level (factor,
+// _shared/rate-cards.js), so the browser cannot send its own figure.
 // Lines saved before 4 Nov 2026 have only { description, item_type, amount }: the amount is the sell
 // price, quantity 1, markup 0. A prebuild's components share a prebuild_group_id and carry the
 // prebuild's client description, which the client's document shows as one line.
 
+const { rateAt } = require('./rate-cards');
+
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-async function priceFixedLines(supabaseAdmin, rawLines, markupPercent) {
+async function priceFixedLines(supabaseAdmin, rawLines, markupPercent, factor = 1) {
   const markup = r2(markupPercent);
   const { data: tiers, error } = await supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate');
   if (error) throw error;
@@ -19,7 +22,7 @@ async function priceFixedLines(supabaseAdmin, rawLines, markupPercent) {
     const item_type = l.item_type === 'labour' ? 'labour' : 'material';
     const quantity = r2(l.quantity);
     const tier = item_type === 'labour' && l.rate_tier_id ? tierById[l.rate_tier_id] : null;
-    const unit_cost = tier ? r2(tier.sell_rate) : r2(l.unit_cost);
+    const unit_cost = tier ? rateAt(tier.sell_rate, factor) : r2(l.unit_cost);
     const description = String(l.description || '').trim().slice(0, 300) || (tier ? tier.name : '');
     const amount = item_type === 'labour' ? r2(quantity * unit_cost) : r2(quantity * unit_cost * (1 + markup / 100));
     return {

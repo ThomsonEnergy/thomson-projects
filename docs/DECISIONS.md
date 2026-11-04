@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 4 Nov 2026
 
+- LIVE (owner: yes, push live; migration 20261128070000): item 46, charge rate levels (Settings > Billable Rates, Standard 100% plus any the owner adds), picked per client and per job, applied to quote labour lines, variations, invoice items and actuals and the client's Schedule of Rates. Detail: `docs/PROJECT_SPEC.md` D1a.
 - Planned, waiting on yes: merge a client's jobs into one job (Admin, one server step), each old job's stages coming across as cost centres with everything that hangs off them, the old J numbers still landing on the merged job. Detail: `docs/IDEAS_BACKLOG.md` item 47.
 - Planned, waiting on yes: charge rate levels (Standard 100% plus any the owner adds, as a percent of the Billable Rates) picked per client and per job, applied to quote labour lines, variations, Invoice actual costs and the client's Schedule of Rates. Detail: `docs/IDEAS_BACKLOG.md` item 46.
 - LIVE (owner: a bug, straight to main): the client's invoice shows each claim as one line (just the stage name) instead of a Labour row and a Materials row; the split stays on our side for Xero and costing (`public/invoice.html`, also the PDF). Detail: `docs/PROJECT_SPEC.md` A22.

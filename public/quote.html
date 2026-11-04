@@ -257,7 +257,7 @@
   <div id="approve-bar" class="q-approve-bar"></div>
 
   <script src="/js/supabase-client.js?v=123"></script>
-  <script src="/js/schedule-of-rates.js?v=3"></script>
+  <script src="/js/schedule-of-rates.js?v=4"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
@@ -983,7 +983,7 @@
           ${headHtml}
           <div class="pg-body sor">
             <h1 class="pg-title">Schedule<br>of rates</h1>
-            ${scheduleOfRatesHtml(rates, s.rates_reviewed_on)}
+            ${scheduleOfRatesHtml(rates, s.rates_reviewed_on, data.rate_card_name)}
           </div>
         </section>` : '';
 

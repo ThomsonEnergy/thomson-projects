@@ -14,6 +14,7 @@
 
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { priceFixedLines } = require('./_shared/fixed-variation-lines');
+const { rateCardFor } = require('./_shared/rate-cards');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -50,7 +51,7 @@ exports.handler = async (event) => {
         const { data: settings } = await supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle();
         markup = Number(settings?.default_markup_percent) || 45;
       }
-      fixedLines = await priceFixedLines(supabaseAdmin, lines, markup);
+      fixedLines = await priceFixedLines(supabaseAdmin, lines, markup, (await rateCardFor(supabaseAdmin, projectId)).factor);
       if (!fixedLines.length) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Add at least one priced line to a fixed-price variation.' }) };
       }
