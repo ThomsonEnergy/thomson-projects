@@ -185,10 +185,8 @@
       const qtyRow = (name, qty, unit) => ({ cells: [esc(name), (Number(qty) || 0).toFixed(2), money(unit), money((Number(qty) || 0) * (Number(unit) || 0))], cls: ['', 'ctr', 'num', 'num'] });
       const sections = [];
       if (isStandalone || !claims.length) {
-        const rows = [];
-        if (labourAmount > 0) rows.push(itemRow('Labour', labourAmount));
-        if (materialAmount > 0) rows.push(itemRow('Materials', materialAmount));
-        if (!rows.length) rows.push(itemRow(inv.description || 'Invoice', subtotal));
+        // One line for the client; the labour / materials split stays on our side (Xero income lines, job costing).
+        const rows = [itemRow(inv.description || 'Invoice', labourAmount + materialAmount > 0 ? labourAmount + materialAmount : subtotal)];
         sections.push({ title: inv.description || 'Invoice', rows });
       } else {
         claims.forEach((c) => {
@@ -211,9 +209,10 @@
             });
             const itemLab = items.reduce((t, it) => t + (Number(it.labour_amount) || 0), 0);
             const itemMat = items.reduce((t, it) => t + (Number(it.material_amount) || 0), 0);
-            const restLab = Math.round((lab - itemLab) * 100) / 100, restMat = Math.round((mat - itemMat) * 100) / 100;
-            if (restLab > 0) rows.push(itemRow('Labour', restLab));
-            if (restMat > 0) rows.push(itemRow('Materials', restMat));
+            // The claim itself is one line for the client (owner, 4 Nov 2026): the labour / materials
+            // split stays on our side (Xero income lines, job costing), never on the invoice.
+            const rest = Math.round((lab + mat - itemLab - itemMat) * 100) / 100;
+            if (rest > 0) rows.push(itemRow(c.cost_centre_name, rest));
             if (!rows.length) rows.push(itemRow(c.cost_centre_name, 0));
           }
           sections.push({ title: `${c.cost_centre_name}${partial ? ` - progress claim (${pct}% of this stage)` : ''}`, rows });
