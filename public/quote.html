@@ -562,11 +562,31 @@
       const template = project.proposal_template || 'new_build';
       const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
       const varLinesTotal = (lines) => r2((lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0));
+      // A fixed-price variation's lines as the client sees them (backlog item 43): a prebuild's components
+      // (same prebuild_group_id) collapse into one line with the prebuild's client description, the way
+      // get_quote_by_token does for a stage; labour shows its hours and rate, materials a count. Lines
+      // priced before 4 Nov 2026 have no quantity and show none.
+      const clientVarLines = (lines) => {
+        const out = [];
+        const groups = {};
+        (lines || []).forEach((l) => {
+          const amount = r2(l.amount);
+          if (l.prebuild_group_id) {
+            let g = groups[l.prebuild_group_id];
+            if (!g) { g = { description: l.prebuild_client_description || l.description, amount: 0, quantity: null, item_type: null }; groups[l.prebuild_group_id] = g; out.push(g); }
+            g.amount = r2(g.amount + amount);
+          } else {
+            out.push({ description: l.description, amount, quantity: l.quantity != null ? Number(l.quantity) : null, item_type: l.item_type, unit_cost: l.item_type === 'labour' ? l.unit_cost : null });
+          }
+        });
+        return out;
+      };
+      const varQtyText = (l) => l.quantity == null ? '' : `${fmtQty(l.quantity, l.item_type)}${l.item_type === 'labour' && l.unit_cost != null ? ` at ${money(l.unit_cost)}/hr` : ''}`;
       // A variation shown as a stage row: its priced lines, the reason as its description.
       const varAsCentre = (v) => ({
         name: `Variation ${v.number || ''}: ${v.description}`.replace(/\s+:/, ':'), description: v.reason || '',
         quoted_amount: varLinesTotal(v.lines), stc_total: 0, is_variation: true, photo_groups: [],
-        line_items: (v.lines || []).map(l => ({ description: l.description, amount: Number(l.amount) || 0, quantity: 1, item_type: l.item_type })),
+        line_items: clientVarLines(v.lines),
       });
       const storedCentres = data.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
       const thisVariation = vInfo ? vInfo.variation : null;
@@ -872,7 +892,7 @@
             <td colspan="3">
               <table class="qtable" style="margin:0;"><tbody class="stage-detail">
                 ${c.line_items.map(li => `
-                  <tr><td>${esc(li.description)}</td><td class="num">${c.is_variation ? '' : fmtQty(li.quantity, li.item_type)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
+                  <tr><td>${esc(li.description)}</td><td class="num">${c.is_variation ? varQtyText(li) : fmtQty(li.quantity, li.item_type)}</td><td class="num">${money(li.amount)}</td></tr>`).join('')}
                 <tr class="sub"><td>Stage subtotal</td><td></td><td class="num">${money(c.quoted_amount)}</td></tr>
               </tbody></table>
             </td>
@@ -926,7 +946,7 @@
                 <div class="sec-title bd">${esc(c.name)}</div>
                 <table class="qtable bd split">
                   <thead><tr><th>Item</th><th class="num">Qty</th></tr></thead>
-                  <tbody>${c.line_items.map(li => `<tr><td>${esc(li.description)}</td><td class="num">${c.is_variation ? '' : fmtQty(li.quantity, li.item_type)}</td></tr>`).join('')}
+                  <tbody>${c.line_items.map(li => `<tr><td>${esc(li.description)}</td><td class="num">${c.is_variation ? varQtyText(li) : fmtQty(li.quantity, li.item_type)}</td></tr>`).join('')}
                   <tr class="sub"><td>${esc(c.name)}${c.is_variation ? ' (variation)' : ''}, ex GST</td><td class="num">${money(c.quoted_amount)}</td></tr></tbody>
                 </table>
               </div>`).join('')}</div>
@@ -1074,8 +1094,8 @@
             ${v.reason ? `<div class="sec-title">Reason for the variation</div><p class="pg-lead" style="white-space:pre-wrap;">${esc(v.reason)}</p>` : ''}
             <div class="sec-title">Price of this variation</div>
             <table class="qtable">
-              <thead><tr><th>Item</th><th class="num">Price (ex GST)</th></tr></thead>
-              <tbody>${(v.lines || []).map(l => `<tr><td>${esc(l.description)}</td><td class="num">${money(l.amount)}</td></tr>`).join('')}</tbody>
+              <thead><tr><th>Item</th><th class="num"></th><th class="num">Price (ex GST)</th></tr></thead>
+              <tbody>${clientVarLines(v.lines).map(l => `<tr><td>${esc(l.description)}</td><td class="num">${varQtyText(l)}</td><td class="num">${money(l.amount)}</td></tr>`).join('')}</tbody>
             </table>
             <div class="totals">
               <div class="l">This variation (ex GST): ${money(vTotal)}</div>
