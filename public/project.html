@@ -7740,6 +7740,9 @@
       const btnStyle = 'font-size:12px; padding:5px 10px;';
       const linkFor = (r) => `${shareOrigin()}/quote.html?variation=${r.variation_token}`;
       const linesTotal = (r) => (r.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      // How a fixed-price line was priced (item 43): hours at a rate, or quantity at cost plus markup; older lines only say which kind.
+      const fixedLineHow = (l) => l.quantity == null ? (l.item_type === 'labour' ? 'labour' : 'materials')
+        : l.item_type === 'labour' ? `labour, ${qtyText(l.quantity)} hrs at ${money(l.unit_cost)}` : `materials, ${qtyText(l.quantity)} at ${money(l.unit_cost)}${Number(l.markup_percent) ? ' + ' + qtyText(l.markup_percent) + '%' : ''}`;
       const entryStages = (t) => (t.selected_cost_centre_ids && t.selected_cost_centre_ids.length) ? t.selected_cost_centre_ids : (t.cost_centre_id ? [t.cost_centre_id] : []);
 
       listEl.innerHTML = (rows || []).length ? rows.map(r => {
@@ -7784,7 +7787,7 @@
           <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
             ${r.reason ? `<p style="margin:0 0 8px; white-space:pre-wrap; font-size:13px;"><strong>Reason:</strong> ${escapeHtml(r.reason)}</p>` : ''}
             ${pricingVisible ? `
-              ${(r.fixed_lines || []).map(l => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:2px 0;"><span>${escapeHtml(l.description)} <span class="subtitle">(${l.item_type === 'labour' ? 'labour' : 'materials'})</span></span><span>${money(l.amount)}</span></div>`).join('')}
+              ${(r.fixed_lines || []).map(l => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:2px 0;"><span>${escapeHtml(l.description)} <span class="subtitle">(${fixedLineHow(l)})</span></span><span>${money(l.amount)}</span></div>`).join('')}
               <div style="display:flex; justify-content:space-between; font-weight:600; font-size:13px; padding-top:6px; margin-top:4px; border-top:0.5px solid var(--border);"><span>Total ex GST</span><span>${money(linesTotal(r))}</span></div>
               <div class="subtitle" style="display:flex; justify-content:space-between; font-size:12px;"><span>Inc GST</span><span>${money(linesTotal(r) * 1.1)}</span></div>
             ` : `<p class="subtitle" style="margin:0; font-size:12px;">Fixed-price variation, priced by the office.</p>`}
@@ -8013,118 +8016,15 @@
       }
     }
 
-    // Pricing roles: set up (or edit the draft of) a fixed-price variation - the
-    // reason the client will read and the priced lines. Saving keeps it as a draft;
-    // "Email to client..." on its card sends it for signing.
+    // The fixed-price variation editor lives in js/variation-fixed-editor.js (backlog item 43), downloaded
+    // the first time it is opened, like the Time tab, so the job page itself stays light.
     function openFixedVariationEditor(project, entry, onSaved) {
-      const lines = (entry && entry.fixed_lines && entry.fixed_lines.length ? entry.fixed_lines : [{ description: '', item_type: 'material', amount: '' }]).map(l => ({ ...l }));
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
-          <h2>${entry ? 'Edit fixed-price variation' : 'New fixed-price variation'}</h2>
-          <p class="subtitle" style="margin-bottom:10px;">The client gets this as its own variation document (referencing their original quote), then signs to approve it. Once signed it's added to the job as a stage at this price.</p>
-          <label style="margin-top:0;">What is the extra work?</label>
-          <input id="fv-desc" value="${escapeHtml(entry ? entry.description : '')}" placeholder="e.g. Move meter box and run new sub-main" />
-          <label>Reason for the variation (the client reads this)</label>
-          <textarea id="fv-reason" style="min-height:80px;" placeholder="e.g. The builder moved the meter location after the quote was accepted, which needs a longer cable run.">${escapeHtml(entry ? entry.reason || '' : '')}</textarea>
-          <label>Priced lines (ex GST)</label>
-          <div id="fv-lines"></div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-            <button type="button" class="secondary" id="fv-add-line" style="font-size:12px; padding:6px 10px;">+ Add a line</button>
-            <button type="button" class="secondary" id="fv-add-stock" style="font-size:12px; padding:6px 10px;">+ From Stock or prebuild</button>
-          </div>
-          <p style="margin:12px 0 0; font-size:14px;">Total: <strong id="fv-total">$0.00</strong> ex GST <span class="subtitle" id="fv-total-gst"></span></p>
-          <div id="fv-msg"></div>
-          <div style="margin-top:12px;"><button type="button" id="fv-save">Save draft</button> <button type="button" class="secondary" id="fv-cancel">Cancel</button></div>
-        </div>`;
-      document.body.appendChild(overlay);
-      const linesEl = overlay.querySelector('#fv-lines');
-      const sum = () => lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
-      const refreshTotal = () => {
-        overlay.querySelector('#fv-total').textContent = money(sum());
-        overlay.querySelector('#fv-total-gst').textContent = `(${money(sum() * 1.1)} inc GST)`;
-      };
-      const renderLines = () => {
-        linesEl.innerHTML = lines.map((l, i) => `
-          <div style="display:grid; grid-template-columns:1fr 110px 100px auto; gap:6px; margin-bottom:6px; align-items:center;">
-            <input class="fv-l-desc" data-i="${i}" value="${escapeHtml(l.description)}" placeholder="Description" style="margin:0;" />
-            <select class="fv-l-type" data-i="${i}" style="margin:0;"><option value="material" ${l.item_type !== 'labour' ? 'selected' : ''}>Materials</option><option value="labour" ${l.item_type === 'labour' ? 'selected' : ''}>Labour</option></select>
-            <input class="fv-l-amt" data-i="${i}" type="number" min="0" step="0.01" value="${l.amount === '' ? '' : l.amount}" placeholder="$" style="margin:0;" />
-            <button type="button" class="secondary fv-l-del" data-i="${i}" style="font-size:12px; padding:4px 9px;">&times;</button>
-          </div>`).join('');
-        linesEl.querySelectorAll('.fv-l-desc').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].description = el.value; }));
-        linesEl.querySelectorAll('.fv-l-type').forEach(el => el.addEventListener('change', () => { lines[el.dataset.i].item_type = el.value; }));
-        linesEl.querySelectorAll('.fv-l-amt').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].amount = el.value; refreshTotal(); }));
-        linesEl.querySelectorAll('.fv-l-del').forEach(el => el.addEventListener('click', () => { lines.splice(Number(el.dataset.i), 1); if (!lines.length) lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); refreshTotal(); }));
-      };
-      renderLines(); refreshTotal();
-      overlay.querySelector('#fv-add-line').addEventListener('click', () => { lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); });
-      // Priced like a quote: Stock at cost plus the default markup; a prebuild's labour at its
-      // own (sell) rates and its materials marked up. Price only, nothing leaves Stock.
-      overlay.querySelector('#fv-add-stock').addEventListener('click', async () => {
-        const pick = await openVariationStockPicker(true, true); // price only: no low-stock warning
-        if (!pick) return;
-        const { data: cs } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle();
-        const factor = 1 + markupOr45(cs?.default_markup_percent) / 100;
-        const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-        const qty = Number(pick.quantity) || 1;
-        const name = `${pick.name} x ${r2(qty)}`;
-        let added = [];
-        if (pick.kind === 'material') {
-          const { data: m } = await supabaseClient.from('materials').select('cost_price').eq('id', pick.id).maybeSingle();
-          added.push({ description: name, item_type: 'material', amount: r2((Number(m?.cost_price) || 0) * factor * qty) });
-        } else {
-          const pb = (await getPrebuilds()).find(p => p.id === pick.id);
-          const comps = (pb && pb.prebuild_components) || [];
-          const part = (type) => comps.filter(c => (c.item_type === 'labour') === (type === 'labour'))
-            .reduce((t, c) => t + (Number(c.quantity) || 0) * (Number(c.unit_cost) || 0), 0) * qty;
-          const lab = r2(part('labour')), mat = r2(part('material') * factor);
-          if (lab > 0) added.push({ description: `${name} (labour)`, item_type: 'labour', amount: lab });
-          if (mat > 0) added.push({ description: `${name} (materials)`, item_type: 'material', amount: mat });
-          if (!added.length) added.push({ description: name, item_type: 'material', amount: '' });
-        }
-        // fill the blank starting line rather than leaving it empty above
-        if (lines.length === 1 && !lines[0].description && !(parseFloat(lines[0].amount) > 0)) lines.splice(0, 1);
-        lines.push(...added);
-        renderLines(); refreshTotal();
-      });
-      overlay.querySelector('#fv-cancel').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#fv-save').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#fv-msg');
-        const description = overlay.querySelector('#fv-desc').value.trim();
-        const reason = overlay.querySelector('#fv-reason').value.trim();
-        const clean = lines.map(l => ({ description: String(l.description || '').trim(), item_type: l.item_type === 'labour' ? 'labour' : 'material', amount: Math.round((parseFloat(l.amount) || 0) * 100) / 100 })).filter(l => l.description && l.amount > 0);
-        if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work is.</div>`; return; }
-        if (!reason) { msg.innerHTML = `<div class="error-box">Add the reason, so the client knows why.</div>`; return; }
-        if (!clean.length) { msg.innerHTML = `<div class="error-box">Add at least one priced line.</div>`; return; }
-        const saveBtn = overlay.querySelector('#fv-save');
-        saveBtn.disabled = true;
-        try {
-          if (entry) {
-            // Only a draft can be rewritten. Once it is sent, approved or declined the lines are what the
-            // client saw (and signed), so the status is checked in the same write: no row back, no save.
-            const { data: saved, error: uErr } = await supabaseClient.from('job_variation_entries').update({ description, reason, fixed_lines: clean })
-              .eq('id', entry.id).or('approval_status.is.null,approval_status.eq.draft').select('id');
-            if (uErr) throw uErr;
-            if (!saved || !saved.length) throw new Error('This variation is no longer a draft (it has been sent, approved or declined since this editor was opened), so it cannot be changed. Close this and reload the page.');
-          } else {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/create-variation', {
-              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({ projectId: project.id, type: 'fixed', description, reason, lines: clean }),
-            });
-            const d = await res.json();
-            if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save it');
-            await logActivity('project', project.id, 'variation_logged', `Fixed-price variation ${d.number} drafted: ${description}`);
-          }
-          overlay.remove();
-          await onSaved();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          saveBtn.disabled = false;
-        }
-      });
+      if (window.openFixedVariationEditorPanel) return window.openFixedVariationEditorPanel(project, entry, onSaved);
+      const s = document.createElement('script');
+      s.src = '/js/variation-fixed-editor.js?v=1';
+      s.onload = () => window.openFixedVariationEditorPanel(project, entry, onSaved);
+      s.onerror = () => showToast('Could not load the variation editor. Check the connection and try again.', { error: true });
+      document.head.appendChild(s);
     }
 
     // Makes (or remakes) a fixed-price variation's PDF: the variation document from

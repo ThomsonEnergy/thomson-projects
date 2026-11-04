@@ -1,15 +1,19 @@
 // POST /.netlify/functions/create-variation
 // Body: { projectId, type: 'do_and_charge' | 'fixed', description, workDate?, notes?,
-//         startHours?, reason?, lines? }
+//         startHours?, reason?, lines?, markupPercent?, entryId? }
 // Any active staff member can log a "do and charge" variation (work done first,
 // billed for what it took). It gets its own cost centre straight away so the team
 // can pick it when clocking in on My Day. Only pricing roles can start a "fixed"
 // variation (a price agreed up front, sent to the client to sign): it is saved as a
 // draft with its priced lines and only becomes a stage on the job once the client
-// approves it (accept-variation.js).
-// A server function because staff cannot create cost centres themselves.
+// approves it (accept-variation.js). With entryId, a fixed-price draft is rewritten
+// instead (same checks; only a draft can change).
+// A server function because staff cannot create cost centres themselves, and the
+// fixed-price lines are priced here from the Schedule of Rates and the markup
+// (_shared/fixed-variation-lines.js), never from a figure the browser sends.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { priceFixedLines } = require('./_shared/fixed-variation-lines');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -18,7 +22,7 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user } = auth;
 
   try {
-    const { projectId, type, description, workDate, notes, startHours, reason, lines } = JSON.parse(event.body || '{}');
+    const { projectId, entryId, type, description, workDate, notes, startHours, reason, lines, markupPercent } = JSON.parse(event.body || '{}');
     if (!projectId || !description || !String(description).trim()) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and a description are required' }) };
     }
@@ -37,24 +41,37 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'Variations can only be added to a job.' }) };
     }
 
-    const { data: lastNo } = await supabaseAdmin.from('job_variation_entries').select('variation_number').eq('project_id', projectId).order('variation_number', { ascending: false, nullsFirst: false }).limit(1);
-    const number = ((lastNo || [])[0]?.variation_number || 0) + 1;
     const desc = String(description).trim();
-    const date = workDate || new Date().toISOString().slice(0, 10);
 
     let fixedLines = [];
     if (type === 'fixed') {
-      fixedLines = (Array.isArray(lines) ? lines : [])
-        .map(l => ({
-          description: String(l.description || '').trim(),
-          item_type: l.item_type === 'labour' ? 'labour' : 'material',
-          amount: Math.round((Number(l.amount) || 0) * 100) / 100,
-        }))
-        .filter(l => l.description && l.amount > 0);
+      let markup = Number(markupPercent);
+      if (!Number.isFinite(markup) || markup < 0) {
+        const { data: settings } = await supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle();
+        markup = Number(settings?.default_markup_percent) || 45;
+      }
+      fixedLines = await priceFixedLines(supabaseAdmin, lines, markup);
       if (!fixedLines.length) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Add at least one priced line to a fixed-price variation.' }) };
       }
+      if (entryId) {
+        // Only a draft can be rewritten: once sent, approved or declined the lines are what the client
+        // saw (and signed). The status is checked in the same write: no row back, no save.
+        const { data: saved, error: uErr } = await supabaseAdmin.from('job_variation_entries')
+          .update({ description: desc, reason: String(reason || '').trim() || null, fixed_lines: fixedLines })
+          .eq('id', entryId).eq('project_id', projectId).eq('variation_type', 'fixed')
+          .or('approval_status.is.null,approval_status.eq.draft').select('id, variation_number');
+        if (uErr) throw uErr;
+        if (!saved || !saved.length) {
+          return { statusCode: 409, body: JSON.stringify({ error: 'This variation is no longer a draft (it has been sent, approved or declined since the editor was opened), so it cannot be changed. Close this and reload the page.' }) };
+        }
+        return { statusCode: 200, body: JSON.stringify({ ok: true, id: saved[0].id, number: saved[0].variation_number }) };
+      }
     }
+
+    const { data: lastNo } = await supabaseAdmin.from('job_variation_entries').select('variation_number').eq('project_id', projectId).order('variation_number', { ascending: false, nullsFirst: false }).limit(1);
+    const number = ((lastNo || [])[0]?.variation_number || 0) + 1;
+    const date = workDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
 
     const { data: entry, error: entErr } = await supabaseAdmin.from('job_variation_entries').insert({
       project_id: projectId, description: desc, work_date: date, created_by: user.id,

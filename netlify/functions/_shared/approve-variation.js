@@ -5,16 +5,15 @@
 // history, and the PDFs are remade in the background.
 
 const { startFinalizeDocuments } = require('./start-finalize-documents');
-
-const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const { stageFromFixedLines } = require('./fixed-variation-lines');
 const METHOD_TEXT = { email: 'by email', phone: 'by phone call', in_person: 'in person' };
 
 // how: { method: 'online' | 'email' | 'phone' | 'in_person', signedName, signature, note, approvedBy, emailThreadId }
 async function approveVariation(supabaseAdmin, entry, how) {
-  const lines = Array.isArray(entry.fixed_lines) ? entry.fixed_lines : [];
-  const labour = r2(lines.filter(l => l.item_type === 'labour').reduce((s, l) => s + (Number(l.amount) || 0), 0));
-  const material = r2(lines.filter(l => l.item_type !== 'labour').reduce((s, l) => s + (Number(l.amount) || 0), 0));
-  const total = r2(labour + material);
+  // The stage carries what the variation was priced with (item 43): labour hours at their rate,
+  // materials at cost with the markup, so Edit stages and job costing read like a quoted stage.
+  // Lines from before 4 Nov 2026 are sell amounts at markup 0.
+  const { rows, labour, materialCost, markup, total } = stageFromFixedLines(entry.fixed_lines);
   if (!(total > 0)) { const e = new Error('This variation has no price on it.'); e.statusCode = 400; throw e; }
 
   // Claim it first: only one approval can move it to approved, so two at the same moment (client
@@ -31,18 +30,14 @@ async function approveVariation(supabaseAdmin, entry, how) {
   const { data: last } = await supabaseAdmin.from('cost_centres').select('sort_order').eq('project_id', entry.project_id).order('sort_order', { ascending: false }).limit(1);
   const nextSort = ((last || [])[0]?.sort_order ?? -1) + 1;
 
-  // Markup 0: the agreed amounts are the sell prices, billed exactly as quoted.
   const { data: centre, error: ccErr } = await supabaseAdmin.from('cost_centres').insert({
     project_id: entry.project_id, name: name2, description: entry.reason || entry.description, sort_order: nextSort,
-    estimated_labour_cost: labour, estimated_material_cost: material, markup_percent: 0, quoted_amount: total,
+    estimated_labour_cost: labour, estimated_material_cost: materialCost, markup_percent: markup, quoted_amount: total,
     variation_entry_id: entry.id,
   }).select('id').single();
   if (ccErr) { await putBack(); throw ccErr; }
 
-  const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(lines.map((l, i) => ({
-    cost_centre_id: centre.id, description: l.description, item_type: l.item_type === 'labour' ? 'labour' : 'material',
-    quantity: 1, unit_cost: Number(l.amount) || 0, sort_order: i,
-  })));
+  const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(rows.map((r) => ({ cost_centre_id: centre.id, ...r })));
   if (liErr) { await supabaseAdmin.from('cost_centres').delete().eq('id', centre.id); await putBack(); throw liErr; }
 
   const online = how.method === 'online';
