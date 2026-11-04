@@ -109,7 +109,13 @@
         return null;
       }
       // a job merged into another (item 47): its J number and old links open the merged job
-      if (project.merged_into_project_id) { location.replace(`/project.html?id=${project.merged_into_project_id}&merged_from=${project.id}`); return null; }
+      if (project.merged_into_project_id) {
+        const next = new URLSearchParams(location.search);  // keep the tab and anything else the link asked for
+        next.set('id', project.merged_into_project_id);
+        next.set('merged_from', project.id);
+        location.replace(`/project.html?${next.toString()}`);
+        return null;
+      }
       paintJobHeaderEarly(project);
 
       const isJob = !!project.job_number;
@@ -5412,7 +5418,7 @@
       }
 
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
-      loadJsOnce('/js/job-merge.js?v=1', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
+      loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });

@@ -9,8 +9,13 @@
 --    merged job. Every merge is written to project_merges (what moved, with counts) and to both
 --    jobs' activity logs. No undo button: the record is enough to unwind one by hand.
 --  * project_merge_preview(p_from[]): the counts the confirm screen shows.
---  * Checks: same client, J numbers only (quotes stay separate), nothing already merged, nobody
---    clocked in on a job being merged.
+--  * Checks: same client, J numbers only (quotes stay separate), open jobs only on both sides (not
+--    complete or archived), nothing already merged, nobody clocked in on a job being merged.
+--  * Also moved: PO lines received to the old job (destination_job_id), payment milestones, warranty
+--    jobs raised against it, chat and email job suggestions; its variations are renumbered after the
+--    merged job's own. A row a unique rule keeps on the old job is listed in the log as left behind.
+--  * New work that still names the old job (an offline clock-in, a booking, a PO, a task made from a
+--    page opened before the merge) lands on the merged job (trigger _follow_merged_project).
 
 alter table public.projects
   add column if not exists merged_into_project_id uuid references public.projects(id) on delete set null,
@@ -105,6 +110,9 @@ declare
   v_sort integer;
   v_table text;
   v_moved jsonb;
+  v_left text[];
+  v_n integer;
+  v_var_base integer;
   v_summary text[] := '{}';
   v_tables text[] := array['invoices', 'purchase_orders', 'supplier_bills', 'time_entries', 'job_material_usage', 'job_variation_entries',
     'job_variation_hours', 'job_variation_materials', 'variations', 'job_tasks', 'project_documents', 'project_photos', 'project_field_notes',
@@ -117,6 +125,7 @@ begin
   if not found then raise exception 'Job not found.'; end if;
   if into_job.job_number is null then raise exception 'Jobs can only be merged into a job with a J number, not a quote.'; end if;
   if into_job.merged_into_project_id is not null then raise exception 'J% was itself merged into another job.', into_job.job_number; end if;
+  if into_job.pipeline_stage in ('complete', 'archived') then raise exception 'J% is %: reopen it before merging jobs into it.', into_job.job_number, into_job.pipeline_stage; end if;
   if p_from is null or array_length(p_from, 1) is null then raise exception 'Pick at least one job to merge.'; end if;
   perform set_config('teops.po_step', 'on', true);
 
@@ -126,6 +135,7 @@ begin
     if from_job.id = into_job.id then raise exception 'A job cannot be merged into itself.'; end if;
     if from_job.job_number is null then raise exception 'Q% is a quote: approve it onto the job instead.', from_job.quote_number; end if;
     if from_job.merged_into_project_id is not null then raise exception 'J% was already merged into another job.', from_job.job_number; end if;
+    if from_job.pipeline_stage in ('complete', 'archived') then raise exception 'J% is %: reopen it before merging it.', from_job.job_number, from_job.pipeline_stage; end if;
     if (into_job.client_id is not null and from_job.client_id is distinct from into_job.client_id)
        or (into_job.client_id is null and lower(trim(from_job.client_name)) is distinct from lower(trim(into_job.client_name))) then
       raise exception 'J% is for % and J% is for %: only one client''s jobs can be merged.', from_job.job_number, from_job.client_name, into_job.job_number, into_job.client_name;
@@ -141,19 +151,31 @@ begin
     select coalesce(max(sort_order), 0) into v_sort from cost_centres where project_id = into_job.id;
     update cost_centres set project_id = into_job.id, name = format('J%s: %s', from_job.job_number, name), sort_order = v_sort + 1 + sort_order
       where project_id = from_job.id;
+    -- variations numbered after the merged job's own (variation_number is per job)
+    select coalesce(max(variation_number), 0) into v_var_base from job_variation_entries where project_id = into_job.id;
+    update job_variation_entries set variation_number = v_var_base + variation_number where project_id = from_job.id and variation_number is not null;
+    v_left := '{}';
     foreach v_table in array v_tables loop
       v_moved := v_moved || jsonb_build_object(v_table, _project_merge_move(v_table, from_job.id, into_job.id));
+      execute format('select count(*) from %I where project_id = $1', v_table) into v_n using from_job.id;
+      if v_n > 0 then v_left := v_left || format('%s %s', v_n, replace(v_table, '_', ' ')); end if;
     end loop;
     update meetings set project_ids = array_replace(project_ids, from_job.id, into_job.id) where from_job.id = any (project_ids);
     update sm8_deleted_activities set project_id = into_job.id where project_id = from_job.id;
     update activity_log set entity_id = into_job.id where entity_type = 'project' and entity_id = from_job.id;
+    update purchase_order_line_items set destination_job_id = into_job.id where destination_job_id = from_job.id;
+    update payment_milestones set project_id = into_job.id where project_id = from_job.id;
+    update projects set warranty_of_project_id = into_job.id where warranty_of_project_id = from_job.id;
+    update chat_messages set tag_suggested_project_id = into_job.id where tag_suggested_project_id = from_job.id;
+    update email_threads set suggested_project_id = into_job.id where suggested_project_id = from_job.id;
 
     update projects set merged_into_project_id = into_job.id, merged_at = now(), pipeline_stage = 'archived', status = 'merged' where id = from_job.id;
     insert into project_merges (into_project_id, from_project_id, from_job_number, moved, merged_by)
       values (into_job.id, from_job.id, from_job.job_number, v_counts || jsonb_build_object('tables', v_moved), auth.uid());
     perform _po_log('project', into_job.id, 'merged', format('J%s (%s) merged into this job: %s stages, %s shifts, %s POs, %s bills, %s invoices, %s variations, %s tasks, %s documents, %s photos, %s bookings',
       from_job.job_number, from_job.name, v_counts->>'stages', v_counts->>'shifts', v_counts->>'purchase_orders', v_counts->>'bills', v_counts->>'invoices',
-      v_counts->>'variations', v_counts->>'tasks', v_counts->>'documents', v_counts->>'photos', v_counts->>'bookings'));
+      v_counts->>'variations', v_counts->>'tasks', v_counts->>'documents', v_counts->>'photos', v_counts->>'bookings')
+      || case when array_length(v_left, 1) > 0 then format('. Left on J%s because this job already has the same (open J%s''s record to see them): %s', from_job.job_number, from_job.job_number, array_to_string(v_left, ', ')) else '' end);
     perform _po_log('project', from_job.id, 'merged', format('Merged into J%s (%s); this J number now opens that job', into_job.job_number, into_job.name));
     v_summary := v_summary || format('J%s', from_job.job_number);
   end loop;
@@ -163,3 +185,28 @@ end;
 $$;
 revoke all on function public.project_merge(uuid, uuid[]) from public, anon;
 grant execute on function public.project_merge(uuid, uuid[]) to authenticated;
+
+-- New work that names a merged job lands on the job it was merged into (its stages are there now).
+create or replace function public._follow_merged_project()
+returns trigger language plpgsql set search_path = public as $$
+declare
+  v_into uuid;
+begin
+  if new.project_id is not null then
+    select merged_into_project_id into v_into from projects where id = new.project_id;
+    if v_into is not null then new.project_id := v_into; end if;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public._follow_merged_project() from public, anon, authenticated;
+drop trigger if exists trg_time_entries_follow_merged on public.time_entries;
+create trigger trg_time_entries_follow_merged before insert on public.time_entries for each row execute function public._follow_merged_project();
+drop trigger if exists trg_schedule_assignments_follow_merged on public.schedule_assignments;
+create trigger trg_schedule_assignments_follow_merged before insert on public.schedule_assignments for each row execute function public._follow_merged_project();
+drop trigger if exists trg_purchase_orders_follow_merged on public.purchase_orders;
+create trigger trg_purchase_orders_follow_merged before insert on public.purchase_orders for each row execute function public._follow_merged_project();
+drop trigger if exists trg_job_tasks_follow_merged on public.job_tasks;
+create trigger trg_job_tasks_follow_merged before insert on public.job_tasks for each row execute function public._follow_merged_project();
+drop trigger if exists trg_job_material_usage_follow_merged on public.job_material_usage;
+create trigger trg_job_material_usage_follow_merged before insert on public.job_material_usage for each row execute function public._follow_merged_project();

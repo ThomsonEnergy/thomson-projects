@@ -5,12 +5,15 @@
 // client's other jobs, see what will move (project_merge_preview), Merge (project_merge, one
 // database step, all or nothing), then the page reloads. Writes nothing itself.
 
-const MERGE_COUNT_LABELS = [['stages', 'stage'], ['shifts', 'shift'], ['purchase_orders', 'PO'], ['bills', 'bill'], ['invoices', 'invoice'],
-  ['variations', 'variation'], ['tasks', 'task'], ['documents', 'document'], ['photos', 'photo'], ['bookings', 'booking'], ['notes', 'note'],
-  ['materials_used', 'material used'], ['stcs', 'STC claim'], ['assets', 'asset'], ['inspections', 'inspection'], ['emails', 'email'], ['contacts', 'contact']];
+// [count key, one, many]
+const MERGE_COUNT_LABELS = [['stages', 'stage', 'stages'], ['shifts', 'shift', 'shifts'], ['purchase_orders', 'PO', 'POs'], ['bills', 'bill', 'bills'],
+  ['invoices', 'invoice', 'invoices'], ['variations', 'variation', 'variations'], ['tasks', 'task', 'tasks'], ['documents', 'document', 'documents'],
+  ['photos', 'photo', 'photos'], ['bookings', 'booking', 'bookings'], ['notes', 'note', 'notes'], ['materials_used', 'material used', 'materials used'],
+  ['stcs', 'STC claim', 'STC claims'], ['assets', 'asset', 'assets'], ['inspections', 'inspection', 'inspections'], ['emails', 'email', 'emails'],
+  ['contacts', 'contact', 'contacts']];
 
 function mergeCountsText(counts) {
-  const parts = MERGE_COUNT_LABELS.map(([k, label]) => { const n = Number(counts?.[k]) || 0; return n ? `${n} ${label}${n === 1 ? '' : (label === 'PO' ? 's' : 's')}` : ''; }).filter(Boolean);
+  const parts = MERGE_COUNT_LABELS.map(([k, one, many]) => { const n = Number(counts?.[k]) || 0; return n ? `${n} ${n === 1 ? one : many}` : ''; }).filter(Boolean);
   return parts.length ? parts.join(', ') : 'nothing on it yet';
 }
 
@@ -31,7 +34,7 @@ async function renderJobMerge(project, containerId) {
     const { data: merges } = await supabaseClient.from('project_merges').select('from_job_number, created_at').eq('into_project_id', project.id).order('created_at');
     if ((merges || []).length) parts.push(`<p class="subtitle" style="font-size:12px; margin:0 0 6px;">Merged in: ${merges.map(m => `J${escapeHtml(m.from_job_number)}`).join(', ')}</p>`);
   }
-  if (role === 'admin' && project.job_number && !project.merged_into_project_id) {
+  if (role === 'admin' && project.job_number && !project.merged_into_project_id && !['complete', 'archived'].includes(project.pipeline_stage)) {
     parts.push(`<button type="button" class="secondary" id="merge-jobs-btn" style="font-size:12px; padding:6px 10px;">Merge another job into this one</button>`);
   }
   el.innerHTML = parts.join('');
@@ -61,28 +64,35 @@ async function openMergeJobsPanel(project) {
   q('#mj-cancel').addEventListener('click', () => overlay.remove());
   const next = q('#mj-next');
   if (!next) return;
+  const msg = q('#mj-msg');
+  // One button, two steps: See what will move (for the ticked jobs), then Merge exactly those. Ticking
+  // or unticking a job after the preview goes back to step one, so the merge is always what was shown.
+  let previewedIds = null;
+  const reset = () => { previewedIds = null; q('#mj-preview').innerHTML = ''; next.textContent = 'See what will move'; next.disabled = false; };
+  overlay.querySelectorAll('.mj-pick').forEach(c => c.addEventListener('change', reset));
   next.addEventListener('click', async () => {
     const ids = [...overlay.querySelectorAll('.mj-pick:checked')].map(c => c.value);
-    const msg = q('#mj-msg');
     if (!ids.length) { msg.innerHTML = '<div class="error-box">Tick at least one job.</div>'; return; }
-    next.disabled = true; next.textContent = 'Counting...';
-    const { data: preview, error: pErr } = await supabaseClient.rpc('project_merge_preview', { p_from: ids });
-    if (pErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(pErr))}</div>`; next.disabled = false; next.textContent = 'See what will move'; return; }
     msg.innerHTML = '';
-    q('#mj-preview').innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; padding:8px;">
-      ${(preview || []).map(p => `<p style="margin:4px 0; font-size:13px;"><strong>J${escapeHtml(p.job_number)} ${escapeHtml(p.name)}</strong>: ${escapeHtml(mergeCountsText(p.counts))}</p>`).join('')}
-      <p class="subtitle" style="font-size:12px; margin:6px 0 0;">Nothing is re-costed and no invoice changes. Both jobs' activity logs record the move.</p>
-    </div>`;
-    next.textContent = `Merge ${ids.length === 1 ? 'this job' : `these ${ids.length} jobs`} into ${projectRef(project)}`;
-    next.disabled = false;
-    next.onclick = async () => {
-      if (!confirm(`Merge ${ids.length === 1 ? 'this job' : `these ${ids.length} jobs`} into ${projectRef(project)}? There is no undo button.`)) return;
-      next.disabled = true; next.textContent = 'Merging...';
-      const { data, error: mErr } = await supabaseClient.rpc('project_merge', { p_into: project.id, p_from: ids });
-      if (mErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(mErr))}</div>`; next.disabled = false; next.textContent = 'Try again'; return; }
-      showToast(`${(data?.merged || []).join(', ')} merged into J${data?.into_job_number}`);
-      overlay.remove();
-      location.reload();
-    };
+    if (!previewedIds) {
+      next.disabled = true; next.textContent = 'Counting...';
+      const { data: preview, error: pErr } = await supabaseClient.rpc('project_merge_preview', { p_from: ids });
+      if (pErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(pErr))}</div>`; reset(); return; }
+      q('#mj-preview').innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; padding:8px;">
+        ${(preview || []).map(p => `<p style="margin:4px 0; font-size:13px;"><strong>J${escapeHtml(p.job_number)} ${escapeHtml(p.name)}</strong>: ${escapeHtml(mergeCountsText(p.counts))}</p>`).join('')}
+        <p class="subtitle" style="font-size:12px; margin:6px 0 0;">Nothing is re-costed and no invoice changes. Both jobs' activity logs record the move.</p>
+      </div>`;
+      previewedIds = ids;
+      next.textContent = `Merge ${ids.length === 1 ? 'this job' : `these ${ids.length} jobs`} into ${projectRef(project)}`;
+      next.disabled = false;
+      return;
+    }
+    if (!confirm(`Merge ${previewedIds.length === 1 ? 'this job' : `these ${previewedIds.length} jobs`} into ${projectRef(project)}? There is no undo button.`)) return;
+    next.disabled = true; next.textContent = 'Merging...';
+    const { data, error: mErr } = await supabaseClient.rpc('project_merge', { p_into: project.id, p_from: previewedIds });
+    if (mErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(mErr))}</div>`; next.disabled = false; next.textContent = 'Try the merge again'; return; }
+    showToast(`${(data?.merged || []).join(', ')} merged into J${data?.into_job_number}`);
+    overlay.remove();
+    location.reload();
   });
 }
