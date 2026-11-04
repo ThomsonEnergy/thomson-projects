@@ -2723,7 +2723,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=4';
+  s.src = '/js/global-search.js?v=5';
   document.head.appendChild(s);
 }
 

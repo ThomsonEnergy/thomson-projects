@@ -253,12 +253,26 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
   });
 
   const [{ data: projects, error }, { data: linked, error: linkErr }] = await Promise.all([
-    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, sm8_job_number, cost_centres(id)').not('sm8_job_uuid', 'is', null),
+    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, sm8_job_number, merged_into_project_id, cost_centres(id)').not('sm8_job_uuid', 'is', null),
     supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null),
   ]);
   if (error) throw error;
   if (linkErr) throw linkErr;
   const profileByStaff = new Map((linked || []).map(p => [p.sm8_staff_uuid, p.id]));
+  // A job merged into another (item 47): its ServiceM8 time and checklist land on the merged job, on
+  // the stage that came from it when there is just one ("J7010: ...").
+  const intoIds = [...new Set((projects || []).map(p => p.merged_into_project_id).filter(Boolean))];
+  const { data: intoRows, error: intoErr } = intoIds.length
+    ? await supabaseAdmin.from('projects').select('id, job_number, quote_number, cost_centres(id, name)').in('id', intoIds)
+    : { data: [] };
+  if (intoErr) throw intoErr;
+  const intoById = new Map((intoRows || []).map(r => [r.id, r]));
+  const syncTarget = (p) => {
+    const into = p.merged_into_project_id && intoById.get(p.merged_into_project_id);
+    if (!into) return p;
+    const fromStages = (into.cost_centres || []).filter(c => String(c.name || '').startsWith(`J${p.job_number}: `));
+    return { ...p, id: into.id, job_number: into.job_number, quote_number: into.quote_number, cost_centres: fromStages };
+  };
 
   // Per job rather than one bulk call: ServiceM8's filter has no "in", and
   // the whole account's history of check-ins can be far bigger than the
@@ -286,9 +300,10 @@ async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, g
       summary.checklistSeen += items.length;
       // A job with one stage puts the time on it; otherwise it is left
       // unassigned to a stage, like a clock-in that picked none.
-      const centreId = (project.cost_centres || []).length === 1 ? project.cost_centres[0].id : null;
-      await copyJobLabour(supabaseAdmin, project, activities.filter(a => isOn(a.activity_was_recorded)), profileByStaff, centreId, summary);
-      await copyJobChecklist(supabaseAdmin, userId, project, items, profileByStaff, summary);
+      const target = syncTarget(project);
+      const centreId = (target.cost_centres || []).length === 1 ? target.cost_centres[0].id : null;
+      await copyJobLabour(supabaseAdmin, target, activities.filter(a => isOn(a.activity_was_recorded)), profileByStaff, centreId, summary);
+      await copyJobChecklist(supabaseAdmin, userId, target, items, profileByStaff, summary);
       summary.jobs++;
     } catch (err) {
       console.error('sm8-labour job error:', project.sm8_job_uuid, err.message);

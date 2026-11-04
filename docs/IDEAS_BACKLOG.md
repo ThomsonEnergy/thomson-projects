@@ -30,10 +30,10 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 | 40 | Delete and Already paid buttons on the Emailed bills page | LIVE 4 Nov 2026 (spec A11), migration 20261128030919 | N | None |
-| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 |
+| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 | N | None |
 | 46 | Charge rates per client and per job (Standard, Commercial 115%, Mates rates 85%...) applied to quotes, variations, invoice actuals and the Schedule of Rates | LIVE 4 Nov 2026 (spec D1a), migration 20261128070000 | N | None |
 | 48 | Commercial agreements: a builder's % off the Schedule of Rates, sent as an FYI letter, shown on invoices as full rates then the agreement line, withdrawn in one click (SOPA, legal action, our choice) | Planned 4 Nov 2026, waiting on owner's yes | N | Builds on 46 |
-| 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | Planned 4 Nov 2026, waiting on owner's yes | N | Build after 46 (same page) | N | Anthropic key on staging |
+| 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | LIVE 4 Nov 2026 (spec A13e), migration 20261128080000 | N | None |
 
 ## High lead time, start now
 
@@ -1023,7 +1023,7 @@ Done means:
 
 Touches: `public/settings.html` (loads the new script), `public/js/settings-rate-cards.js` (new), `public/clients.html`, `public/project.html` (two `RATE_TIERS` lines plus loading the chip script), `public/js/job-rate-card.js` (new), `public/js/variation-fixed-editor.js`, `public/quote.html` and `public/js/schedule-of-rates.js` (level named), `netlify/functions/get-invoiceable-actuals.js`, `netlify/functions/_shared/variation-lines.js`, `netlify/functions/generate-client-document-pdf.js` (job Schedule of Rates at the job's level), one migration (`rate_cards`, `clients.rate_card_id`, `projects.rate_card_id`, the default trigger, `get_quote_by_token` and `get_schedule_of_rates` taking the level). Overlaps: none (PR 247 is the Emailed bills page; waiting items 4, 26, 37, 38, 40 touch none of these). Kind: feature (into `staging`); migration yes; money yes (what clients are charged), stock no, RLS yes (one new table, everyone reads, pricing roles write), payroll no. Size: medium (half a day). Test on staging: sales@staging.test, the five clicks above; no keys needed. Best model: Fable 5.1, effort xhigh, because it changes what every client is charged, with a migration.
 
-## 47. Merge a client's jobs into one job with separate cost centres (planned 4 Nov 2026, waiting on the owner's yes)
+## 47. Merge a client's jobs into one job with separate cost centres (planned, yes and LIVE 4 Nov 2026, see PROJECT_SPEC.md A13e)
 
 Owner's ask (4 Nov 2026): when a client has more than one job, merge them into one job, each old job becoming its own cost centre (stage) on the one job.
 
