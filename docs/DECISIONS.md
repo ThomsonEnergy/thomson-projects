@@ -2,6 +2,11 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 4 Nov 2026
+
+- Bug found (owner, J7057): approving a quote copies its stages, lines, contacts and milestones onto the new job row but leaves the quote's clocked shifts, Stock draws and purchase orders on the quote (`_shared/create-job-from-quote.js`). On production only Q1006 to J7057 is affected (3 shifts, 10.25 hours). Fix planned, waiting on yes: move them at approval with the stages re-pointed, plus a one-off data fix for J7057. Detail: `docs/PROJECT_SPEC.md` A3 once fixed.
+- Planned, waiting on yes: fixed-price variation labour lines pick a rate tier and hours from the Schedule of Rates instead of a typed dollar figure; the editor moves out of `project.html`. Detail: `docs/IDEAS_BACKLOG.md` item 43.
+
 ## 3 Nov 2026
 
 - RELEASED (owner: "release", PR 255, merge commit 1f9d899): PRs 216 (fix or delete ServiceM8 time), 223 (quotes edited only in Quote tab steps), 227 (software factory checks), 231 (Postie filing), 239 (Leads tab on Quotes, lead and call request notifications, 7am lead reminder), 253 (Time tab on every job, move shifts to another job). Production migrations applied by hand before the merge: 20261125000000 (sm8_deleted_activities table and delete trigger), 20261127000000 (lead notification triggers); 20261025000001 recorded as already applied. Still unrecorded on production but present: 20261017120000 and 20261124160000 (known laptop item in `docs/STAGING.md`).
