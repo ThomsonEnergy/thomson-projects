@@ -10,7 +10,8 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 async function rateCardFor(supabaseAdmin, projectId) {
   const none = { id: null, name: 'Standard', percent: 100, factor: 1 };
   if (!projectId) return none;
-  const { data } = await supabaseAdmin.from('projects').select('rate_card_id, rate_cards(id, name, percent)').eq('id', projectId).maybeSingle();
+  const { data, error } = await supabaseAdmin.from('projects').select('rate_card_id, rate_cards(id, name, percent)').eq('id', projectId).maybeSingle();
+  if (error) throw error;  // a money path: never fall back to Standard on a failed read
   const rc = data?.rate_cards;
   if (!rc || !(Number(rc.percent) > 0)) return none;
   return { id: rc.id, name: rc.name, percent: Number(rc.percent), factor: Number(rc.percent) / 100 };

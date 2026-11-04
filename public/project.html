@@ -4084,15 +4084,6 @@
       });
     }
 
-    // The Billable Rates at this quote's or job's charge rate level (item 46, js/rate-cards.js).
-    async function loadRateTiersForProject(project) {
-      const [{ data: tiersData }, cards] = await Promise.all([
-        supabaseClient.from('billable_rate_tiers').select('*').order('sort_order'),
-        loadRateCards(),
-      ]);
-      return tiersAtCard(tiersData || [], rateCardOf(project, cards));
-    }
-
     async function wireQuoteSteps(project) {
       try {
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
@@ -8048,7 +8039,7 @@
     function openFixedVariationEditor(project, entry, onSaved) {
       if (window.openFixedVariationEditorPanel) return window.openFixedVariationEditorPanel(project, entry, onSaved);
       const s = document.createElement('script');
-      s.src = '/js/variation-fixed-editor.js?v=1';
+      s.src = '/js/variation-fixed-editor.js?v=2';
       s.onload = () => window.openFixedVariationEditorPanel(project, entry, onSaved);
       s.onerror = () => showToast('Could not load the variation editor. Check the connection and try again.', { error: true });
       document.head.appendChild(s);

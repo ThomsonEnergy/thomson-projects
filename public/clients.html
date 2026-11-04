@@ -184,11 +184,17 @@
   <script>
     let allClients = [];
     let editingClientId = null;
-    // the charge rate levels (item 46): the Standard one is the blank choice, the client row keeps null
+    // the charge rate levels (item 46): a new client starts on the default level; if the list cannot
+    // load the box is left alone and not saved, so a client's level is never wiped by mistake
+    let rateCardsLoaded = false;
+    let defaultRateCardId = '';
     loadRateCards().then(cards => {
       const sel = document.getElementById('c-rate-card');
-      sel.innerHTML = cards.map(c => `<option value="${c.is_default ? '' : escapeHtml(c.id)}">${escapeHtml(rateCardLabel(c))}</option>`).join('') || '<option value="">Standard</option>';
-    }).catch(() => {});
+      sel.innerHTML = cards.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(rateCardLabel(c))}</option>`).join('') || '<option value="">Standard</option>';
+      defaultRateCardId = (cards.find(c => c.is_default) || {}).id || '';
+      if (!editingClientId) sel.value = defaultRateCardId;
+      rateCardsLoaded = true;
+    }).catch(() => { document.getElementById('c-rate-card').disabled = true; });
     let contactCount = 0;
     let csvRows = [];
     let csvHeaders = [];
@@ -264,7 +270,7 @@
       document.getElementById('c-address').value = '';
       document.getElementById('c-abn').value = '';
       document.getElementById('c-terms').value = 'cod';
-      document.getElementById('c-rate-card').value = '';
+      document.getElementById('c-rate-card').value = defaultRateCardId;
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -483,7 +489,7 @@
         address: document.getElementById('c-address').value.trim(),
         abn: document.getElementById('c-abn').value.trim() || null,
         payment_terms: document.getElementById('c-terms').value,
-        rate_card_id: document.getElementById('c-rate-card').value || null,
+        ...(rateCardsLoaded ? { rate_card_id: document.getElementById('c-rate-card').value || null } : {}),
         client_type: document.getElementById('c-type').value,
         notes: document.getElementById('c-notes').value.trim(),
       };

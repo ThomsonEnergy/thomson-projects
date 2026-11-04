@@ -117,7 +117,7 @@
       const esc = escapeHtml;
       const content = document.getElementById('content');
       const [{ data, error }, { data: settings }] = await Promise.all([
-        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: new URLSearchParams(location.search).get('project') || null }),  // a job's Company docs PDF prints at the job's level (item 46)
+        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: new URLSearchParams(location.search).get('project') || null, p_token: new URLSearchParams(location.search).get('token') || null }),  // a job's Company docs PDF prints at the job's level (item 46)
         supabaseClient.rpc('get_public_company_settings'),
       ]);
       if (error || !data) { content.innerHTML = `<div class="error-box" style="margin:24px;">The Schedule of Rates could not be loaded. Please try again or contact us.</div>`; return; }

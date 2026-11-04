@@ -59,26 +59,44 @@ drop trigger if exists trg_projects_rate_card_default on public.projects;
 create trigger trg_projects_rate_card_default before insert or update of client_id on public.projects
   for each row execute function public.projects_rate_card_default();
 
--- The Schedule of Rates: at a job's level when one is given (its Company docs PDF), else Standard
--- (the public rates page and the Documents page). Replaces the no-argument version.
+-- One default level at a time (new clients start on it): swapped in one step. Pricing roles.
+create or replace function public.rate_card_set_default(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_pricing_role() then raise exception 'Only Admin, Finance or Sales can change the default level.'; end if;
+  if not exists (select 1 from rate_cards where id = p_id) then raise exception 'Level not found.'; end if;
+  update rate_cards set is_default = false where is_default and id <> p_id;
+  update rate_cards set is_default = true where id = p_id;
+end;
+$$;
+revoke all on function public.rate_card_set_default(uuid) from public, anon;
+grant execute on function public.rate_card_set_default(uuid) to authenticated;
+
+-- The Schedule of Rates: at a job's level when the job and its quote token are given (its Company
+-- docs PDF, printed by the server), else Standard (the public rates page and the Documents page), so
+-- a job id alone shows nobody another client's level. Replaces the no-argument version.
 drop function if exists public.get_schedule_of_rates();
-create or replace function public.get_schedule_of_rates(p_project_id uuid default null)
+create or replace function public.get_schedule_of_rates(p_project_id uuid default null, p_token text default null)
  returns json
  language sql
  stable security definer
  set search_path = public
 as $function$
+  with lvl as (
+    select rc.name, rc.percent from projects p join rate_cards rc on rc.id = p.rate_card_id
+    where p_project_id is not null and p_token is not null and p.id = p_project_id and p.quote_token = p_token
+  )
   select json_build_object(
     'rates', (
-      select coalesce(json_agg(json_build_object('name', t.name, 'sell_rate', round(t.sell_rate * coalesce(_rate_factor(p_project_id), 1), 2)) order by t.sort_order), '[]'::json)
+      select coalesce(json_agg(json_build_object('name', t.name, 'sell_rate', round(t.sell_rate * coalesce((select percent from lvl), 100) / 100, 2)) order by t.sort_order), '[]'::json)
       from billable_rate_tiers t
     ),
     'reviewed_on', (select s.rates_reviewed_on from company_settings s where s.id = 1),
-    'rate_card_name', (select rc.name from projects p join rate_cards rc on rc.id = p.rate_card_id where p.id = p_project_id and rc.percent <> 100)
+    'rate_card_name', (select name from lvl where percent <> 100)
   );
 $function$;
-revoke execute on function public.get_schedule_of_rates(uuid) from public;
-grant execute on function public.get_schedule_of_rates(uuid) to anon, authenticated;
+revoke execute on function public.get_schedule_of_rates(uuid, text) from public;
+grant execute on function public.get_schedule_of_rates(uuid, text) to anon, authenticated;
 
 -- get_quote_by_token (migration 20261124131544) with the estimate's Schedule of Rates at the quote's
 -- level and the level's name (null at Standard).

@@ -5,14 +5,32 @@
 // job's level; the chip writes projects.rate_card_id (pricing roles) and reloads the page so every
 // rate on it is read again at the new level. Amounts are still worked out on the server.
 
-async function loadRateCards() {
-  const { data } = await supabaseClient.from('rate_cards').select('id, name, percent, is_default').order('sort_order').order('name');
-  return data || [];
+let rateCardsPromise = null;
+function loadRateCards() {
+  if (!rateCardsPromise) {
+    rateCardsPromise = supabaseClient.from('rate_cards').select('id, name, percent, is_default').order('sort_order').order('name')
+      .then(({ data, error }) => { if (error) { rateCardsPromise = null; throw error; } return data || []; });
+  }
+  return rateCardsPromise;
 }
 
-// The level for a project row ({ rate_card_id }) out of the loaded cards: Standard when none.
+const STANDARD_RATE_CARD = { id: null, name: 'Standard', percent: 100, is_default: false };
+
+// The level for a project row ({ rate_card_id }) out of the loaded cards. No level means Standard
+// (100%), the same reading the server and the database give it; the default level only applies to
+// new clients.
 function rateCardOf(project, cards) {
-  return (cards || []).find(c => c.id === project?.rate_card_id) || (cards || []).find(c => c.is_default) || { id: null, name: 'Standard', percent: 100, is_default: true };
+  return (cards || []).find(c => c.id === project?.rate_card_id) || STANDARD_RATE_CARD;
+}
+
+// The Billable Rates tiers at the quote's or job's level (project.html and the variation editor).
+async function loadRateTiersForProject(project) {
+  const [{ data: tiers, error }, cards] = await Promise.all([
+    supabaseClient.from('billable_rate_tiers').select('*').order('sort_order'),
+    loadRateCards(),
+  ]);
+  if (error) throw error;
+  return tiersAtCard(tiers || [], rateCardOf(project, cards));
 }
 
 const rateCardFactor = (card) => (Number(card?.percent) > 0 ? Number(card.percent) / 100 : 1);
@@ -38,15 +56,16 @@ async function renderJobRateCard(project, containerId) {
   const [cards, role] = await Promise.all([loadRateCards(), getMyRole()]);
   const card = rateCardOf(project, cards);
   const canEdit = isPricingRole(role) && cards.length > 1;
+  const options = card.id ? cards : [STANDARD_RATE_CARD, ...cards];  // a job with no level yet: Standard until one is picked
   el.innerHTML = `<span class="subtitle">Charge rates:</span> <span class="badge draft">${escapeHtml(rateCardLabel(card))}</span>
-    ${canEdit ? `<select id="job-rate-card" style="width:auto; display:inline-block; margin-left:6px; padding:4px 8px;">${cards.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === card.id ? 'selected' : ''}>${escapeHtml(rateCardLabel(c))}</option>`).join('')}</select>` : ''}
+    ${canEdit ? `<select id="job-rate-card" style="width:auto; display:inline-block; margin-left:6px; padding:4px 8px;">${options.map(c => `<option value="${escapeHtml(c.id || '')}" ${c.id === card.id ? 'selected' : ''}>${escapeHtml(rateCardLabel(c))}</option>`).join('')}</select>` : ''}
     <span class="subtitle" style="font-size:11px;">Labour on this ${project.job_number ? 'job' : 'quote'} is priced at this level from now on; lines already saved keep their rate.</span>`;
   const sel = el.querySelector('#job-rate-card');
   if (sel) sel.addEventListener('change', async () => {
     sel.disabled = true;
     const { error } = await supabaseClient.from('projects').update({ rate_card_id: sel.value || null }).eq('id', project.id);
     if (error) { alert(friendlyError(error)); sel.disabled = false; return; }
-    const to = cards.find(c => c.id === sel.value);
+    const to = cards.find(c => c.id === sel.value) || STANDARD_RATE_CARD;
     await logActivity('project', project.id, 'rate_card', `Charge rates set to ${rateCardLabel(to)} (was ${rateCardLabel(card)})`);
     location.reload();
   });

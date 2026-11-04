@@ -19,7 +19,7 @@ async function loadRateCardsPanel() {
             <td><input class="rc-name" data-id="${c.id}" value="${escapeHtml(c.name)}" /></td>
             <td class="num"><input class="rc-percent" data-id="${c.id}" type="number" step="1" min="1" max="500" value="${escapeHtml(c.percent)}" style="text-align:right; width:90px;" /></td>
             <td class="subtitle">${money(Math.round(120 * (Number(c.percent) || 100)) / 100)}/hr</td>
-            <td><input type="radio" name="rc-default" class="rc-default" data-id="${c.id}" ${c.is_default ? 'checked' : ''} style="width:auto;" /></td>
+            <td><input type="radio" name="rc-default" class="rc-default" data-id="${c.id}" ${c.is_default ? 'checked' : ''} style="width:auto;" title="New clients start on this level" /></td>
             <td>${c.is_default ? '' : `<button type="button" class="secondary rc-delete" data-id="${c.id}" style="font-size:12px; padding:6px 10px;">Delete</button>`}</td>
           </tr>`).join('')}
       </tbody>
@@ -33,10 +33,8 @@ async function loadRateCardsPanel() {
     if (e) alert('Could not save: ' + e.message); else { showToast('Saved'); loadRateCardsPanel(); }
   }));
   listEl.querySelectorAll('.rc-default').forEach(radio => radio.addEventListener('change', async () => {
-    // one default at a time (unique index): clear the old one first
-    const { error: e1 } = await supabaseClient.from('rate_cards').update({ is_default: false }).eq('is_default', true);
-    const { error: e2 } = e1 ? { error: e1 } : await supabaseClient.from('rate_cards').update({ is_default: true }).eq('id', radio.dataset.id);
-    if (e2) alert('Could not save: ' + e2.message); else showToast('Default level saved. New clients and jobs take it.');
+    const { error: e } = await supabaseClient.rpc('rate_card_set_default', { p_id: radio.dataset.id });  // one step, one default
+    if (e) alert('Could not save: ' + e.message); else showToast('Default level saved. New clients start on it.');
     loadRateCardsPanel();
   }));
   listEl.querySelectorAll('.rc-delete').forEach(btn => btn.addEventListener('click', async () => {

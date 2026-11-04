@@ -372,10 +372,11 @@ async function handle(event) {
     } else if (doc_type === 'schedule_of_rates') {
       // record_id is the job: the Schedule of Rates at today's rates goes in its "Company docs"
       // folder, so the job keeps the version the client was sent and the job email can attach it.
-      const { data: project, error } = await supabaseAdmin.from('projects').select('id').eq('id', record_id).single();
+      const { data: project, error } = await supabaseAdmin.from('projects').select('id, quote_token').eq('id', record_id).single();
       if (error || !project) throw new Error(error?.message || 'Job not found');
 
-      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1&project=${project.id}`, {  // at the job's charge rate level (item 46)
+      // at the job's charge rate level (item 46): the quote token proves the job to the public page
+      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1&project=${project.id}&token=${encodeURIComponent(project.quote_token || '')}`, {
         printBackground: true,
         preferCSSPageSize: true,
         margin: { top: 0, right: 0, bottom: 0, left: 0 },

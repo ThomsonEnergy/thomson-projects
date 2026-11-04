@@ -67,7 +67,7 @@
       const listEl = document.getElementById('cd-list');
       const [{ data: docs, error }, { data: sor }] = await Promise.all([
         supabaseClient.from('company_documents').select('*, profiles(full_name)').order('sort_order').order('title'),
-        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: null }),
+        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: null, p_token: null }),
       ]);
       if (error) { listEl.innerHTML = `<div class="error-box">${esc(error.message)}</div>`; return; }
       if (!docs.length) { listEl.innerHTML = `<p class="subtitle">No documents yet.</p>`; return; }
