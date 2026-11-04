@@ -30,7 +30,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -549,8 +549,9 @@
 
     // inboxItemId: set when the bill came from the Emailed bills page; saving ticks it off there.
     async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null, inboxItemId = null) {
-      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
+      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand, part_number, barcode');
       const materials = allMaterials || [];
+      const partNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
       const { data: openPOs } = await supabaseClient
         .from('purchase_orders')
@@ -569,12 +570,17 @@
         if (matchedPO) autoMatchedPoId = matchedPO.id;
       }
 
+      const byCodeIds = new Set();
       const matchedPOForLines = autoMatchedPoId ? (openPOs || []).find(po => po.id === autoMatchedPoId) : null;
       const genericPoLines = matchedPOForLines ? (matchedPOForLines.purchase_order_line_items || []).filter(pl => !pl.material_id) : [];
 
       const lineItems = (extracted.line_items || []).map(li => {
         let bestMatch = null, bestScore = 0;
-        materials.forEach(m => {
+        // the item with this part number or barcode (scanned on site, or typed on the Stock page) wins outright
+        const code = partNorm(li.part_number);
+        const byCode = code ? materials.find(m => (m.barcode && partNorm(m.barcode) === code) || (m.part_number && partNorm(m.part_number) === code)) : null;
+        if (byCode) { bestMatch = byCode; bestScore = 1; }
+        else materials.forEach(m => {
           const score = fuzzyMatchScore(m.name, li.description);
           if (score > bestScore) { bestScore = score; bestMatch = m; }
         });
@@ -588,6 +594,7 @@
           if (score > genericPoScore) { genericPoScore = score; genericPoMatch = pl; }
         });
 
+        if (byCode) byCodeIds.add(byCode.id);
         return {
           ...li,
           suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null,
@@ -644,6 +651,8 @@
             ${lineItems.map((li, i) => `
               <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
                 <input class="rli-desc" value="${escapeHtml(li.description)}" placeholder="Description" style="margin-bottom:6px;" />
+                <input type="hidden" class="rli-part" value="${escapeHtml(li.part_number || '')}" />
+                ${li.part_number ? `<p class="subtitle" style="margin:0 0 6px; font-size:11px;">Part ${escapeHtml(li.part_number)}${li.suggestedMatchId && byCodeIds.has(li.suggestedMatchId) ? ' (matched to Stock by part number)' : ''}</p>` : ''}
                 <div class="grid cols-2">
                   <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${escapeHtml(li.quantity ?? 1)}" /></div>
                   <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${escapeHtml(li.unit_cost ?? 0)}" /></div>
@@ -737,6 +746,7 @@
               description: row.querySelector('.rli-desc').value.trim(),
               quantity: parseFloat(row.querySelector('.rli-qty').value) || 0,
               unit_cost: parseFloat(row.querySelector('.rli-cost').value) || 0,
+              part_number: row.querySelector('.rli-part').value.trim() || null,
               material_id: matchValue === '__new__' ? null : matchValue,
               create_material: matchValue === '__new__',
               replace_po_line_id: replaceCheckbox && replaceCheckbox.checked ? replaceCheckbox.dataset.poLineId : null,
@@ -752,8 +762,9 @@
           }
 
           // One server step, all or nothing: duplicate check by bill number, the PO (linked or new), the
-          // bill and its lines linked or flagged against the PO. Stock counts are not touched here: gear
-          // goes into stock or onto the job when its PO line is received.
+          // bill and its lines linked or flagged against the PO, and each supplier's price on the Stock
+          // items (item 44). Stock counts are not touched here: gear goes into stock or onto the job
+          // when its PO line is received.
           const { data: billId, error: saveErr } = await supabaseClient.rpc('supplier_bill_save_review', { p: {
             supplier_id: supplierId,
             bill_number: overlay.querySelector('#rev-bill-number').value.trim() || null,
