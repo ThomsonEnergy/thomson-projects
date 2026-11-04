@@ -30,7 +30,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 36 | Software factory: isolate, build, prove, ship, weekly cleanup (`docs/SOFTWARE_FACTORY.md`) | Built 27 Oct 2026, on `staging` | N | Owner: allow `*.netlify.app` on the cloud environment so phone sessions can run the smoke run |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
 | 40 | Delete and Already paid buttons on the Emailed bills page | Planned 30 Oct 2026, waiting on owner's yes | N | None |
-| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | Yes 4 Nov 2026, building in `feat/stock-scan` | N | Anthropic key on staging |
+| 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | Built 4 Nov 2026, on `staging` (spec A12, A11b), migration 20261128050000 | N | Anthropic key on staging |
 
 ## High lead time, start now
 
@@ -955,9 +955,9 @@ Done means:
 
 Touches: `public/project.html` (delete the inline editor, load the new script), `public/js/variation-fixed-editor.js` (new), `public/quote.html`, `netlify/functions/create-variation.js`, `netlify/functions/_shared/approve-variation.js`. Overlaps: none. Kind: feature (into `staging`); migration no; money yes (variation price the client signs, server recomputes it), stock no, RLS no, payroll no. Size: medium. Test on staging: sales@staging.test, the four clicks above. Best model: Fable 5.1, effort high, because it changes a price the client signs and the stage the job is billed from.
 
-## 44. Scan a part into Stock: photo of the part number or barcode, priced per supplier by price lists and bills (planned 4 Nov 2026, revised the same day, yes 4 Nov 2026)
+## 44. Scan a part into Stock: photo of the part number or barcode, priced per supplier by price lists and bills (planned 4 Nov 2026, yes and built the same day, on `staging`, see PROJECT_SPEC.md A12 and A11b)
 
-Building in: `feat/stock-scan` (PR into `staging`).
+Built 4 Nov 2026 in `feat/stock-scan`, migration 20261128050000. The Used stock panel moved out of `supabase-client.js` into `js/used-stock.js` (loaded on demand) so every page got about 13 KB lighter.
 
 Owner's ask (4 Nov 2026): the guys take a picture of an item's part number or barcode and it comes into Stock with no price. When a price list or a supplier invoice later arrives with that part on it, the price lands on our Stock item by itself.
 
