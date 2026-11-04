@@ -218,7 +218,10 @@ exports.handler = async (event) => {
       claimLabel = 'Final claim';
     } else {
       const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
-      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
+      // Claims invoiced before the job came across from ServiceM8 count too (cost_centres.imported_claims, item 45).
+      const { data: importedRows } = await supabaseAdmin.from('cost_centres').select('imported_claims').eq('project_id', projectId);
+      const importedCount = (importedRows || []).reduce((n, c) => n + (Array.isArray(c.imported_claims) ? c.imported_claims.length : 0), 0);
+      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length + importedCount;
       claimLabel = `Progress claim ${priorProgressCount + 1}`;
     }
 

@@ -233,7 +233,7 @@
       if (previousInvoices.length) {
         // these amounts come ex GST and before credit notes, so the heading says so (M39)
         sections.push({ title: 'Previous invoices on this job (ex GST, before credits)', head: ['Invoice', 'Date', 'Amount (ex GST)'], headCls: ['', 'ctr', 'num'], widths: ['44%', '28%', '28%'],
-          rows: previousInvoices.map((p) => ({ cells: [esc(p.invoice_number), p.sent_at ? dateText(new Date(p.sent_at)) : '', money(p.amount)], cls: ['', 'ctr', 'num'] })) });
+          rows: previousInvoices.map((p) => ({ cells: [esc(p.invoice_number) + (p.source === 'servicem8' ? ' (ServiceM8)' : ''), p.sent_at ? dateText(new Date(p.sent_at)) : '', money(p.amount)], cls: ['', 'ctr', 'num'] })) });
       }
 
       // ---- pieces of the sheet ----
