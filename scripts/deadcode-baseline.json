@@ -6,7 +6,6 @@
   "findings": [
     "export AER_BASE in netlify/functions/_shared/energy-plans.js: nothing outside the file uses it",
     "export ASSISTANT_MODEL in netlify/functions/_shared/chat-ai.js: nothing outside the file uses it",
-    "export AUTO_LIMIT_PCT in netlify/functions/_shared/price-list-intake.js: nothing outside the file uses it",
     "export BATTERY_HANDOVER_RULES in netlify/functions/_shared/solar-compliance-rules.js: nothing outside the file uses it",
     "export BATTERY_QUOTE_RULES in netlify/functions/_shared/solar-compliance-rules.js: nothing outside the file uses it",
     "export BUNDLE_ID in netlify/functions/_shared/apns.js: nothing outside the file uses it",

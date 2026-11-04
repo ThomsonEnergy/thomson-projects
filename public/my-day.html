@@ -111,7 +111,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -184,7 +184,7 @@
         const usedBtn = document.getElementById('used-stock-btn');
         const isJob = !!(data.projects && data.projects.job_number);
         usedBtn.style.display = isJob ? 'block' : 'none';
-        usedBtn.onclick = () => openUsedStockPanel({ projectId: data.project_id, jobLabel: projectRef(data.projects) });
+        usedBtn.onclick = () => loadUsedStock().then(() => openUsedStockPanel({ projectId: data.project_id, jobLabel: projectRef(data.projects) })).catch(err => alert(err.message));
         await renderActiveJobCard(data.project_id);
       } else {
         document.getElementById('clock-heading').textContent = 'Clock in';

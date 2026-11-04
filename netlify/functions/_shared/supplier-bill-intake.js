@@ -426,7 +426,10 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
 
 // Saves an inbox row as a supplier bill against a PO (or no PO). Lines are linked to the
 // PO's lines where the description matches, and flagged the same way the manual review
-// screen flags them. Stock levels and material prices are left alone.
+// screen flags them. A line on a Stock item (through its PO line, or by the part number or
+// barcode Tally read) sets that supplier's price through material_supplier_price_set: what we
+// paid is the supplier's current price, and the item's Buy from supplier moves its cost price
+// (spec A11b, item 44). Stock counts are left alone (gear lands when the PO line is received).
 // amount: the total a person confirmed on the Emailed bills page; the auto-save has none and
 // takes the total as read (the bill check then compares it with the lines before any approval).
 async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId = null, amount = null } = {}) {
@@ -485,6 +488,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   for (const l of (ex.line_items || []).filter(l => l.description)) {
     const unitCost = Number(l.unit_cost) || 0;
     const quantity = Number(l.quantity) || 1;
+    const partNumber = String(l.part_number || '').trim() || null;
     let best = null, bestScore = 0;
     poLines.forEach(pl => {
       const score = fuzzyMatchScore(pl.description, l.description);
@@ -501,8 +505,15 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     }
     else if (po && !poLine) flag = 'Not on the linked PO';
     else if (poLine && unitCost > Number(poLine.unit_cost) * 1.01) flag = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
+    let materialId = poLine?.material_id || null;
+    if (!materialId && partNumber && !isFreight(l.description)) {
+      // a Stock item scanned on site carries its part number or barcode: the bill finds it by that
+      const { data: byCode, error: codeErr } = await supabaseAdmin.rpc('_material_by_code', { p_barcode: partNumber, p_part_number: partNumber });
+      if (codeErr) throw codeErr;
+      materialId = byCode || null;
+    }
     lines.push({
-      bill_id: bill.id, material_id: poLine?.material_id || null, description: l.description,
+      bill_id: bill.id, material_id: materialId, description: l.description, part_number: partNumber,
       quantity, unit_cost: unitCost, po_line_item_id: poLine?.id || null, flag_reason: flag, resolution,
     });
   }
@@ -510,6 +521,9 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     const { error: lineErr } = await supabaseAdmin.from('supplier_bill_line_items').insert(lines);
     if (lineErr) throw lineErr;
   }
+  // each line's price lands on its Stock item (one database step; the auto-save, nobody looking, follows the 20% rule)
+  const { error: priceErr } = await supabaseAdmin.rpc('supplier_bill_price_lines', { p_bill_id: bill.id, p_checked: !!userId });
+  if (priceErr) throw priceErr;
 
   await supabaseAdmin.from('supplier_bill_inbox').update({
     status: 'saved', bill_id: bill.id, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),

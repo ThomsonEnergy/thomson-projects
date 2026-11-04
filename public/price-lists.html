@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'check', imports = [], changes = [], applied = [], suppliers = [], materials = {};
@@ -92,7 +92,7 @@
         : c.kind === 'match' ? `<button type="button" data-apply="${c.id}">Yes, same item</button><button type="button" class="secondary" data-skip="${c.id}">No</button>`
         : `<button type="button" data-apply="${c.id}">Switch to the new item</button><button type="button" class="secondary" data-skip="${c.id}">Keep the old one</button>`;
       return `<div class="pl-change ${dir}">
-        <div class="pl-head"><span><strong>${title}</strong> <span class="pl-chip">${esc(KIND_TEXT[c.kind] || c.kind)}</span></span>
+        <div class="pl-head"><span><strong>${title}</strong> <span class="pl-chip">${esc(KIND_TEXT[c.kind] || c.kind)}</span>${c.source === 'bill' ? ' <span class="pl-chip">From a bill</span>' : c.source === 'manual' ? ' <span class="pl-chip">By hand</span>' : ''}</span>
           <span>${money(c.old_cost)} &rarr; <strong>${money(c.new_cost)}</strong> ${pctText(c.change_pct)}</span></div>
         <div class="pl-meta">${esc(c.reason || '')}${withUndo ? ` · ${dateText(c.resolved_at)}${c.resolved_by ? '' : ' (automatic)'}` : ''}</div>
         <div class="pl-actions">${buttons}</div></div>`;
