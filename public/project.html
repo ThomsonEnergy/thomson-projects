@@ -45,7 +45,8 @@
   <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
-  <script src="/js/project-invoice-actuals.js?v=2"></script>
+  <script src="/js/project-invoice-actuals.js?v=3"></script>
+  <script src="/js/rate-cards.js?v=1"></script>
   <script src="/js/assets.js?v=3"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -840,10 +841,7 @@
       editDirty = false;
       editProject = project;
       try {
-        if (!RATE_TIERS.length) {
-          const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-          RATE_TIERS = tiersData || [];
-        }
+        if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
             .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
@@ -4088,10 +4086,7 @@
 
     async function wireQuoteSteps(project) {
       try {
-        if (!RATE_TIERS.length) {
-          const { data: tiersData } = await supabaseClient.from('billable_rate_tiers').select('*').order('sort_order');
-          RATE_TIERS = tiersData || [];
-        }
+        if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
             .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
@@ -4665,6 +4660,7 @@
 
               <div class="card">
                 <h2>Needs attention</h2>
+                <div id="summary-rate-card" style="margin:6px 0;"></div>
                 <div id="summary-ccew-line"></div>
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
               </div>
@@ -5412,6 +5408,7 @@
         refreshProjectInspectionArea();
       }
 
+      renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
@@ -8042,7 +8039,7 @@
     function openFixedVariationEditor(project, entry, onSaved) {
       if (window.openFixedVariationEditorPanel) return window.openFixedVariationEditorPanel(project, entry, onSaved);
       const s = document.createElement('script');
-      s.src = '/js/variation-fixed-editor.js?v=1';
+      s.src = '/js/variation-fixed-editor.js?v=2';
       s.onload = () => window.openFixedVariationEditorPanel(project, entry, onSaved);
       s.onerror = () => showToast('Could not load the variation editor. Check the connection and try again.', { error: true });
       document.head.appendChild(s);

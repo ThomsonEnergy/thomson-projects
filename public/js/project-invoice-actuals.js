@@ -186,10 +186,11 @@ async function openInvoiceActualCostsPanel(project) {
   const centresEl = overlay.querySelector('#ia-centres');
   const modeWrap = overlay.querySelector('#ia-mode-wrap');
   const rateNote = overlay.querySelector('#ia-rate-note');
+  const levelNote = actuals.rateCard && Number(actuals.rateCard.percent) !== 100 ? ` Charge rates: ${actuals.rateCard.name} (${actuals.rateCard.percent}% of the Billable Rates).` : '';
   const setRateNote = () => {
-    rateNote.textContent = rateMode === 'schedule'
+    rateNote.textContent = levelNote + (rateMode === 'schedule'
       ? `${rules.standardHours || 'Standard hours'}; outside them ${rules.bands.after_hours?.multiplier || 1.5}x, Saturday ${rules.bands.saturday?.multiplier || 1.5}x, Sunday ${rules.bands.sunday?.multiplier || 2}x, public holiday ${rules.bands.public_holiday?.multiplier || 2.5}x; minimum ${rules.minimumHours} hours per person per day. Switching rebuilds the clocked rows.`
-      : 'Every hour at the person\'s base rate, as clocked. Switching rebuilds the clocked rows.';
+      : 'Every hour at the person\'s base rate, as clocked. Switching rebuilds the clocked rows.');
   };
   setRateNote();
   overlay.querySelectorAll('input[name="ia-rate-mode"]').forEach(r => r.addEventListener('change', () => {

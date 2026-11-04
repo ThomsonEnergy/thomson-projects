@@ -1,7 +1,8 @@
 // Thomson Energy's Schedule of Rates: the one copy of its wording, shared by the estimate page
 // (quote.html, estimates only) and the standalone document (rates.html, Documents page).
-// rates: [{ name, sell_rate }] from billable_rate_tiers; reviewedOn: company_settings.rates_reviewed_on.
-// Needs escapeHtml and money from supabase-client.js.
+// rates: [{ name, sell_rate }] from billable_rate_tiers (at the job's charge rate level, item 46);
+// reviewedOn: company_settings.rates_reviewed_on; levelName: the level when it is not Standard
+// ("Commercial"), printed under the labour rates. Needs escapeHtml and money from supabase-client.js.
 
 function ratesAsAtText(reviewedOn) {
   const d = reviewedOn ? new Date(reviewedOn + 'T00:00:00') : new Date();
@@ -10,7 +11,7 @@ function ratesAsAtText(reviewedOn) {
 
 // Two halves, so the standalone document can put each on its own A4 sheet (the estimate page cuts
 // its own sheets and uses the whole thing).
-function scheduleOfRatesParts(rates, reviewedOn) {
+function scheduleOfRatesParts(rates, reviewedOn, levelName) {
   const esc = escapeHtml;
   return [`
     <div class="sor-h">1. Application</div>
@@ -20,6 +21,7 @@ function scheduleOfRatesParts(rates, reviewedOn) {
       <thead><tr><th>Description</th><th class="num">Unit price ex GST</th><th class="num">Unit price inc GST</th></tr></thead>
       <tbody>${(rates || []).map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1 * 100) / 100)}</td></tr>`).join('')}</tbody>
     </table>
+    ${levelName ? `<p><b>${esc(levelName)} rates.</b> The labour rates above are this client's agreed level.</p>` : ''}
     <div class="sor-h">3. Standard hours</div>
     <p><b>Standard hours:</b> Monday to Friday, 6:30am to 4:00pm.<br><b>Minimum charge:</b> 2 hours per attendance per technician.</p>
     <p>Personnel classification is determined solely by Thomson Energy based on licensing, experience, competency, and responsibility required for the task.</p>`, `
@@ -49,6 +51,6 @@ function scheduleOfRatesParts(rates, reviewedOn) {
     <p class="note-line">This document is current as at ${esc(ratesAsAtText(reviewedOn))}.</p>`];
 }
 
-function scheduleOfRatesHtml(rates, reviewedOn) {
-  return scheduleOfRatesParts(rates, reviewedOn).join('');
+function scheduleOfRatesHtml(rates, reviewedOn, levelName) {
+  return scheduleOfRatesParts(rates, reviewedOn, levelName).join('');
 }
