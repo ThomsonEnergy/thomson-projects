@@ -46,6 +46,13 @@
     let markup = savedMarkup ? num(savedMarkup.markup_percent) : markupOr45(cs?.default_markup_percent);
     const lines = saved.length ? saved.map(l => loadLine(l, markup)) : [blankLine()];
 
+    // The figures row of each line: four across on a desktop, two by two on a phone.
+    if (!document.getElementById('fv-style')) {
+      const st = document.createElement('style');
+      st.id = 'fv-style';
+      st.textContent = '.fv-row2{display:grid;grid-template-columns:90px minmax(0,1fr) 100px 90px;gap:6px;margin-bottom:10px;align-items:center}.fv-row2 .fv-l-amt{text-align:right;font-weight:600;font-size:13px;white-space:nowrap}@media(max-width:600px){.fv-row2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}';
+      document.head.appendChild(st);
+    }
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
     overlay.innerHTML = `
@@ -93,11 +100,11 @@
             <select class="fv-l-type" data-i="${i}" style="margin:0;"><option value="labour" ${isLabour ? 'selected' : ''}>Labour</option><option value="material" ${!isLabour ? 'selected' : ''}>Materials</option></select>
             <button type="button" class="secondary fv-l-del" data-i="${i}" style="font-size:12px; padding:4px 9px;">&times;</button>
           </div>
-          <div style="display:grid; grid-template-columns:90px 1fr 100px 90px; gap:6px; margin-bottom:10px; align-items:center; ${l.prebuild_group_id ? 'padding-left:12px; border-left:2px solid var(--border);' : ''}">
+          <div class="fv-row2" style="${l.prebuild_group_id ? 'padding-left:12px; border-left:2px solid var(--border);' : ''}">
             <input class="fv-l-qty" data-i="${i}" type="number" min="0" step="0.01" inputmode="decimal" value="${l.quantity === '' ? '' : num(l.quantity)}" placeholder="${isLabour ? 'Hours' : 'Qty'}" style="margin:0;" />
-            ${isLabour ? `<select class="fv-l-tier" data-i="${i}" style="margin:0;">${tierOptions(l)}</select>` : `<span class="subtitle" style="font-size:12px;">x cost each, + ${num(markup)}% markup</span>`}
+            ${isLabour ? `<select class="fv-l-tier" data-i="${i}" style="margin:0; min-width:0;">${tierOptions(l)}</select>` : `<span class="subtitle" style="font-size:12px;">at cost each + ${num(markup)}%</span>`}
             <input class="fv-l-cost" data-i="${i}" type="number" min="0" step="0.01" inputmode="decimal" value="${l.unit_cost === '' ? '' : num(l.unit_cost)}" placeholder="${isLabour ? '$/hr' : 'Cost $'}" style="margin:0;" ${isLabour && l.rate_tier_id ? 'readonly' : ''} />
-            <span class="fv-l-amt" data-i="${i}" style="text-align:right; font-weight:600; font-size:13px;"></span>
+            <span class="fv-l-amt" data-i="${i}"></span>
           </div>`;
       }).join('');
       linesEl.querySelectorAll('.fv-l-desc').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].description = el.value; }));
