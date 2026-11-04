@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
@@ -2404,7 +2404,14 @@
         paid_at: null, xero_invoice_id: null, id: cn.id, isCredit: true,
         labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0), bstc_amount: -(Number(cn.bstc_amount) || 0),
       }));
-      const stageInvoices = [...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Claims invoiced before the job came across from ServiceM8 (cost_centres.imported_claims, item 45):
+      // already inside invoiced_amount, listed first, no invoice page or Xero behind them.
+      const importedInvoices = (Array.isArray(c.imported_claims) ? c.imported_claims : []).map((ic, i) => ({
+        invoice_number: ic.number, invoice_token: null, sent_at: ic.date || null, created_at: ic.date || '1970-01-01', sortFirst: i,
+        paid_at: null, xero_invoice_id: null, id: null, isImported: true, source: ic.source || 'servicem8',
+        labour_amount: Number(ic.amount) || 0, material_amount: 0, stc_amount: 0, bstc_amount: 0,
+      }));
+      const stageInvoices = [...importedInvoices, ...[...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))];
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
       const quotedAmt = Number(c.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmt - claimedTotal);
@@ -2736,6 +2743,13 @@
       // the logged variations go on the invoice unless you change that.
       if (!centres.length && !opts.variationsOnly) return;
       const projectRemaining = centres.reduce((s, x) => s + x.remaining, 0);
+      // The whole-project % is a share of the contract value (every quoted stage, claimed or not), so a job
+      // 32.7% claimed can take at most 67.3% more (item 45). Rounded to a tenth of a percent.
+      const allStages = (project.cost_centres || []).map(c => stageClaimSummary(c));
+      const projectQuoted = allStages.reduce((s, x) => s + x.quotedAmt, 0);
+      const projectClaimed = allStages.reduce((s, x) => s + x.claimedTotal, 0);
+      const pctOf = (amt) => projectQuoted > 0 ? Math.round((amt / projectQuoted) * 1000) / 10 : 0;
+      const maxPct = Math.max(0, Math.min(100, pctOf(projectRemaining)));
       const mode = opts.preselectCentreId ? 'stage' : 'project';
 
       const overlay = document.createElement('div');
@@ -2743,7 +2757,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <h2>Invoice project</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${centres.length ? `${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.` : 'No quoted stages left to claim.'}</p>
+          <p class="subtitle" style="margin-bottom:12px;">${centres.length ? `${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.${projectClaimed > 0 ? ` Claimed so far: ${money(projectClaimed)} (${pctOf(projectClaimed)}% of ${money(projectQuoted)}).` : ''}` : 'No quoted stages left to claim.'}</p>
 
           <div id="inv-stage-part" style="${centres.length ? '' : 'display:none;'}">
           <div style="display:flex; gap:16px; margin-bottom:14px;">
@@ -2752,8 +2766,8 @@
           </div>
 
           <div id="inv-mode-project" style="${mode === 'project' ? '' : 'display:none;'}">
-            <label style="margin-top:0">Claim this % of the total contract value</label>
-            <input type="number" id="inv-project-pct" min="0" max="100" step="1" value="${opts.variationsOnly ? 0 : 100}" />
+            <label style="margin-top:0">Claim this % of the contract value${projectClaimed > 0 ? ` (up to ${maxPct}%, the rest is already claimed)` : ''}</label>
+            <input type="number" id="inv-project-pct" min="0" max="${maxPct}" step="0.1" inputmode="decimal" value="${opts.variationsOnly ? 0 : maxPct}" />
             <p class="subtitle" id="inv-project-preview" style="margin-top:8px;"></p>
           </div>
 
@@ -2804,9 +2818,9 @@
       function computeClaims() {
         const selectedMode = overlay.querySelector('input[name="inv-mode"]:checked').value;
         if (selectedMode === 'project') {
-          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          const pct = Math.max(0, Math.min(maxPct, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
           const allocated = {};
-          if (pct >= 100) {
+          if (pct >= maxPct) {
             // Exactly 100% - claim each stage's remaining balance verbatim,
             // no proportional split or rounding involved. Matters because
             // the STC pickup below needs amt to land EXACTLY on x.remaining
@@ -2814,7 +2828,7 @@
             // a "final claim" can silently leave the STC credit unclaimed.
             centres.forEach(x => { allocated[x.centre.id] = x.remaining; });
           } else {
-            let targetTotal = projectRemaining * (pct / 100);
+            let targetTotal = Math.min(projectRemaining, projectQuoted * (pct / 100));
             // Proportional-to-remaining, capped per stage, waterfalled: any
             // amount a stage can't absorb (because pct x its remaining alone
             // would be fine, but rounding/edge cases could push it over) is
@@ -2945,8 +2959,9 @@
         overlay.querySelector('#inv-total-display').textContent = `${money(total)} inc GST`;
         const pctPreview = overlay.querySelector('#inv-project-preview');
         if (pctPreview) {
-          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
-          pctPreview.textContent = `${money(projectRemaining * (pct / 100))} across ${claims.length} stage${claims.length === 1 ? '' : 's'}.`;
+          const pct = Math.max(0, Math.min(maxPct, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          const thisClaim = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount, 0);
+          pctPreview.textContent = `This claim ${money(thisClaim)} across ${claims.length} stage${claims.length === 1 ? '' : 's'}${projectQuoted > 0 ? `, taking the job to ${pctOf(projectClaimed + thisClaim)}% claimed` : ''}.`;
         }
       }
 
@@ -4869,7 +4884,13 @@
                     <table class="responsive-stack">
                       <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
                       <tbody>
-                        ${stageInvoices.map(inv => inv.isCredit ? `
+                        ${stageInvoices.map(inv => inv.isImported ? `
+                          <tr>
+                            <td data-label="Invoice">${escapeHtml(inv.invoice_number || '')} <span class="subtitle" style="font-size:11px;">ServiceM8</span></td>
+                            <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
+                            <td data-label="Sent">${inv.sent_at ? new Date(inv.sent_at).toLocaleDateString('en-AU') : ''}</td>
+                            <td data-label=""><span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span></td>
+                          </tr>` : inv.isCredit ? `
                           <tr>
                             <td data-label="Invoice">Credit note</td>
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
