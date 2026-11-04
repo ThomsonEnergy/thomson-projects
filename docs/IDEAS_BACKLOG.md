@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 30 Oct 2026 (item 40 planned)
+Last updated 4 Nov 2026 (item 43 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -935,3 +935,22 @@ Done means:
 4. Staff login: Time tab shows hours but no cost and no Move.
 
 Touches: `public/project.html` (load the script, add the tab, point the cost figure at it, delete the old pop-up), `public/js/job-time.js` (new), `netlify/functions/admin-update-time-entry.js`, `scripts/page-budgets.json` only if needed (never raised for `project.html`). Overlaps: PR 216 changed `admin-update-time-entry.js` and the old pop-up; it is merged into `staging`, so build on `staging`. Kind: feature (into `staging`); migration no; money, stock, RLS or payroll: job costing and invoices yes (server checks above), payroll no. Size: medium. Test on staging: admin@staging.test, open J9002, Time tab, move the fake ServiceM8 shift to another job and back. Best model: Opus 5.5, effort high, because it is a feature with a known design that touches invoiced labour checks.
+
+## 43. Fixed-price variation labour priced from the Schedule of Rates (planned 4 Nov 2026, waiting on the owner's yes)
+
+Owner's ask (4 Nov 2026): a fixed-price variation's labour line is just a dollar figure typed in. It should pick labour from the Schedule of Rates like every quote stage does.
+
+- **Labour line = tier + hours.** In the fixed-price variation editor a Labour line shows the rate tier dropdown (`billable_rate_tiers`, "Licensed Electrician ($120/hr)") and an Hours box; the amount is hours x the tier's sell rate and the description defaults to the tier name, the same as a quote stage line. A Materials line stays description and amount. "+ From Stock or prebuild" keeps working (a prebuild's labour becomes one labour line per tier it uses, hours summed).
+- **Saved on `fixed_lines`** (jsonb, no migration) as `{ description, item_type, amount, hours, rate_tier_id, unit_cost }`; `create-variation.js` works the amount out again on the server from the tier's current sell rate, so the browser cannot send a different figure.
+- **Client document** (`quote.html?variation=`): a labour line prints "Licensed Electrician, 4 hrs at $120.00" with its amount; the total is unchanged.
+- **On approval** (`_shared/approve-variation.js`): the stage's labour line items get quantity = hours, unit cost = rate and `rate_tier_id`, so the job's Edit stages and costing show hours like any quoted stage. Materials lines stay quantity 1 at the amount.
+- The editor moves out of `project.html` into `public/js/variation-fixed-editor.js` (the `/code-structure` rule: no new inline code on `project.html`).
+
+Done means:
+1. sales@staging.test, open a job, Variations tab, New fixed-price variation: a Labour line shows the tier dropdown and Hours, picking "Licensed Electrician" and 4 hours shows $480.00.
+2. Save draft, the card lists the line with its amount; Make PDF, the document says "Licensed Electrician, 4 hrs at $120.00".
+3. Mark it approved by phone: the job gets the variation stage with a labour line of 4 hours at $120 under Edit stages.
+4. "+ From Stock or prebuild" with a prebuild still adds its labour and materials lines.
+
+Touches: `public/project.html` (delete the inline editor, load the new script), `public/js/variation-fixed-editor.js` (new), `public/quote.html`, `netlify/functions/create-variation.js`, `netlify/functions/_shared/approve-variation.js`. Overlaps: none. Kind: feature (into `staging`); migration no; money yes (variation price the client signs, server recomputes it), stock no, RLS no, payroll no. Size: medium. Test on staging: sales@staging.test, the four clicks above. Best model: Fable 5.1, effort high, because it changes a price the client signs and the stage the job is billed from.
+
