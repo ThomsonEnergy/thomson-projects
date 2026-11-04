@@ -5,7 +5,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 ## 4 Nov 2026
 
 - Bug found (owner, J7057): approving a quote copies its stages, lines, contacts and milestones onto the new job row but leaves the quote's clocked shifts, Stock draws and purchase orders on the quote (`_shared/create-job-from-quote.js`). On production only Q1006 to J7057 is affected (3 shifts, 10.25 hours). Fix planned, waiting on yes: move them at approval with the stages re-pointed, plus a one-off data fix for J7057. Detail: `docs/PROJECT_SPEC.md` A3 once fixed.
-- Planned, waiting on yes: fixed-price variation labour lines pick a rate tier and hours from the Schedule of Rates instead of a typed dollar figure; the editor moves out of `project.html`. Detail: `docs/IDEAS_BACKLOG.md` item 43.
+- Planned, waiting on yes: fixed-price variation labour lines pick a rate tier and hours from the Schedule of Rates instead of a typed dollar figure, and materials lines are quantity x cost price plus a markup box (owner: cost plus markup, same as everywhere else); the editor moves out of `project.html`. Detail: `docs/IDEAS_BACKLOG.md` item 43.
 
 ## 3 Nov 2026
 
