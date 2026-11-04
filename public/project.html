@@ -108,6 +108,8 @@
         document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return null;
       }
+      // a job merged into another (item 47): its J number and old links open the merged job
+      if (project.merged_into_project_id) { location.replace(`/project.html?id=${project.merged_into_project_id}&merged_from=${project.id}`); return null; }
       paintJobHeaderEarly(project);
 
       const isJob = !!project.job_number;
@@ -4660,6 +4662,7 @@
 
               <div class="card">
                 <h2>Needs attention</h2>
+                <div id="job-merge-area" style="margin:6px 0;"></div>
                 <div id="summary-rate-card" style="margin:6px 0;"></div>
                 <div id="summary-ccew-line"></div>
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
@@ -5409,6 +5412,7 @@
       }
 
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
+      loadJsOnce('/js/job-merge.js?v=1', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });

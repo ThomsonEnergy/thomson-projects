@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 4 Nov 2026
 
+- LIVE (owner: yes, push live; migration 20261128080000): item 47, Merge another job into this one (Admin, Summary): a client's other open jobs merge into one job in one server step, each old job's stages renamed "J7010: ...", everything on them following, the old J number still opening the merged job. Detail: `docs/PROJECT_SPEC.md` A13e.
 - LIVE (owner: yes, push live; migration 20261128070000): item 46, charge rate levels (Settings > Billable Rates, Standard 100% plus any the owner adds), picked per client and per job, applied to quote labour lines, variations, invoice items and actuals and the client's Schedule of Rates. Detail: `docs/PROJECT_SPEC.md` D1a.
 - Item 40 (Delete and Already paid on the Emailed bills page) merged into `staging` (PR 247) once the `project.html` budget was green again; migration 20261128030919 ran on the staging database by itself and `supplier_bills_approve_and_mark_paid` was tested there (fake bill, rolled back). Three test rows sit in the staging inbox for the owner to click (supplier `TEST Supplier Claude`, emails `test-claude-1` to `3`). Waits for release night. Detail: `docs/PROJECT_SPEC.md` A11 on `staging`.
 - Planned, waiting on yes: merge a client's jobs into one job (Admin, one server step), each old job's stages coming across as cost centres with everything that hangs off them, the old J numbers still landing on the merged job. Detail: `docs/IDEAS_BACKLOG.md` item 47.
