@@ -549,9 +549,12 @@
 
     // inboxItemId: set when the bill came from the Emailed bills page; saving ticks it off there.
     async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null, inboxItemId = null) {
-      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand, part_number, barcode');
+      const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
       const materials = allMaterials || [];
-      const partNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      // the Stock item with each line's part number or barcode (the database's own rule, _material_by_code)
+      const byCodeIds = await Promise.all((extracted.line_items || []).map(li => li.part_number
+        ? supabaseClient.rpc('_material_by_code', { p_barcode: li.part_number, p_part_number: li.part_number }).then(r => r.data || null)
+        : null));
 
       const { data: openPOs } = await supabaseClient
         .from('purchase_orders')
@@ -570,15 +573,13 @@
         if (matchedPO) autoMatchedPoId = matchedPO.id;
       }
 
-      const byCodeIds = new Set();
       const matchedPOForLines = autoMatchedPoId ? (openPOs || []).find(po => po.id === autoMatchedPoId) : null;
       const genericPoLines = matchedPOForLines ? (matchedPOForLines.purchase_order_line_items || []).filter(pl => !pl.material_id) : [];
 
-      const lineItems = (extracted.line_items || []).map(li => {
+      const lineItems = (extracted.line_items || []).map((li, i) => {
         let bestMatch = null, bestScore = 0;
         // the item with this part number or barcode (scanned on site, or typed on the Stock page) wins outright
-        const code = partNorm(li.part_number);
-        const byCode = code ? materials.find(m => (m.barcode && partNorm(m.barcode) === code) || (m.part_number && partNorm(m.part_number) === code)) : null;
+        const byCode = byCodeIds[i] ? materials.find(m => m.id === byCodeIds[i]) : null;
         if (byCode) { bestMatch = byCode; bestScore = 1; }
         else materials.forEach(m => {
           const score = fuzzyMatchScore(m.name, li.description);
@@ -594,9 +595,9 @@
           if (score > genericPoScore) { genericPoScore = score; genericPoMatch = pl; }
         });
 
-        if (byCode) byCodeIds.add(byCode.id);
         return {
           ...li,
+          matchedByCode: !!byCode,
           suggestedMatchId: bestScore >= 0.3 ? bestMatch?.id : null,
           genericPoLineId: genericPoScore >= 0.3 ? genericPoMatch?.id : null,
           genericPoLineDescription: genericPoScore >= 0.3 ? genericPoMatch?.description : null,
@@ -652,7 +653,7 @@
               <div class="rev-line-item" data-index="${i}" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px;">
                 <input class="rli-desc" value="${escapeHtml(li.description)}" placeholder="Description" style="margin-bottom:6px;" />
                 <input type="hidden" class="rli-part" value="${escapeHtml(li.part_number || '')}" />
-                ${li.part_number ? `<p class="subtitle" style="margin:0 0 6px; font-size:11px;">Part ${escapeHtml(li.part_number)}${li.suggestedMatchId && byCodeIds.has(li.suggestedMatchId) ? ' (matched to Stock by part number)' : ''}</p>` : ''}
+                ${li.part_number ? `<p class="subtitle" style="margin:0 0 6px; font-size:11px;">Part ${escapeHtml(li.part_number)}${li.matchedByCode ? ' (matched to Stock by part number)' : ''}</p>` : ''}
                 <div class="grid cols-2">
                   <div><label style="margin-top:0; font-size:11px;">Quantity</label><input class="rli-qty" type="number" step="0.01" value="${escapeHtml(li.quantity ?? 1)}" /></div>
                   <div><label style="margin-top:0; font-size:11px;">Unit cost</label><input class="rli-cost" type="number" step="0.01" value="${escapeHtml(li.unit_cost ?? 0)}" /></div>

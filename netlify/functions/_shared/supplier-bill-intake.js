@@ -521,14 +521,9 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     const { error: lineErr } = await supabaseAdmin.from('supplier_bill_line_items').insert(lines);
     if (lineErr) throw lineErr;
   }
-  for (const l of lines.filter(l => l.material_id && l.unit_cost > 0 && !isFreight(l.description))) {
-    const { error: priceErr } = await supabaseAdmin.rpc('material_supplier_price_set', {
-      p_material_id: l.material_id, p_supplier_id: supplier.id, p_cost: l.unit_cost, p_source: 'bill',
-      p_part_number: l.part_number, p_description: l.description, p_bill_id: bill.id, p_import_id: null,
-      p_price_item_id: null, p_checked: !!userId,  // the auto-save (nobody looking) follows the 20% rule
-    });
-    if (priceErr) throw priceErr;
-  }
+  // each line's price lands on its Stock item (one database step; the auto-save, nobody looking, follows the 20% rule)
+  const { error: priceErr } = await supabaseAdmin.rpc('supplier_bill_price_lines', { p_bill_id: bill.id, p_checked: !!userId });
+  if (priceErr) throw priceErr;
 
   await supabaseAdmin.from('supplier_bill_inbox').update({
     status: 'saved', bill_id: bill.id, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),

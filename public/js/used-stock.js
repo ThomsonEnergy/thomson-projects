@@ -27,7 +27,7 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
   const low = new Set();
   let have = {};
   const placeLabel = () => source.type === 'vehicle' ? (vehicles.find(v => v.id === source.vehicleId)?.vehicle_name || vehicles.find(v => v.id === source.vehicleId)?.rego || 'the van') : 'Warehouse';
-  const bigBtn = 'min-height:44px; font-size:15px;';
+  const bigBtn = STOCK_BIG_BTN;
 
   const overlay = openModal(`
     <h2 style="margin-bottom:4px;">Stock used on ${escapeHtml(jobLabel || 'this job')}</h2>
@@ -63,17 +63,12 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
 
   const q = (sel) => overlay.querySelector(sel);
   function renderSources() {
-    const opts = [...vehicles.map(v => ({ type: 'vehicle', vehicleId: v.id, label: v.vehicle_name || v.rego })), { type: 'warehouse', label: 'Warehouse' }];
-    q('#us-sources').innerHTML = opts.map(o => {
-      const on = o.type === source.type && (o.type === 'warehouse' || o.vehicleId === source.vehicleId);
-      return `<button type="button" class="${on ? '' : 'secondary'} us-src-btn" data-type="${o.type}" data-vehicle="${o.vehicleId || ''}" style="${bigBtn} flex:1 1 40%;">${escapeHtml(o.label)}</button>`;
-    }).join('');
-    q('#us-sources').querySelectorAll('.us-src-btn').forEach(b => b.addEventListener('click', async () => {
-      source = b.dataset.type === 'vehicle' ? { type: 'vehicle', vehicleId: b.dataset.vehicle } : { type: 'warehouse' };
+    renderStockPlaceButtons(q('#us-sources'), vehicles, source, async (s) => {
+      source = s;
       have = await loadPlaceCounts(source.type, source.vehicleId);
       picked.forEach(p => { p.leftTouched = false; });
       renderSources(); renderPicked();
-    }));
+    });
   }
   function addPick(m) {
     const found = picked.find(p => p.materialId === m.id);

@@ -7039,6 +7039,17 @@ function loadJsOnce(src, isLoaded) {
 const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=1', () => typeof openUsedStockPanel === 'function');
 const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=1', () => typeof openStockScanPanel === 'function');
 
+// Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
+const STOCK_BIG_BTN = 'min-height:44px; font-size:15px;';
+function renderStockPlaceButtons(el, vehicles, place, onPick) {
+  const opts = [...vehicles.map(v => ({ type: 'vehicle', vehicleId: v.id, label: v.vehicle_name || v.rego })), { type: 'warehouse', label: 'Warehouse' }];
+  el.innerHTML = opts.map(o => {
+    const on = o.type === place.type && (o.type === 'warehouse' || o.vehicleId === place.vehicleId);
+    return `<button type="button" class="${on ? '' : 'secondary'} stock-place-btn" data-type="${o.type}" data-vehicle="${o.vehicleId || ''}" style="${STOCK_BIG_BTN} flex:1 1 40%;">${escapeHtml(o.label)}</button>`;
+  }).join('');
+  el.querySelectorAll('.stock-place-btn').forEach(b => b.addEventListener('click', () => onPick(b.dataset.type === 'vehicle' ? { type: 'vehicle', vehicleId: b.dataset.vehicle } : { type: 'warehouse' })));
+}
+
 async function loadPlaceCounts(loc, vehicleId) {
   let q = supabaseClient.from('material_stock_by_location').select('material_id, quantity').eq('location_type', loc);
   if (loc === 'vehicle') q = q.eq('vehicle_id', vehicleId);

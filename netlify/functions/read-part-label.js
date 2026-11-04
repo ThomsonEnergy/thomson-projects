@@ -16,7 +16,9 @@ exports.handler = async (event) => {
   try {
     const { fileBase64, mediaType } = JSON.parse(event.body || '{}');
     if (!fileBase64 || !IMAGE_TYPES.includes(mediaType)) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'Send a photo (jpeg, png or webp).' }) };
-    const label = await readPartLabel({ fileBase64, mediaType });
+    const { data: cats } = await auth.supabaseAdmin.from('materials').select('category').not('category', 'is', null);
+    const categories = [...new Set((cats || []).map(c => String(c.category).trim()).filter(Boolean))].sort().slice(0, 40);
+    const label = await readPartLabel({ fileBase64, mediaType, categories });
     return { statusCode: 200, body: JSON.stringify({ ok: true, label }) };
   } catch (err) {
     console.error('read-part-label failed:', err.message);

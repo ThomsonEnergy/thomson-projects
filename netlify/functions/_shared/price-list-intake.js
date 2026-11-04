@@ -13,7 +13,7 @@
 //   - for each of our materials linked to one of their parts (material_supplier_links), the
 //     database step material_supplier_price_set keeps that supplier's last price on the link and,
 //     when the supplier is the item's Buy from one (materials.supplier_id):
-//       our cost was $0 or moved under AUTO_LIMIT_PCT -> cost price updated now (logged, undo);
+//       our cost was $0 or moved under 20%             -> cost price updated now (logged, undo);
 //       moved more                                    -> waits for a person;
 //       part gone from the list, material not used for USED_RECENTLY_DAYS and a similar new
 //       item is on the list               -> "looks replaced" waits for a person (never deleted);
@@ -30,7 +30,6 @@ const fetch = require('node-fetch');
 const { fuzzyMatchScore, matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
 const ai = require('./price-list-ai');
 
-const AUTO_LIMIT_PCT = 20;
 const USED_RECENTLY_DAYS = 180;
 const MAX_PAGES = 60;
 const PAGE_BATCH = 4;
@@ -297,6 +296,8 @@ async function applyPriceList(admin, importId) {
     if (!m) continue;
     const item = onList(link.item_key);
     if (!item) { missing.push({ link, m }); continue; }
+    // nothing moved for this supplier and (when it is the Buy from one) for us: no round trip
+    if (link.last_cost != null && Math.abs(item.unit_cost - Number(link.last_cost)) < 0.005 && (m.supplier_id !== sid || Math.abs(item.unit_cost - (Number(m.cost_price) || 0)) < 0.005)) continue;
     await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number || link.part_number, description: item.description, importId: imp.id, priceItemId: item.id });
   }
 
@@ -492,5 +493,4 @@ async function processPriceLists({ budgetMs = 12 * 60 * 1000, extractAttachments
 
 module.exports = {
   processPriceLists, applyPriceList, applyChange, skipChange, undoChange, looksLikePriceListEmail, startPriceListProcessing,
-  fileKind, itemKey, NAME_HINT, AUTO_LIMIT_PCT,
-};
+  fileKind, itemKey, NAME_HINT, };

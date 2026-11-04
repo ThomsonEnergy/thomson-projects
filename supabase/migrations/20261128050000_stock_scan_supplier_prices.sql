@@ -32,7 +32,7 @@ alter table public.material_supplier_links
   add column if not exists last_bill_id uuid references public.supplier_bills(id) on delete set null;
 alter table public.material_supplier_links drop constraint if exists material_supplier_links_source_check;
 alter table public.material_supplier_links add constraint material_supplier_links_source_check
-  check (last_cost_source is null or last_cost_source in ('price_list', 'bill', 'manual'));
+  check (last_cost_source is null or last_cost_source in ('price_list', 'bill'));
 create index if not exists material_supplier_links_last_bill_id_idx on public.material_supplier_links (last_bill_id);
 
 alter table public.price_changes
@@ -51,7 +51,7 @@ $$;
 revoke all on function public._part_norm(text) from public, anon;
 grant execute on function public._part_norm(text) to authenticated;
 
-create index if not exists materials_part_number_norm_idx on public.materials (_part_norm(part_number)) where part_number is not null;
+create index if not exists materials_part_number_norm_idx on public.materials (_part_norm(part_number));
 create index if not exists materials_barcode_idx on public.materials (barcode) where barcode is not null;
 
 -- The Stock item with this barcode, else this part number (normalised). Null when none.
@@ -68,8 +68,7 @@ grant execute on function public._material_by_code(text, text) to authenticated,
 
 -- One supplier's price for one item. Keeps the supplier link (part number, last price, where it
 -- came from), moves materials.cost_price when the supplier is the item's Buy from one (an item with
--- no Buy from takes this supplier), and writes the price_changes row. Returns
--- { applied, waiting, buy_from, change_id, new_link }.
+-- no Buy from takes this supplier), and writes the price_changes row. Returns { applied, waiting }.
 --   p_source: 'price_list' or 'bill'; p_bill_id / p_import_id / p_price_item_id: where the price came
 --   from (the supplier_price_items row lets a person apply a waiting change on the Price lists page);
 --   p_checked: a person saved this bill (false for the unattended auto-save, which follows the 20% rule).
@@ -90,7 +89,6 @@ declare
   v_old numeric;
   v_pct numeric;
   v_apply boolean := false;
-  v_change uuid;
   v_from text;
   v_reason text;
 begin
@@ -135,10 +133,10 @@ begin
       perform _po_log('material', m.id, 'supplier_price', format('%s: $%s from %s (we buy from %s at $%s)', s.name, to_char(p_cost, 'FM999G999G990D00'), v_from,
         coalesce((select name from suppliers where id = m.supplier_id), 'another supplier'), to_char(v_old, 'FM999G999G990D00')));
     end if;
-    return jsonb_build_object('applied', false, 'waiting', false, 'buy_from', false, 'new_link', v_new_link);
+    return jsonb_build_object('applied', false, 'waiting', false);
   end if;
   if abs(p_cost - v_old) < 0.005 then
-    return jsonb_build_object('applied', false, 'waiting', false, 'buy_from', true, 'new_link', v_new_link);
+    return jsonb_build_object('applied', false, 'waiting', false);
   end if;
 
   v_pct := case when v_old > 0 then round((p_cost - v_old) / v_old * 100, 1) end;
@@ -156,18 +154,36 @@ begin
   insert into price_changes (import_id, bill_id, source, supplier_price_item_id, material_id, supplier_id, kind, old_cost, new_cost, change_pct, old_name, new_name, reason, status, resolved_at, resolved_by)
   values (p_import_id, p_bill_id, p_source, p_price_item_id, m.id, s.id, case when v_new_link then 'match' else 'price' end, v_old, p_cost, v_pct, m.name,
           case when v_new_link then coalesce(nullif(p_description, ''), p_part_number, m.name) end, v_reason,
-          case when v_apply then 'applied' else 'waiting' end, case when v_apply then now() end, case when v_apply then auth.uid() end)
-  returning id into v_change;
+          case when v_apply then 'applied' else 'waiting' end, case when v_apply then now() end, case when v_apply then auth.uid() end);
 
   if v_apply then
     update materials set cost_price = p_cost where id = m.id;  -- trg_materials_price_fill clears needs_price and fills $0 lines
     perform _po_log('material', m.id, 'priced', format('Cost $%s -> $%s from %s''s %s', to_char(v_old, 'FM999G999G990D00'), to_char(p_cost, 'FM999G999G990D00'), s.name, v_from));
   end if;
-  return jsonb_build_object('applied', v_apply, 'waiting', not v_apply, 'buy_from', true, 'change_id', v_change, 'new_link', v_new_link);
+  return jsonb_build_object('applied', v_apply, 'waiting', not v_apply);
 end;
 $$;
 revoke all on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean) from public, anon;
 grant execute on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean) to authenticated, service_role;
+
+-- Every line of a saved bill that is on a Stock item sets that supplier's price (one step for the
+-- reviewed save, the one-tap save and the auto-save). p_checked: a person saved the bill.
+create or replace function public.supplier_bill_price_lines(p_bill_id uuid, p_checked boolean default true)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  b supplier_bills;
+  l supplier_bill_line_items;
+begin
+  if auth.uid() is not null and not is_pricing_role() then raise exception 'Only Admin, Finance or Sales can set prices.'; end if;
+  select * into b from supplier_bills where id = p_bill_id;
+  if not found then raise exception 'Bill not found.'; end if;
+  for l in select * from supplier_bill_line_items where bill_id = b.id and material_id is not null and unit_cost > 0 and not _is_freight(description) order by created_at loop
+    perform material_supplier_price_set(l.material_id, b.supplier_id, l.unit_cost, 'bill', l.part_number, l.description, b.id, null, null, p_checked);
+  end loop;
+end;
+$$;
+revoke all on function public.supplier_bill_price_lines(uuid, boolean) from public, anon;
+grant execute on function public.supplier_bill_price_lines(uuid, boolean) to authenticated, service_role;
 
 -- "Buy from this one" on the Stock page: the item's supplier and cost price become that supplier's
 -- last price. Pricing roles only.
@@ -177,6 +193,7 @@ declare
   m materials;
   s suppliers;
   v_link material_supplier_links;
+  v_old numeric;
 begin
   if not is_pricing_role() then raise exception 'Only Admin, Finance or Sales can change where an item is bought from.'; end if;
   select * into m from materials where id = p_material_id for update;
@@ -184,11 +201,11 @@ begin
   select * into s from suppliers where id = p_supplier_id;
   if not found then raise exception 'Supplier not found.'; end if;
   select * into v_link from material_supplier_links where material_id = m.id and supplier_id = s.id;
+  v_old := coalesce(m.cost_price, 0);
   update materials set supplier_id = s.id, supplier = s.name, cost_price = coalesce(v_link.last_cost, cost_price) where id = m.id;
-  if v_link.last_cost is not null and abs(v_link.last_cost - coalesce(m.cost_price, 0)) >= 0.005 then
+  if v_link.last_cost is not null and abs(v_link.last_cost - v_old) >= 0.005 then
     insert into price_changes (source, material_id, supplier_id, kind, old_cost, new_cost, change_pct, old_name, reason, status, resolved_at, resolved_by)
-    values ('manual', m.id, s.id, 'price', coalesce(m.cost_price, 0), v_link.last_cost,
-            case when coalesce(m.cost_price, 0) > 0 then round((v_link.last_cost - m.cost_price) / m.cost_price * 100, 1) end,
+    values ('manual', m.id, s.id, 'price', v_old, v_link.last_cost, case when v_old > 0 then round((v_link.last_cost - v_old) / v_old * 100, 1) end,
             m.name, format('Now bought from %s', s.name), 'applied', now(), auth.uid());
   end if;
   perform _po_log('material', m.id, 'buy_from', format('Now bought from %s%s', s.name,
@@ -213,6 +230,7 @@ declare
   v_name text := nullif(trim(coalesce(p->>'name', '')), '');
   v_part text := nullif(trim(coalesce(p->>'part_number', '')), '');
   v_barcode text := nullif(trim(coalesce(p->>'barcode', '')), '');
+  v_brand text := nullif(trim(coalesce(p->>'brand', '')), '');
   v_loc text := coalesce(p->>'location_type', 'warehouse');
   v_vehicle uuid := nullif(p->>'vehicle_id', '')::uuid;
   v_qty numeric := coalesce((p->>'quantity')::numeric, 0);
@@ -229,13 +247,13 @@ begin
     v_existed := true;
     update materials set
       part_number = coalesce(part_number, v_part), barcode = coalesce(barcode, v_barcode),
-      brand = coalesce(brand, nullif(trim(coalesce(p->>'brand', '')), '')), photo_path = coalesce(photo_path, nullif(p->>'photo_path', ''))
+      brand = coalesce(brand, v_brand), photo_path = coalesce(photo_path, nullif(p->>'photo_path', ''))
     where id = m.id;
     perform _po_log('material', m.id, 'scanned', format('Scanned on site%s', case when v_qty > 0 then format(': %s added to %s (now %s)', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle), _po_qty(_stock_adjust(m.id, v_loc, v_vehicle, v_qty))) else '' end));
   else
     if v_name is null then raise exception 'Give the part a name.'; end if;
     insert into materials (name, part_number, barcode, brand, category, photo_path, cost_price, sell_price, needs_price, created_by)
-    values (v_name, v_part, v_barcode, nullif(trim(coalesce(p->>'brand', '')), ''), nullif(trim(coalesce(p->>'category', '')), ''), nullif(p->>'photo_path', ''), 0, 0, true, auth.uid())
+    values (v_name, v_part, v_barcode, v_brand, nullif(trim(coalesce(p->>'category', '')), ''), nullif(p->>'photo_path', ''), 0, 0, true, auth.uid())
     returning * into m;
     perform _po_log('material', m.id, 'created', format('Added to Stock from a photo of the label%s%s, needs a price%s', coalesce(' (part ' || v_part || ')', ''), coalesce(' barcode ' || v_barcode, ''),
       case when v_qty > 0 then format('; %s at %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle)) else '' end));
@@ -249,7 +267,7 @@ grant execute on function public.material_add_from_scan(jsonb) to authenticated;
 
 -- Reviewed bill save (migration 20261124150000) plus: part numbers are kept on the bill lines (the
 -- review screen matches a line to the Stock item with that part number or barcode, the person's pick
--- stands), and every line on a Stock item sets that supplier's price through material_supplier_price_set.
+-- stands), and every line on a Stock item sets that supplier's price (supplier_bill_price_lines).
 create or replace function public.supplier_bill_save_review(p jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
@@ -321,9 +339,6 @@ begin
       returning id into v_mat;
       perform _po_log('material', v_mat, 'created', format('Added to Stock from bill %s (%s)', coalesce(v_num, ''), s.name));
     end if;
-    if v_mat is not null and v_cost > 0 and not _is_freight(v_desc) then
-      perform material_supplier_price_set(v_mat, s.id, v_cost, 'bill', v_part, v_desc, v_bill, null, null, true);
-    end if;
 
     v_po_line := null;
     v_flag := null;
@@ -378,6 +393,7 @@ begin
     insert into supplier_bill_line_items (bill_id, material_id, description, part_number, quantity, unit_cost, po_line_item_id, flag_reason, resolution)
     values (v_bill, v_mat, v_desc, v_part, v_qty, v_cost, v_po_line, v_flag, case when v_added then 'added' end);
   end loop;
+  perform supplier_bill_price_lines(v_bill, true);
 
   perform _po_log('supplier', s.id, 'bill_added', format('Bill %s ($%s) saved%s', coalesce(v_num, ''), to_char(coalesce((p->>'amount')::numeric, 0), 'FM999G999G990D00'),
     case when v_po_id is not null then ' against ' || coalesce((select po_number from purchase_orders where id = v_po_id), 'a PO') else '' end));

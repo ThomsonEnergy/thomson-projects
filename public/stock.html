@@ -375,14 +375,14 @@
       const rows = (links || []).sort((a, b) => (a.last_cost ?? Infinity) - (b.last_cost ?? Infinity));
       if (!rows.length) { el.innerHTML = '<p class="subtitle" style="font-size:12px;">No supplier prices yet: a price list or a bill with this part number adds one.</p>'; return; }
       const cheapest = rows.find(r => r.last_cost != null);
-      const SOURCE = { price_list: 'price list', bill: 'bill', manual: 'by hand' };
+      const SOURCE = { price_list: 'price list', bill: 'bill' };
       el.innerHTML = `<label style="margin-top:0">Supplier prices</label>` + rows.map(r => `
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--border); font-size:13px; flex-wrap:wrap;">
           <span><strong>${escapeHtml(r.suppliers?.name || '')}</strong>${r.supplier_id === material.supplier_id ? ' <span class="badge draft">Buy from</span>' : ''}${cheapest && r.id === cheapest.id && rows.length > 1 ? ' <span class="badge draft" style="color:var(--green);">Cheapest</span>' : ''}
             <br><span class="subtitle">${escapeHtml(r.part_number || '')}${r.last_cost != null ? `${r.part_number ? ' · ' : ''}${money(r.last_cost)} (${escapeHtml(SOURCE[r.last_cost_source] || '')}${r.last_cost_at ? ', ' + escapeHtml(dayText(r.last_cost_at)) : ''})` : ' no price yet'}</span></span>
           <span style="display:flex; gap:6px;">
             ${r.supplier_id !== material.supplier_id && r.last_cost != null ? `<button type="button" class="secondary btn-sm mat-buy-from" data-id="${r.supplier_id}">Buy from this one</button>` : ''}
-            ${r.last_cost != null && cheapest && r.id !== cheapest.id ? `<button type="button" class="secondary btn-sm mat-ask-match" data-id="${r.id}">Ask to match</button>` : ''}
+            ${r.last_cost != null && r.id !== cheapest.id ? `<button type="button" class="secondary btn-sm mat-ask-match" data-id="${r.id}">Ask to match</button>` : ''}
           </span>
         </div>`).join('');
       el.querySelectorAll('.mat-buy-from').forEach(btn => btn.addEventListener('click', async () => {

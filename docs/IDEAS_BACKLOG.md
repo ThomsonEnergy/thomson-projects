@@ -959,6 +959,8 @@ Touches: `public/project.html` (delete the inline editor, load the new script), 
 
 Built 4 Nov 2026 in `feat/stock-scan`, migration 20261128050000. The Used stock panel moved out of `supabase-client.js` into `js/used-stock.js` (loaded on demand) so every page got about 13 KB lighter.
 
+Left for later (from the cleanup pass, 4 Nov 2026): the 20% price rule as a Settings number (`company_settings`, read by `material_supplier_price_set`) instead of a number in SQL; one SQL item key function (`_item_key`) with `supplier_price_items.item_key` generated from it so the reader's JS key and the link key cannot drift; the emailed one-tap and auto saves calling `supplier_bill_save_review` as the service role so there is one bill save; `price_change_apply / skip / undo` as SQL steps instead of the three JS functions in `price-list-intake.js`; one `_shared/claude.js` for every Claude call (`callClaude` in `price-list-ai.js` is the start); stock categories as a settings list used by the Stock form and the label reader.
+
 Owner's ask (4 Nov 2026): the guys take a picture of an item's part number or barcode and it comes into Stock with no price. When a price list or a supplier invoice later arrives with that part on it, the price lands on our Stock item by itself.
 
 What exists already: "Not in Stock? + Add it" at clock-out makes a $0 item flagged **Needs a price** and `materials_price_fill` pushes the first price into the stock pull lines and job costs (spec A12). Price lists keep every supplier part in `supplier_price_items` with a part number and link to our materials through `material_supplier_links` (spec A11b). Bills are read by Tally from a photo or PDF, lines are description only (no part number). Nothing reads barcodes yet.
