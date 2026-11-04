@@ -41,7 +41,7 @@ exports.handler = async (event) => {
 
   const undo = { supabaseAdmin: null, invoiceId: null, usageIds: [], stock: [], added: [] };
   try {
-    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds, billable, notBillable } = JSON.parse(event.body || '{}');
 
     if (!projectId || !Array.isArray(claims) || !claims.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
@@ -72,6 +72,20 @@ exports.handler = async (event) => {
       }
       if ((alreadyBilled || []).length) {
         return { statusCode: 400, body: JSON.stringify({ error: 'A shift on this invoice has already been billed. Close the panel and open it again.' }) };
+      }
+    }
+    // Materials billed from what is already costed to the job (item 41): same checks.
+    const billedUsageIds = [...new Set(pricedClaims.flatMap(({ priced }) => priced.rows.map(r => r.job_material_usage_id).filter(Boolean)))];
+    if (billedUsageIds.length) {
+      const [{ data: ownUsage }, { data: usageBilled }] = await Promise.all([
+        supabaseAdmin.from('job_material_usage').select('id').eq('project_id', projectId).in('id', billedUsageIds),
+        supabaseAdmin.from('invoice_line_items').select('id').in('job_material_usage_id', billedUsageIds).limit(1),
+      ]);
+      if ((ownUsage || []).length !== billedUsageIds.length) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'A material on this invoice is not costed to this job.' }) };
+      }
+      if ((usageBilled || []).length) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'A material on this invoice has already been billed. Close the panel and open it again.' }) };
       }
     }
     const claimRows = pricedClaims
@@ -204,7 +218,10 @@ exports.handler = async (event) => {
       claimLabel = 'Final claim';
     } else {
       const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
-      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length;
+      // Claims invoiced before the job came across from ServiceM8 count too (cost_centres.imported_claims, item 45).
+      const { data: importedRows } = await supabaseAdmin.from('cost_centres').select('imported_claims').eq('project_id', projectId);
+      const importedCount = (importedRows || []).reduce((n, c) => n + (Array.isArray(c.imported_claims) ? c.imported_claims.length : 0), 0);
+      const priorProgressCount = (priorInvoices || []).filter(inv => inv.description !== 'Deposit' && inv.description !== 'Final claim').length + importedCount;
       claimLabel = `Progress claim ${priorProgressCount + 1}`;
     }
 
@@ -264,8 +281,8 @@ exports.handler = async (event) => {
       const claimId = (insertedClaims || []).find(ic => ic.cost_centre_id === c.cost_centre_id)?.id || null;
       const itemRows = [];
       for (const item of c._items) {
-        let usageId = null;
-        if (item.kind === 'material' && item.material_id) {
+        let usageId = item.job_material_usage_id || null;
+        if (item.kind === 'material' && item.material_id && !usageId) {
           const { data: usage, error: usageErr } = await supabaseAdmin.from('job_material_usage').insert({
             project_id: projectId, cost_centre_id: c.cost_centre_id, material_id: item.material_id,
             quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
@@ -292,6 +309,24 @@ exports.handler = async (event) => {
       undo.added.push({ centreId: c.cost_centre_id, amount: r2(c.labour_amount + c.material_amount) });
     }
     undo.invoiceId = null; // done: nothing to take back from here on
+
+    // The Bill ticks from the panel (item 41): rows unticked are marked not billable on the job so
+    // they stay off the next invoice; rows ticked are billable again. Only this job's rows, and
+    // never a reason to fail an invoice that already exists.
+    try {
+      const ids = (o, k) => [...new Set((Array.isArray(o?.[k]) ? o[k] : []).filter(v => typeof v === 'string'))];
+      const marks = [
+        ['time_entries', ids(notBillable, 'timeEntryIds'), false], ['time_entries', ids(billable, 'timeEntryIds'), true],
+        ['job_material_usage', ids(notBillable, 'usageIds'), false], ['job_material_usage', ids(billable, 'usageIds'), true],
+      ];
+      for (const [table, list, value] of marks) {
+        if (!list.length) continue;
+        const { error: markErr } = await supabaseAdmin.from(table).update({ billable: value }).eq('project_id', projectId).in('id', list);
+        if (markErr) throw markErr;
+      }
+    } catch (markErr) {
+      console.error('create-invoice billable marks failed:', markErr.message);
+    }
 
     // Logged variations (bill-variations.js made each one a stage, claimed above)
     // are now billed on this invoice.

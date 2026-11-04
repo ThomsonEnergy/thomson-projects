@@ -9,9 +9,12 @@
 //
 // Once read, applyPriceList():
 //   - keeps the supplier's whole list in supplier_price_items (searchable, with the last price);
-//   - for each of our materials linked to one of their parts (material_supplier_links):
-//       price moved under AUTO_LIMIT_PCT  -> cost price updated now (logged, can be undone);
-//       moved more                        -> waits for a person;
+//   - links any of our materials whose part number is one of theirs, without asking (item 44);
+//   - for each of our materials linked to one of their parts (material_supplier_links), the
+//     database step material_supplier_price_set keeps that supplier's last price on the link and,
+//     when the supplier is the item's Buy from one (materials.supplier_id):
+//       our cost was $0 or moved under 20%             -> cost price updated now (logged, undo);
+//       moved more                                    -> waits for a person;
 //       part gone from the list, material not used for USED_RECENTLY_DAYS and a similar new
 //       item is on the list               -> "looks replaced" waits for a person (never deleted);
 //   - suggests links for our materials that are not linked yet (first list from a supplier,
@@ -27,7 +30,6 @@ const fetch = require('node-fetch');
 const { fuzzyMatchScore, matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
 const ai = require('./price-list-ai');
 
-const AUTO_LIMIT_PCT = 20;
 const USED_RECENTLY_DAYS = 180;
 const MAX_PAGES = 60;
 const PAGE_BATCH = 4;
@@ -43,7 +45,8 @@ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const itemKey = (it) => (it.part_number ? 'p:' + norm(it.part_number).replace(/ /g, '') : 'd:' + norm(it.description));
+const partNorm = (s) => norm(s).replace(/ /g, '');  // the database's _part_norm
+const itemKey = (it) => (it.part_number ? 'p:' + partNorm(it.part_number) : 'd:' + norm(it.description));
 
 function fileKind(name, mime) {
   const n = String(name || '').toLowerCase();
@@ -215,6 +218,18 @@ async function logMaterial(admin, materialId, description, userId) {
   await admin.from('activity_log').insert({ entity_type: 'material', entity_id: materialId, action: 'price_list', description, changed_by: userId || null });
 }
 
+// One supplier's list price for one item: the link, the 20% rule, the price_changes row and the
+// log all happen in the database (migration 20261128050000). Returns { applied, waiting, ... }.
+async function setSupplierPrice(admin, { materialId, supplierId, cost, partNumber, description, importId, priceItemId }) {
+  const { data, error } = await admin.rpc('material_supplier_price_set', {
+    p_material_id: materialId, p_supplier_id: supplierId, p_cost: cost, p_source: 'price_list',
+    p_part_number: partNumber || null, p_description: description || null, p_bill_id: null, p_import_id: importId || null,
+    p_price_item_id: priceItemId || null, p_checked: false,
+  });
+  if (error) throw error;
+  return data || {};
+}
+
 // Turns a fully read import into supplier_price_items and price_changes. Safe to run again
 // (e.g. after the supplier is picked by hand).
 async function applyPriceList(admin, importId) {
@@ -250,32 +265,40 @@ async function applyPriceList(admin, importId) {
 
   const { data: links } = await admin.from('material_supplier_links').select('*').eq('supplier_id', sid);
   const linkList = links || [];
-  const { data: mats } = await admin.from('materials').select('id, name, cost_price, supplier_id');
+  const { data: mats } = await admin.from('materials').select('id, name, cost_price, supplier_id, part_number');
   const materials = new Map((mats || []).map(m => [m.id, m]));
   const linkedKeys = new Set(linkList.map(l => l.item_key));
+  const linkedMaterialIds = new Set(linkList.map(l => l.material_id));
   const first = !linkList.length;
   const changes = [];
   let autoApplied = 0;
+  let waitingFromDb = 0;  // price_changes rows material_supplier_price_set wrote as waiting
+  const priced = async (args) => { const r = await setSupplierPrice(admin, args); if (r.applied) autoApplied += 1; if (r.waiting) waitingFromDb += 1; };
 
-  // 1. linked materials: price moves and parts that have gone
+  // 0. our items with the same part number as one of theirs (a part scanned on site, or typed on the
+  //    Stock page): linked without asking, an exact part number is as good as "Yes, same item"
+  const byPart = new Map();
+  spi.forEach(r => { const k = partNorm(r.part_number); if (k && byKey.has(r.item_key)) byPart.set(k, r); });
+  for (const m of materials.values()) {
+    if (linkedMaterialIds.has(m.id)) continue;
+    const item = byPart.get(partNorm(m.part_number));
+    if (!item || linkedKeys.has(item.item_key)) continue;
+    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number, description: item.description, importId: imp.id, priceItemId: item.id });
+    linkedMaterialIds.add(m.id);
+    linkedKeys.add(item.item_key);
+  }
+
+  // 1. linked materials: price moves (the database keeps the supplier's price and moves ours by the
+  //    rule) and parts that have gone
   const missing = [];
   for (const link of linkList) {
     const m = materials.get(link.material_id);
     if (!m) continue;
     const item = onList(link.item_key);
     if (!item) { missing.push({ link, m }); continue; }
-    const oldCost = Number(m.cost_price) || 0;
-    if (Math.abs(item.unit_cost - oldCost) < 0.005) continue;
-    const pct = oldCost ? ((item.unit_cost - oldCost) / oldCost) * 100 : null;
-    const base = { import_id: imp.id, material_id: m.id, supplier_id: sid, supplier_price_item_id: item.id, kind: 'price', old_cost: oldCost, new_cost: item.unit_cost, change_pct: pct == null ? null : Math.round(pct * 10) / 10 };
-    if (pct != null && Math.abs(pct) < AUTO_LIMIT_PCT) {
-      await setMaterialCost(admin, m.id, item.unit_cost);
-      await logMaterial(admin, m.id, `Cost ${money(oldCost)} -> ${money(item.unit_cost)} from ${supplier.name}'s emailed price list (automatic)`, null);
-      changes.push({ ...base, status: 'applied', resolved_at: now, reason: `Small change (${base.change_pct > 0 ? '+' : ''}${base.change_pct}%), applied automatically` });
-      autoApplied += 1;
-    } else {
-      changes.push({ ...base, status: 'waiting', reason: pct == null ? 'Our cost was $0' : `Big change (${base.change_pct > 0 ? '+' : ''}${base.change_pct}%), check before applying` });
-    }
+    // nothing moved for this supplier and (when it is the Buy from one) for us: no round trip
+    if (link.last_cost != null && Math.abs(item.unit_cost - Number(link.last_cost)) < 0.005 && (m.supplier_id !== sid || Math.abs(item.unit_cost - (Number(m.cost_price) || 0)) < 0.005)) continue;
+    await priced({ materialId: m.id, supplierId: sid, cost: item.unit_cost, partNumber: item.part_number || link.part_number, description: item.description, importId: imp.id, priceItemId: item.id });
   }
 
   // 2. parts no longer on the list: flag only if not used lately and something similar replaced it
@@ -298,7 +321,6 @@ async function applyPriceList(admin, importId) {
   // 3. our materials not linked to this supplier yet: suggest a match (confirmed once by a person)
   const { data: skipped } = await admin.from('price_changes').select('material_id, supplier_price_item_id').eq('supplier_id', sid).eq('kind', 'match').eq('status', 'skipped');
   const declined = new Set((skipped || []).map(s => `${s.material_id}:${s.supplier_price_item_id}`));
-  const linkedMaterialIds = new Set(linkList.map(l => l.material_id));
   const suggestions = [];
   for (const m of materials.values()) {
     if (linkedMaterialIds.has(m.id)) continue;
@@ -322,10 +344,10 @@ async function applyPriceList(admin, importId) {
     if (error) throw error;
   }
 
-  const waiting = changes.filter(c => c.status === 'waiting').length;
+  const waiting = changes.filter(c => c.status === 'waiting').length + waitingFromDb;
   const parts = [`${byKey.size} items read`];
   if (autoApplied) parts.push(`${autoApplied} price${autoApplied === 1 ? '' : 's'} updated`);
-  const big = changes.filter(c => c.kind === 'price' && c.status === 'waiting').length;
+  const big = waitingFromDb;
   if (big) parts.push(`${big} big change${big === 1 ? '' : 's'} to check`);
   const matches = changes.filter(c => c.kind === 'match').length;
   if (matches) parts.push(`${matches} match${matches === 1 ? '' : 'es'} to confirm`);
@@ -349,26 +371,31 @@ async function applyChange(admin, changeId, userId) {
   const { data: item } = c.supplier_price_item_id
     ? await admin.from('supplier_price_items').select('item_key, part_number, description, unit_cost').eq('id', c.supplier_price_item_id).maybeSingle()
     : { data: null };
-  if (!item) throw new Error('That item is no longer on the supplier list.');
+  if (!item && c.source !== 'bill') throw new Error('That item is no longer on the supplier list.');
   const { data: sup } = await admin.from('suppliers').select('name').eq('id', c.supplier_id).maybeSingle();
   c.suppliers = sup;
   const now = new Date().toISOString();
-  if (c.kind === 'match' || c.kind === 'superseded') {
+  if (item && (c.kind === 'match' || c.kind === 'superseded')) {
     const { error } = await admin.from('material_supplier_links').upsert({
       material_id: c.material_id, supplier_id: c.supplier_id, item_key: item.item_key, part_number: item.part_number, supplier_description: item.description, confirmed_by: userId,
+      last_cost: c.new_cost, last_cost_at: now, last_cost_source: 'price_list',
     }, { onConflict: 'material_id,supplier_id' });
     if (error) throw error;
+  } else {
+    await admin.from('material_supplier_links').update({ last_cost: c.new_cost, last_cost_at: now, last_cost_source: c.source || 'price_list' }).eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
   }
   await setMaterialCost(admin, c.material_id, c.new_cost, c.kind === 'superseded' ? { name: c.new_name } : (c.kind === 'match' ? { supplier_id: c.supplier_id } : {}));
   await admin.from('price_changes').update({ status: 'applied', resolved_by: userId, resolved_at: now }).eq('id', c.id);
-  const what = c.kind === 'superseded' ? `Switched from "${c.old_name}" to "${c.new_name}", cost` : (c.kind === 'match' ? `Linked to ${c.suppliers?.name} ${item.part_number || item.description}, cost` : 'Cost');
-  await logMaterial(admin, c.material_id, `${what} ${money(c.old_cost)} -> ${money(c.new_cost)} from ${c.suppliers?.name || 'a supplier'}'s emailed price list`, userId);
+  const what = c.kind === 'superseded' ? `Switched from "${c.old_name}" to "${c.new_name}", cost` : (c.kind === 'match' ? `Linked to ${c.suppliers?.name} ${item?.part_number || item?.description || c.new_name || ''}, cost` : 'Cost');
+  await logMaterial(admin, c.material_id, `${what} ${money(c.old_cost)} -> ${money(c.new_cost)} from ${c.suppliers?.name || 'a supplier'}'s ${c.source === 'bill' ? 'bill' : 'emailed price list'}`, userId);
   await refreshImportCounts(admin, c.import_id);
 }
 
 async function skipChange(admin, changeId, userId) {
   await admin.from('price_changes').update({ status: 'skipped', resolved_by: userId, resolved_at: new Date().toISOString() }).eq('id', changeId).eq('status', 'waiting');
-  const { data: c } = await admin.from('price_changes').select('import_id').eq('id', changeId).single();
+  const { data: c } = await admin.from('price_changes').select('import_id, kind, source, material_id, supplier_id').eq('id', changeId).single();
+  // "No" to a link the list made by part number: the link goes too (nobody confirmed it)
+  if (c.kind === 'match' && c.source !== 'bill') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id).is('confirmed_by', null);
   await refreshImportCounts(admin, c.import_id);
 }
 
@@ -377,13 +404,15 @@ async function undoChange(admin, changeId, userId) {
   if (c.status !== 'applied') throw new Error('Only an applied change can be undone.');
   const { data: m } = await admin.from('materials').select('cost_price').eq('id', c.material_id).single();
   if (Math.abs((Number(m.cost_price) || 0) - Number(c.new_cost)) > 0.005) throw new Error('The cost has been changed again since, so this cannot be undone safely. Edit it on the Stock page.');
-  if (c.kind === 'match') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
+  // a bill's link stays (we did buy it there) but its price is no longer trusted; a price list link goes
+  if (c.source === 'bill') await admin.from('material_supplier_links').update({ last_cost: null, last_cost_at: null, last_cost_source: null, last_bill_id: null }).eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
+  else if (c.kind === 'match') await admin.from('material_supplier_links').delete().eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
   if (c.kind === 'superseded' && c.old_item_key) {
     await admin.from('material_supplier_links').update({ item_key: c.old_item_key }).eq('material_id', c.material_id).eq('supplier_id', c.supplier_id);
   }
   await setMaterialCost(admin, c.material_id, c.old_cost, c.kind === 'superseded' && c.old_name ? { name: c.old_name } : {});
   await admin.from('price_changes').update({ status: 'undone', resolved_by: userId, resolved_at: new Date().toISOString() }).eq('id', c.id);
-  await logMaterial(admin, c.material_id, `Price list change undone: cost back to ${money(c.old_cost)}`, userId);
+  await logMaterial(admin, c.material_id, `${c.source === 'bill' ? 'Bill price' : 'Price list change'} undone: cost back to ${money(c.old_cost)}`, userId);
 }
 
 async function refreshImportCounts(admin, importId) {
@@ -464,5 +493,4 @@ async function processPriceLists({ budgetMs = 12 * 60 * 1000, extractAttachments
 
 module.exports = {
   processPriceLists, applyPriceList, applyChange, skipChange, undoChange, looksLikePriceListEmail, startPriceListProcessing,
-  fileKind, itemKey, NAME_HINT, AUTO_LIMIT_PCT,
-};
+  fileKind, itemKey, NAME_HINT, };

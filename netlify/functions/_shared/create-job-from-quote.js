@@ -28,6 +28,7 @@ const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
+const { entryHours } = require('./compute-labour-cost');
 
 // Same split as project.html's splitLabourMaterial: labour vs materials by
 // what each sells for (labour is already a sell total; materials are a
@@ -127,6 +128,52 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
   return invoiceToken;
 }
 
+// Time clocked on the quote (a site visit, a make safe before the client said yes), Stock drawn
+// against it and purchase orders raised on it are costs of the job, so they go with it (4 Nov 2026,
+// J7057 was approved with 10 hours left behind on Q1006). Each row is re-pointed at the job's copy of
+// its stage. Idempotent: once moved, nothing is left on the quote for a retry to find.
+const fmtHours = (h) => `${Math.round(h * 100) / 100}h`;
+
+async function carryQuoteCosts(supabaseAdmin, quote, job, stageIdMap) {
+  const mapStage = (id) => (id && stageIdMap[id]) || null;
+  const moved = { shifts: 0, hours: 0, draws: 0, pos: 0 };
+
+  const { data: shifts, error: tErr } = await supabaseAdmin.from('time_entries')
+    .select('id, cost_centre_id, selected_cost_centre_ids, clock_in, clock_out, break_minutes').eq('project_id', quote.id);
+  if (tErr) throw tErr;
+  for (const t of shifts || []) {
+    const picked = (t.selected_cost_centre_ids || []).map(mapStage).filter(Boolean);
+    const { error } = await supabaseAdmin.from('time_entries').update({
+      project_id: job.id, cost_centre_id: mapStage(t.cost_centre_id), selected_cost_centre_ids: picked.length ? picked : null,
+    }).eq('id', t.id);
+    if (error) throw error;
+    moved.shifts += 1;
+    moved.hours += entryHours(t);
+  }
+
+  for (const table of ['job_material_usage', 'purchase_orders']) {
+    const { data: rows, error: rErr } = await supabaseAdmin.from(table).select('id, cost_centre_id').eq('project_id', quote.id);
+    if (rErr) throw rErr;
+    for (const r of rows || []) {
+      const { error } = await supabaseAdmin.from(table).update({ project_id: job.id, cost_centre_id: mapStage(r.cost_centre_id) }).eq('id', r.id);
+      if (error) throw error;
+      moved[table === 'purchase_orders' ? 'pos' : 'draws'] += 1;
+    }
+  }
+
+  const parts = [];
+  if (moved.shifts) parts.push(`${moved.shifts} shift${moved.shifts === 1 ? '' : 's'} (${fmtHours(moved.hours)})`);
+  if (moved.draws) parts.push(`${moved.draws} Stock draw${moved.draws === 1 ? '' : 's'}`);
+  if (moved.pos) parts.push(`${moved.pos} purchase order${moved.pos === 1 ? '' : 's'}`);
+  if (parts.length) {
+    const { error: logErr } = await supabaseAdmin.from('activity_log').insert({
+      entity_type: 'project', entity_id: job.id, action: 'costs_carried_over',
+      description: `${parts.join(', ')} carried over from Q${quote.quote_number || ''}`,
+    });
+    if (logErr) console.error('create-job-from-quote: activity log failed', logErr.message); // the move itself is done
+  }
+}
+
 // The quote becomes the frozen approved record. pipeline_stage: 'archived'
 // takes it off the active Job Pipeline board (dashboard.html) and out of any
 // "active projects" view that filters on pipeline_stage - it's a historical
@@ -144,6 +191,11 @@ async function markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote)
     })
     .eq('id', quote.id);
   if (error) throw error;
+}
+
+// The job's stages are the quote's in the same order (inserted above, or read back on a retry).
+function quoteToJobStages(quoteStages, jobStages) {
+  return Object.fromEntries(quoteStages.map((s, i) => [s.id, jobStages[i] && jobStages[i].id]));
 }
 
 // A job made moments ago is still being finished by the call that made it (a double tap, or the client and
@@ -287,7 +339,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
     newStages = insertedStages || [];
 
     // The credits' claim stages point at the quote's stages; point them at the job's copies.
-    const stageIdMap = Object.fromEntries(stages.map((s, i) => [s.id, newStages[i] && newStages[i].id]));
+    const stageIdMap = quoteToJobStages(stages, newStages);
     const creditStages = {};
     if (quote.stc_cost_centre_id && stageIdMap[quote.stc_cost_centre_id]) creditStages.stc_cost_centre_id = stageIdMap[quote.stc_cost_centre_id];
     if (quote.bstc_cost_centre_id && stageIdMap[quote.bstc_cost_centre_id]) creditStages.bstc_cost_centre_id = stageIdMap[quote.bstc_cost_centre_id];
@@ -332,6 +384,8 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
       if (pgErr) throw pgErr;
     }
   }
+
+  await carryQuoteCosts(supabaseAdmin, quote, job, quoteToJobStages(stages, newStages));
 
   // The quote's contacts (Contacts tab) go with the job.
   const { data: haveContacts } = retry ? await supabaseAdmin.from('job_contacts').select('id').eq('project_id', job.id).limit(1) : { data: [] };

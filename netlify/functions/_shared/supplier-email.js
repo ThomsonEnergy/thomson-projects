@@ -1,6 +1,6 @@
 // Emails to suppliers about bills and statements (spec A11c): a query about a bill that does
 // not match its PO, a query about statement issues, a request for copies of missing invoices,
-// and a request for a statement. draft() writes the email; a person edits it and presses Send,
+// a request for a statement, and a price match request to a dearer supplier. draft() writes the email; a person edits it and presses Send,
 // then send() sends it through the sales@ Gmail connection FROM invoice@ (sales@ has invoice@ as
 // a "Send mail as" address), so the supplier's reply comes back to invoice@ and is linked to the
 // bill or statement (query_gmail_thread_id). Nothing is ever sent without a person.
@@ -41,6 +41,18 @@ async function draft(admin, kind, id) {
       to,
       subject: `Query on invoice ${bill.bill_number || ''}${po ? ` (our ${po})` : ''}`.trim(),
       body: `Hi ${name},\n\nWe have checked invoice ${bill.bill_number || ''} (${money(bill.amount)}${bill.bill_date ? ', dated ' + bill.bill_date : ''})${po ? ' against our purchase order ' + po : ''}.\n\n${deniedText}${issueText}Could you please explain, or send a credit note / corrected invoice? We will hold the invoice until it is sorted.${SIGN_OFF}`,
+    };
+  }
+  if (kind === 'price_match') { // id is the material_supplier_links row of the supplier to ask (item 44)
+    const { data: link } = await admin.from('material_supplier_links').select('*, materials(name)').eq('id', id).single();
+    const { name, to } = await supplierEmail(admin, link.supplier_id);
+    const { data: others } = await admin.from('material_supplier_links').select('last_cost').eq('material_id', link.material_id).neq('supplier_id', link.supplier_id).not('last_cost', 'is', null).order('last_cost').limit(1);
+    const best = others?.[0];
+    const item = `${link.materials?.name || 'this item'}${link.part_number ? ` (your part ${link.part_number})` : ''}`;
+    return {
+      to,
+      subject: `Price match on ${link.part_number || link.materials?.name || 'an item'}`,
+      body: `Hi ${name},\n\nWe buy ${item} from you${link.last_cost != null ? ` at ${money(link.last_cost)} ex GST` : ''}. We have been offered the same item at ${best ? money(best.last_cost) : '(add the price here)'} ex GST elsewhere.\n\nCould you match that price? We would rather keep buying it from you.${SIGN_OFF}`,
     };
   }
   if (kind === 'request_statement') { // id is the supplier

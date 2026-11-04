@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
@@ -45,7 +45,7 @@
   <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
-  <script src="/js/project-invoice-actuals.js?v=1"></script>
+  <script src="/js/project-invoice-actuals.js?v=2"></script>
   <script src="/js/assets.js?v=3"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -55,6 +55,16 @@
 
     // Paid hours of one time entry: clock out minus clock in, less the break on the row (a shift is one
     // row with break_minutes on it), never below zero. Any select whose rows land here needs break_minutes.
+    // js/job-time.js (the Time tab and the accrued cost pop-up, backlog item 42) downloads the first
+    // time either is opened, so the job page itself stays light.
+    function withJobTime(fn) {
+      if (window.initJobTime) return fn();
+      const s = document.createElement('script');
+      s.src = '/js/job-time.js?v=1';
+      s.onload = fn;
+      s.onerror = () => showToast('Could not load the Time tab. Check the connection and try again.', { error: true });
+      document.head.appendChild(s);
+    }
     function entryHours(te) { return Math.max(0, (new Date(te.clock_out) - new Date(te.clock_in)) / 3600000 - (Number(te.break_minutes) || 0) / 60); }
 
     // Real accrued labour cost, per stage, from each employee's actual pay
@@ -2394,7 +2404,14 @@
         paid_at: null, xero_invoice_id: null, id: cn.id, isCredit: true,
         labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0), bstc_amount: -(Number(cn.bstc_amount) || 0),
       }));
-      const stageInvoices = [...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Claims invoiced before the job came across from ServiceM8 (cost_centres.imported_claims, item 45):
+      // already inside invoiced_amount, listed first, no invoice page or Xero behind them.
+      const importedInvoices = (Array.isArray(c.imported_claims) ? c.imported_claims : []).map((ic, i) => ({
+        invoice_number: ic.number, invoice_token: null, sent_at: ic.date || null, created_at: ic.date || '1970-01-01', sortFirst: i,
+        paid_at: null, xero_invoice_id: null, id: null, isImported: true, source: ic.source || 'servicem8',
+        labour_amount: Number(ic.amount) || 0, material_amount: 0, stc_amount: 0, bstc_amount: 0,
+      }));
+      const stageInvoices = [...importedInvoices, ...[...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))];
       const claimedTotal = stageInvoices.reduce((s, inv) => s + Number(inv.labour_amount) + Number(inv.material_amount), 0);
       const quotedAmt = Number(c.quoted_amount) || 0;
       const remaining = Math.max(0, quotedAmt - claimedTotal);
@@ -2726,6 +2743,13 @@
       // the logged variations go on the invoice unless you change that.
       if (!centres.length && !opts.variationsOnly) return;
       const projectRemaining = centres.reduce((s, x) => s + x.remaining, 0);
+      // The whole-project % is a share of the contract value (every quoted stage, claimed or not), so a job
+      // 32.7% claimed can take at most 67.3% more (item 45). Rounded to a tenth of a percent.
+      const allStages = (project.cost_centres || []).map(c => stageClaimSummary(c));
+      const projectQuoted = allStages.reduce((s, x) => s + x.quotedAmt, 0);
+      const projectClaimed = allStages.reduce((s, x) => s + x.claimedTotal, 0);
+      const pctOf = (amt) => projectQuoted > 0 ? Math.round((amt / projectQuoted) * 1000) / 10 : 0;
+      const maxPct = Math.max(0, Math.min(100, pctOf(projectRemaining)));
       const mode = opts.preselectCentreId ? 'stage' : 'project';
 
       const overlay = document.createElement('div');
@@ -2733,7 +2757,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:640px; width:100%; max-height:88vh; overflow-y:auto;">
           <h2>Invoice project</h2>
-          <p class="subtitle" style="margin-bottom:12px;">${centres.length ? `${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.` : 'No quoted stages left to claim.'}</p>
+          <p class="subtitle" style="margin-bottom:12px;">${centres.length ? `${money(projectRemaining)} remaining to claim across ${centres.length} stage${centres.length === 1 ? '' : 's'}.${projectClaimed > 0 ? ` Claimed so far: ${money(projectClaimed)} (${pctOf(projectClaimed)}% of ${money(projectQuoted)}).` : ''}` : 'No quoted stages left to claim.'}</p>
 
           <div id="inv-stage-part" style="${centres.length ? '' : 'display:none;'}">
           <div style="display:flex; gap:16px; margin-bottom:14px;">
@@ -2742,8 +2766,8 @@
           </div>
 
           <div id="inv-mode-project" style="${mode === 'project' ? '' : 'display:none;'}">
-            <label style="margin-top:0">Claim this % of the total contract value</label>
-            <input type="number" id="inv-project-pct" min="0" max="100" step="1" value="${opts.variationsOnly ? 0 : 100}" />
+            <label style="margin-top:0">Claim this % of the contract value${projectClaimed > 0 ? ` (up to ${maxPct}%, the rest is already claimed)` : ''}</label>
+            <input type="number" id="inv-project-pct" min="0" max="${maxPct}" step="0.1" inputmode="decimal" value="${opts.variationsOnly ? 0 : maxPct}" />
             <p class="subtitle" id="inv-project-preview" style="margin-top:8px;"></p>
           </div>
 
@@ -2794,9 +2818,9 @@
       function computeClaims() {
         const selectedMode = overlay.querySelector('input[name="inv-mode"]:checked').value;
         if (selectedMode === 'project') {
-          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          const pct = Math.max(0, Math.min(maxPct, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
           const allocated = {};
-          if (pct >= 100) {
+          if (pct >= maxPct) {
             // Exactly 100% - claim each stage's remaining balance verbatim,
             // no proportional split or rounding involved. Matters because
             // the STC pickup below needs amt to land EXACTLY on x.remaining
@@ -2804,7 +2828,7 @@
             // a "final claim" can silently leave the STC credit unclaimed.
             centres.forEach(x => { allocated[x.centre.id] = x.remaining; });
           } else {
-            let targetTotal = projectRemaining * (pct / 100);
+            let targetTotal = Math.min(projectRemaining, projectQuoted * (pct / 100));
             // Proportional-to-remaining, capped per stage, waterfalled: any
             // amount a stage can't absorb (because pct x its remaining alone
             // would be fine, but rounding/edge cases could push it over) is
@@ -2935,8 +2959,9 @@
         overlay.querySelector('#inv-total-display').textContent = `${money(total)} inc GST`;
         const pctPreview = overlay.querySelector('#inv-project-preview');
         if (pctPreview) {
-          const pct = Math.max(0, Math.min(100, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
-          pctPreview.textContent = `${money(projectRemaining * (pct / 100))} across ${claims.length} stage${claims.length === 1 ? '' : 's'}.`;
+          const pct = Math.max(0, Math.min(maxPct, parseFloat(overlay.querySelector('#inv-project-pct').value) || 0));
+          const thisClaim = claims.reduce((s, c) => s + c.labourAmount + c.materialAmount, 0);
+          pctPreview.textContent = `This claim ${money(thisClaim)} across ${claims.length} stage${claims.length === 1 ? '' : 's'}${projectQuoted > 0 ? `, taking the job to ${pctOf(projectClaimed + thisClaim)}% claimed` : ''}.`;
         }
       }
 
@@ -4461,6 +4486,7 @@
         { panel: 'stcs', label: 'STCs', show: !!project.job_number && !editMode && pricingVisible },
         { panel: 'details', label: 'Details', show: true },
         { panel: 'schedule', label: 'Schedule', show: !editMode },
+        { panel: 'time', label: 'Time', show: !!project.job_number && !editMode },
         { panel: 'feed', label: 'Feed', show: !editMode },
         { panel: 'emails', label: 'Emails', show: !editMode },
         { panel: 'documents', label: 'Documents', show: !editMode },
@@ -4858,7 +4884,13 @@
                     <table class="responsive-stack">
                       <thead><tr><th>Invoice</th><th class="num">Amount</th><th>Sent</th><th></th></tr></thead>
                       <tbody>
-                        ${stageInvoices.map(inv => inv.isCredit ? `
+                        ${stageInvoices.map(inv => inv.isImported ? `
+                          <tr>
+                            <td data-label="Invoice">${escapeHtml(inv.invoice_number || '')} <span class="subtitle" style="font-size:11px;">ServiceM8</span></td>
+                            <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
+                            <td data-label="Sent">${inv.sent_at ? new Date(inv.sent_at).toLocaleDateString('en-AU') : ''}</td>
+                            <td data-label=""><span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span></td>
+                          </tr>` : inv.isCredit ? `
                           <tr>
                             <td data-label="Invoice">Credit note</td>
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
@@ -4999,6 +5031,13 @@
                 <h2 style="margin:0 0 4px;">Contacts</h2>
                 <p class="subtitle" style="margin:0 0 14px;">Who to call on this job: the people at the site, the client's people and ours. Anyone can add or fix a contact; tap a number to call.</p>
                 <div id="job-contacts-sections"><p class="subtitle">Loading...</p></div>
+              </div>
+            </div>
+            <div class="settings-panel" id="panel-time">
+              <div class="card">
+                <h2 style="margin:0 0 4px;">Time</h2>
+                <p class="subtitle" style="margin:0 0 14px;">Every shift clocked on this job. Admin can fix a stage, or tick shifts that belong on another job and move them (hours and pay stay the same).</p>
+                <div id="job-time-body"><p class="subtitle">Loading...</p></div>
               </div>
             </div>
             <div class="settings-panel" id="panel-schedule">
@@ -5209,6 +5248,12 @@
       initJobSearch(project, pricingVisible);
       initJobEmails(project);
       initJobSchedule(project, pricingVisible);
+      const timeTab = document.querySelector('#job-tabs .settings-tab[data-panel="time"]');
+      if (timeTab) {
+        const openTime = () => withJobTime(() => { initJobTime(project, pricingVisible); timeTab.click(); });
+        timeTab.addEventListener('click', openTime, { once: true });
+        if (params.get('tab') === 'time') openTime();
+      }
       initJobContacts(project, pricingVisible);
       initJobStcs(project, centres);
 
@@ -5270,7 +5315,7 @@
       if (document.getElementById('ccew-section')) initCcewSection(project);
 
       const costAllocatedEl = document.getElementById('cost-allocated-value');
-      if (costAllocatedEl) costAllocatedEl.addEventListener('click', () => openTimesheetDrilldown(project, pricingVisible));
+      if (costAllocatedEl) costAllocatedEl.addEventListener('click', () => withJobTime(() => openAccruedCost(project, pricingVisible)));
 
       document.querySelectorAll('.create-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible, { preselectCentreId: btn.dataset.id }));
@@ -7297,282 +7342,6 @@
     // timesheet entries behind it, and (admin only) correct which stage
     // an entry's hours are attributed to, or reclassify it as office/
     // training/other time entirely.
-    async function openTimesheetDrilldown(project, pricingVisible) {
-      const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
-      const myRole = await getMyRole();
-      const isAdmin = myRole === 'admin';
-      // Itemised per-entry cost is narrower than pricingVisible (Admin/
-      // Finance/Sales) - dividing one entry's cost by its hours is
-      // functionally the same as reading that employee's pay rate, which
-      // stays Admin/Finance only, not Sales.
-      const isFinanceOrAdmin = myRole === 'admin' || myRole === 'finance';
-      const colCount = 4 + (isFinanceOrAdmin ? 1 : 0) + (isAdmin ? 1 : 0);
-
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:720px; width:100%; max-height:85vh; overflow-y:auto;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <h2 style="margin:0;">Accrued cost on this job</h2>
-            <button type="button" class="secondary" id="td-close-btn">Close</button>
-          </div>
-          <p class="subtitle" style="margin-bottom:14px;">${isAdmin ? 'As admin you can correct which stage an entry belongs to, or move it to office/non-job time.' : 'Read-only - admins can edit the cost centre / office time split.'}</p>
-          <div id="td-msg"></div>
-          <h3 style="margin-bottom:8px;">Timesheets</h3>
-          <div id="td-list"><p class="subtitle">Loading...</p></div>
-          <h3 style="margin:22px 0 8px;">Purchase orders received</h3>
-          <div id="td-po-list"><p class="subtitle">Loading...</p></div>
-        </div>`;
-      document.body.appendChild(overlay);
-      overlay.querySelector('#td-close-btn').addEventListener('click', () => overlay.remove());
-
-      const centreName = (id) => centres.find(c => c.id === id)?.name || 'Unknown stage';
-      const stageLabel = (entry) => {
-        if (entry.time_category && entry.time_category !== 'job') {
-          return timeCategoryLabel(entry.time_category);
-        }
-        const ids = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
-          ? entry.selected_cost_centre_ids
-          : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
-        return ids.length ? ids.map(centreName).join(', ') : 'Unassigned';
-      };
-      // paid hours (less the break), the same basis as the cost column from the server
-      const hoursFor = (entry) => entry.clock_out ? Math.round(entryHours(entry) * 100) / 100 : null;
-
-      async function refreshList() {
-        const listEl = overlay.querySelector('#td-list');
-        const { data: entries, error } = await supabaseClient
-          .from('time_entries')
-          .select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids, time_category, sm8_activity_uuid, profiles(full_name)')
-          .eq('project_id', project.id)
-          .order('clock_in', { ascending: false });
-        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
-        if (!entries.length) { listEl.innerHTML = `<p class="subtitle">No timesheet entries logged against this job yet.</p>`; return; }
-
-        let costById = new Map();
-        let indirectById = new Map();
-        if (isFinanceOrAdmin) {
-          try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/get-itemised-labour-cost', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({ projectId: project.id }),
-            });
-            const data = await res.json();
-            if (res.ok && data.ok) {
-              costById = new Map(Object.entries(data.costByEntryId));
-              indirectById = new Map(Object.entries(data.indirectByEntryId || {}));
-            }
-          } catch (err) {
-            console.error('Itemised labour cost fetch failed:', err.message);
-          }
-        }
-        // Sum only THIS project's entries, not every value in costById - it
-        // also holds cost for the same employee's entries on OTHER jobs
-        // during the same pay week (needed server-side to band overtime
-        // correctly), which would otherwise inflate this total past what
-        // the rows above it actually show.
-        const totalCost = entries.reduce((s, e) => s + (costById.get(e.id) || 0), 0);
-        const totalIndirect = entries.reduce((s, e) => s + (indirectById.get(e.id) || 0), 0);
-
-        listEl.innerHTML = `
-          <table class="responsive-stack">
-            <thead><tr><th>Staff</th><th>Date</th><th class="num">Hours</th><th>Stage / category</th>${isFinanceOrAdmin ? '<th class="num">Cost</th>' : ''}${isAdmin ? '<th></th>' : ''}</tr></thead>
-            <tbody>
-              ${entries.map(e => {
-                const hrs = hoursFor(e);
-                const cost = costById.get(e.id);
-                return `
-                <tr data-entry-id="${e.id}">
-                  <td data-label="Staff">${escapeHtml(e.profiles?.full_name || 'Unknown')}</td>
-                  <td data-label="Date">${new Date(e.clock_in).toLocaleDateString()}</td>
-                  <td class="num" data-label="Hours">${hrs === null ? 'In progress' : hrs.toFixed(2)}</td>
-                  <td data-label="Stage / category">${escapeHtml(stageLabel(e))}${e.sm8_activity_uuid ? ' <span class="subtitle">(ServiceM8, already paid)</span>' : ''}</td>
-                  ${isFinanceOrAdmin ? `<td class="num" data-label="Cost">${cost === undefined ? '-' : money(cost)}</td>` : ''}
-                  ${isAdmin ? `<td><button type="button" class="secondary td-edit-btn" data-id="${e.id}" style="font-size:12px; padding:4px 8px;">Edit</button></td>` : ''}
-                </tr>
-                <tr class="td-edit-row" data-edit-for="${e.id}" style="display:none;"><td colspan="${colCount}"></td></tr>`;
-              }).join('')}
-            </tbody>
-            ${isFinanceOrAdmin ? `<tfoot><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" style="text-align:right; font-weight:600;">Total labour cost (wages + direct overheads)</td><td class="num" style="font-weight:600;">${money(totalCost)}</td>${isAdmin ? '<td></td>' : ''}</tr><tr><td colspan="${colCount - 1 - (isAdmin ? 1 : 0)}" class="subtitle" style="text-align:right;">incl. overheads</td><td class="num subtitle">${money(totalCost + totalIndirect)}</td>${isAdmin ? '<td></td>' : ''}</tr></tfoot>` : ''}
-          </table>`;
-
-        if (!isAdmin) return;
-        listEl.querySelectorAll('.td-edit-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const entry = entries.find(e => e.id === btn.dataset.id);
-            openEditRow(entry);
-          });
-        });
-      }
-
-      async function refreshPoList() {
-        const listEl = overlay.querySelector('#td-po-list');
-        if (!pricingVisible) { listEl.innerHTML = `<p class="subtitle">Pricing details are hidden for your role.</p>`; return; }
-
-        const { data: pos, error } = await supabaseClient
-          .from('purchase_orders')
-          .select('id, po_number, cost_centre_id, suppliers(name), supplier_name, purchase_order_line_items(description, quantity, unit_cost, received)')
-          .eq('project_id', project.id);
-        if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
-
-        const receivedRows = [];
-        (pos || []).forEach(po => {
-          const supplierLabel = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
-          (po.purchase_order_line_items || []).filter(li => li.received).forEach(li => {
-            receivedRows.push({ ...li, supplierLabel, poNumber: po.po_number, stage: centreName(po.cost_centre_id) });
-          });
-        });
-
-        if (!receivedRows.length) { listEl.innerHTML = `<p class="subtitle">No purchase order line items received yet - only received items count as accrued cost, not just approved/ordered ones.</p>`; return; }
-
-        const totalMaterial = receivedRows.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-        listEl.innerHTML = `
-          <table class="responsive-stack">
-            <thead><tr><th>Item</th><th>Supplier</th><th>Stage</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Total</th></tr></thead>
-            <tbody>
-              ${receivedRows.map(li => `
-                <tr>
-                  <td data-label="Item">${escapeHtml(li.description)}${li.poNumber ? ` <span class="subtitle" style="font-size:11px;">(${escapeHtml(li.poNumber)})</span>` : ''}</td>
-                  <td data-label="Supplier">${escapeHtml(li.supplierLabel)}</td>
-                  <td data-label="Stage">${escapeHtml(li.stage)}</td>
-                  <td class="num" data-label="Qty">${li.quantity}</td>
-                  <td class="num" data-label="Unit cost">${money(li.unit_cost)}</td>
-                  <td class="num" data-label="Total">${money(Number(li.quantity) * Number(li.unit_cost))}</td>
-                </tr>`).join('')}
-            </tbody>
-            <tfoot><tr><td colspan="5" style="text-align:right; font-weight:600;">Total received materials cost</td><td class="num" style="font-weight:600;">${money(totalMaterial)}</td></tr></tfoot>
-          </table>`;
-      }
-
-      function openEditRow(entry) {
-        const editCell = overlay.querySelector(`tr[data-edit-for="${entry.id}"] td`);
-        const selectedIds = (entry.selected_cost_centre_ids && entry.selected_cost_centre_ids.length)
-          ? entry.selected_cost_centre_ids
-          : (entry.cost_centre_id ? [entry.cost_centre_id] : []);
-        const category = entry.time_category && entry.time_category !== 'job' ? entry.time_category : 'job';
-        // ServiceM8 imports can be wrong in ServiceM8 itself: admins can fix the times or delete them
-        // (Sydney times; our own staff's entries are edited in Timesheets instead)
-        const isSm8 = !!entry.sm8_activity_uuid;
-        const sydParts = (iso) => {
-          const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(iso)).map(x => [x.type, x.value]));
-          return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
-        };
-        const sydToIso = (dateKey, time) => {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !/^\d{2}:\d{2}$/.test(time)) return null;
-          const naive = new Date(`${dateKey}T${time}:00Z`).getTime();
-          const guess = naive - sydneyOffsetMinutesAt(new Date(naive)) * 60000;
-          return new Date(naive - sydneyOffsetMinutesAt(new Date(guess)) * 60000).toISOString();
-        };
-        const inParts = isSm8 ? sydParts(entry.clock_in) : null;
-        const outParts = isSm8 && entry.clock_out ? sydParts(entry.clock_out) : { date: inParts?.date || '', time: '' };
-
-        editCell.innerHTML = `
-          <div style="padding:10px; background:var(--surface-2); border-radius:8px;">
-            ${isSm8 ? `
-            <p class="subtitle" style="margin:0 0 6px;">ServiceM8 check-in. Fix the times if they are wrong in ServiceM8, or delete it. A new ServiceM8 import will not undo either.</p>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-              <div><label style="margin-top:0;">Start date</label><input type="date" class="td-in-date" value="${inParts.date}" /></div>
-              <div><label style="margin-top:0;">Start time</label><input type="time" class="td-in-time" value="${inParts.time}" /></div>
-              <div><label>Finish date</label><input type="date" class="td-out-date" value="${outParts.date}" /></div>
-              <div><label>Finish time</label><input type="time" class="td-out-time" value="${outParts.time}" /></div>
-            </div>` : ''}
-            <label style="${isSm8 ? '' : 'margin-top:0;'}">Category</label>
-            <select class="td-category">
-              <option value="job" ${category === 'job' ? 'selected' : ''}>Job - split across stage(s) below</option>
-              ${timeCategoryOptionsHtml(category)}
-            </select>
-            <div class="td-stage-section" style="margin-top:8px; ${category === 'job' ? '' : 'display:none;'}">
-              <label>Stage(s) - tick every stage this entry's hours count against</label>
-              ${centres.map(c => `
-                <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:6px;">
-                  <input type="checkbox" class="td-stage-check" value="${c.id}" style="width:auto;" ${selectedIds.includes(c.id) ? 'checked' : ''} />
-                  ${escapeHtml(c.name)}
-                </label>`).join('')}
-            </div>
-            <div style="margin-top:12px;">
-              <button type="button" class="td-save-btn">Save</button>
-              <button type="button" class="secondary td-cancel-btn">Cancel</button>
-              ${isSm8 ? `<button type="button" class="secondary td-delete-btn" style="color:var(--red);">Delete</button>` : ''}
-            </div>
-            <div class="td-edit-msg"></div>
-          </div>`;
-        editCell.closest('tr').style.display = 'table-row';
-
-        editCell.querySelector('.td-category').addEventListener('change', (e) => {
-          editCell.querySelector('.td-stage-section').style.display = e.target.value === 'job' ? '' : 'none';
-        });
-        editCell.querySelector('.td-cancel-btn').addEventListener('click', () => {
-          editCell.closest('tr').style.display = 'none';
-          editCell.innerHTML = '';
-        });
-        editCell.querySelector('.td-save-btn').addEventListener('click', async () => {
-          const msg = editCell.querySelector('.td-edit-msg');
-          const newCategory = editCell.querySelector('.td-category').value;
-          const checkedIds = Array.from(editCell.querySelectorAll('.td-stage-check:checked')).map(el => el.value);
-          if (newCategory === 'job' && !checkedIds.length) {
-            msg.innerHTML = `<div class="error-box">Tick at least one stage, or choose a non-job category.</div>`;
-            return;
-          }
-          let times = {};
-          if (isSm8) {
-            const clockIn = sydToIso(editCell.querySelector('.td-in-date').value, editCell.querySelector('.td-in-time').value);
-            const clockOut = sydToIso(editCell.querySelector('.td-out-date').value, editCell.querySelector('.td-out-time').value);
-            if (!clockIn || !clockOut) { msg.innerHTML = `<div class="error-box">Fill in the start and finish date and time.</div>`; return; }
-            if (clockOut <= clockIn) { msg.innerHTML = `<div class="error-box">Finish must be after start.</div>`; return; }
-            times = { clock_in: clockIn, clock_out: clockOut };
-          }
-          try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/admin-update-time-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({
-                ...times,
-                entryId: entry.id,
-                project_id: newCategory === 'job' ? project.id : null,
-                cost_centre_id: newCategory === 'job' && checkedIds.length === 1 ? checkedIds[0] : null,
-                selected_cost_centre_ids: newCategory === 'job' && checkedIds.length > 1 ? checkedIds : null,
-                time_category: newCategory,
-              }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) throw new Error(data.error || 'Update failed');
-
-            await refreshList();
-            const refreshed = await loadProject();
-            if (refreshed) render(refreshed, pricingVisible);
-          } catch (err) {
-            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          }
-        });
-        editCell.querySelector('.td-delete-btn')?.addEventListener('click', async () => {
-          const msg = editCell.querySelector('.td-edit-msg');
-          const hrs = hoursFor(entry);
-          if (!confirm(`Delete this ServiceM8 entry for ${entry.profiles?.full_name || 'this person'}${hrs === null ? '' : ` (${hrs.toFixed(2)} hours)`}? It comes off this job's labour cost and a new ServiceM8 import will not bring it back.`)) return;
-          try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/admin-update-time-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({ entryId: entry.id, delete: true }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
-
-            await refreshList();
-            const refreshed = await loadProject();
-            if (refreshed) render(refreshed, pricingVisible);
-          } catch (err) {
-            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          }
-        });
-      }
-
-      await Promise.all([refreshList(), refreshPoList()]);
-    }
-
     function isPdfDoc(d) {
       return (d.mime_type || '') === 'application/pdf' || /.pdf$/i.test(d.file_name || '');
     }
@@ -7992,6 +7761,9 @@
       const btnStyle = 'font-size:12px; padding:5px 10px;';
       const linkFor = (r) => `${shareOrigin()}/quote.html?variation=${r.variation_token}`;
       const linesTotal = (r) => (r.fixed_lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+      // How a fixed-price line was priced (item 43): hours at a rate, or quantity at cost plus markup; older lines only say which kind.
+      const fixedLineHow = (l) => l.quantity == null ? (l.item_type === 'labour' ? 'labour' : 'materials')
+        : l.item_type === 'labour' ? `labour, ${qtyText(l.quantity)} hrs at ${money(l.unit_cost)}` : `materials, ${qtyText(l.quantity)} at ${money(l.unit_cost)}${Number(l.markup_percent) ? ' + ' + qtyText(l.markup_percent) + '%' : ''}`;
       const entryStages = (t) => (t.selected_cost_centre_ids && t.selected_cost_centre_ids.length) ? t.selected_cost_centre_ids : (t.cost_centre_id ? [t.cost_centre_id] : []);
 
       listEl.innerHTML = (rows || []).length ? rows.map(r => {
@@ -8036,7 +7808,7 @@
           <div style="margin-top:12px; padding-top:10px; border-top:0.5px solid var(--border);">
             ${r.reason ? `<p style="margin:0 0 8px; white-space:pre-wrap; font-size:13px;"><strong>Reason:</strong> ${escapeHtml(r.reason)}</p>` : ''}
             ${pricingVisible ? `
-              ${(r.fixed_lines || []).map(l => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:2px 0;"><span>${escapeHtml(l.description)} <span class="subtitle">(${l.item_type === 'labour' ? 'labour' : 'materials'})</span></span><span>${money(l.amount)}</span></div>`).join('')}
+              ${(r.fixed_lines || []).map(l => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:2px 0;"><span>${escapeHtml(l.description)} <span class="subtitle">(${fixedLineHow(l)})</span></span><span>${money(l.amount)}</span></div>`).join('')}
               <div style="display:flex; justify-content:space-between; font-weight:600; font-size:13px; padding-top:6px; margin-top:4px; border-top:0.5px solid var(--border);"><span>Total ex GST</span><span>${money(linesTotal(r))}</span></div>
               <div class="subtitle" style="display:flex; justify-content:space-between; font-size:12px;"><span>Inc GST</span><span>${money(linesTotal(r) * 1.1)}</span></div>
             ` : `<p class="subtitle" style="margin:0; font-size:12px;">Fixed-price variation, priced by the office.</p>`}
@@ -8265,118 +8037,15 @@
       }
     }
 
-    // Pricing roles: set up (or edit the draft of) a fixed-price variation - the
-    // reason the client will read and the priced lines. Saving keeps it as a draft;
-    // "Email to client..." on its card sends it for signing.
+    // The fixed-price variation editor lives in js/variation-fixed-editor.js (backlog item 43), downloaded
+    // the first time it is opened, like the Time tab, so the job page itself stays light.
     function openFixedVariationEditor(project, entry, onSaved) {
-      const lines = (entry && entry.fixed_lines && entry.fixed_lines.length ? entry.fixed_lines : [{ description: '', item_type: 'material', amount: '' }]).map(l => ({ ...l }));
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:110; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
-          <h2>${entry ? 'Edit fixed-price variation' : 'New fixed-price variation'}</h2>
-          <p class="subtitle" style="margin-bottom:10px;">The client gets this as its own variation document (referencing their original quote), then signs to approve it. Once signed it's added to the job as a stage at this price.</p>
-          <label style="margin-top:0;">What is the extra work?</label>
-          <input id="fv-desc" value="${escapeHtml(entry ? entry.description : '')}" placeholder="e.g. Move meter box and run new sub-main" />
-          <label>Reason for the variation (the client reads this)</label>
-          <textarea id="fv-reason" style="min-height:80px;" placeholder="e.g. The builder moved the meter location after the quote was accepted, which needs a longer cable run.">${escapeHtml(entry ? entry.reason || '' : '')}</textarea>
-          <label>Priced lines (ex GST)</label>
-          <div id="fv-lines"></div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
-            <button type="button" class="secondary" id="fv-add-line" style="font-size:12px; padding:6px 10px;">+ Add a line</button>
-            <button type="button" class="secondary" id="fv-add-stock" style="font-size:12px; padding:6px 10px;">+ From Stock or prebuild</button>
-          </div>
-          <p style="margin:12px 0 0; font-size:14px;">Total: <strong id="fv-total">$0.00</strong> ex GST <span class="subtitle" id="fv-total-gst"></span></p>
-          <div id="fv-msg"></div>
-          <div style="margin-top:12px;"><button type="button" id="fv-save">Save draft</button> <button type="button" class="secondary" id="fv-cancel">Cancel</button></div>
-        </div>`;
-      document.body.appendChild(overlay);
-      const linesEl = overlay.querySelector('#fv-lines');
-      const sum = () => lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
-      const refreshTotal = () => {
-        overlay.querySelector('#fv-total').textContent = money(sum());
-        overlay.querySelector('#fv-total-gst').textContent = `(${money(sum() * 1.1)} inc GST)`;
-      };
-      const renderLines = () => {
-        linesEl.innerHTML = lines.map((l, i) => `
-          <div style="display:grid; grid-template-columns:1fr 110px 100px auto; gap:6px; margin-bottom:6px; align-items:center;">
-            <input class="fv-l-desc" data-i="${i}" value="${escapeHtml(l.description)}" placeholder="Description" style="margin:0;" />
-            <select class="fv-l-type" data-i="${i}" style="margin:0;"><option value="material" ${l.item_type !== 'labour' ? 'selected' : ''}>Materials</option><option value="labour" ${l.item_type === 'labour' ? 'selected' : ''}>Labour</option></select>
-            <input class="fv-l-amt" data-i="${i}" type="number" min="0" step="0.01" value="${l.amount === '' ? '' : l.amount}" placeholder="$" style="margin:0;" />
-            <button type="button" class="secondary fv-l-del" data-i="${i}" style="font-size:12px; padding:4px 9px;">&times;</button>
-          </div>`).join('');
-        linesEl.querySelectorAll('.fv-l-desc').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].description = el.value; }));
-        linesEl.querySelectorAll('.fv-l-type').forEach(el => el.addEventListener('change', () => { lines[el.dataset.i].item_type = el.value; }));
-        linesEl.querySelectorAll('.fv-l-amt').forEach(el => el.addEventListener('input', () => { lines[el.dataset.i].amount = el.value; refreshTotal(); }));
-        linesEl.querySelectorAll('.fv-l-del').forEach(el => el.addEventListener('click', () => { lines.splice(Number(el.dataset.i), 1); if (!lines.length) lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); refreshTotal(); }));
-      };
-      renderLines(); refreshTotal();
-      overlay.querySelector('#fv-add-line').addEventListener('click', () => { lines.push({ description: '', item_type: 'material', amount: '' }); renderLines(); });
-      // Priced like a quote: Stock at cost plus the default markup; a prebuild's labour at its
-      // own (sell) rates and its materials marked up. Price only, nothing leaves Stock.
-      overlay.querySelector('#fv-add-stock').addEventListener('click', async () => {
-        const pick = await openVariationStockPicker(true, true); // price only: no low-stock warning
-        if (!pick) return;
-        const { data: cs } = await supabaseClient.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle();
-        const factor = 1 + markupOr45(cs?.default_markup_percent) / 100;
-        const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-        const qty = Number(pick.quantity) || 1;
-        const name = `${pick.name} x ${r2(qty)}`;
-        let added = [];
-        if (pick.kind === 'material') {
-          const { data: m } = await supabaseClient.from('materials').select('cost_price').eq('id', pick.id).maybeSingle();
-          added.push({ description: name, item_type: 'material', amount: r2((Number(m?.cost_price) || 0) * factor * qty) });
-        } else {
-          const pb = (await getPrebuilds()).find(p => p.id === pick.id);
-          const comps = (pb && pb.prebuild_components) || [];
-          const part = (type) => comps.filter(c => (c.item_type === 'labour') === (type === 'labour'))
-            .reduce((t, c) => t + (Number(c.quantity) || 0) * (Number(c.unit_cost) || 0), 0) * qty;
-          const lab = r2(part('labour')), mat = r2(part('material') * factor);
-          if (lab > 0) added.push({ description: `${name} (labour)`, item_type: 'labour', amount: lab });
-          if (mat > 0) added.push({ description: `${name} (materials)`, item_type: 'material', amount: mat });
-          if (!added.length) added.push({ description: name, item_type: 'material', amount: '' });
-        }
-        // fill the blank starting line rather than leaving it empty above
-        if (lines.length === 1 && !lines[0].description && !(parseFloat(lines[0].amount) > 0)) lines.splice(0, 1);
-        lines.push(...added);
-        renderLines(); refreshTotal();
-      });
-      overlay.querySelector('#fv-cancel').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#fv-save').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#fv-msg');
-        const description = overlay.querySelector('#fv-desc').value.trim();
-        const reason = overlay.querySelector('#fv-reason').value.trim();
-        const clean = lines.map(l => ({ description: String(l.description || '').trim(), item_type: l.item_type === 'labour' ? 'labour' : 'material', amount: Math.round((parseFloat(l.amount) || 0) * 100) / 100 })).filter(l => l.description && l.amount > 0);
-        if (!description) { msg.innerHTML = `<div class="error-box">Say what the extra work is.</div>`; return; }
-        if (!reason) { msg.innerHTML = `<div class="error-box">Add the reason, so the client knows why.</div>`; return; }
-        if (!clean.length) { msg.innerHTML = `<div class="error-box">Add at least one priced line.</div>`; return; }
-        const saveBtn = overlay.querySelector('#fv-save');
-        saveBtn.disabled = true;
-        try {
-          if (entry) {
-            // Only a draft can be rewritten. Once it is sent, approved or declined the lines are what the
-            // client saw (and signed), so the status is checked in the same write: no row back, no save.
-            const { data: saved, error: uErr } = await supabaseClient.from('job_variation_entries').update({ description, reason, fixed_lines: clean })
-              .eq('id', entry.id).or('approval_status.is.null,approval_status.eq.draft').select('id');
-            if (uErr) throw uErr;
-            if (!saved || !saved.length) throw new Error('This variation is no longer a draft (it has been sent, approved or declined since this editor was opened), so it cannot be changed. Close this and reload the page.');
-          } else {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch('/.netlify/functions/create-variation', {
-              method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-              body: JSON.stringify({ projectId: project.id, type: 'fixed', description, reason, lines: clean }),
-            });
-            const d = await res.json();
-            if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save it');
-            await logActivity('project', project.id, 'variation_logged', `Fixed-price variation ${d.number} drafted: ${description}`);
-          }
-          overlay.remove();
-          await onSaved();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          saveBtn.disabled = false;
-        }
-      });
+      if (window.openFixedVariationEditorPanel) return window.openFixedVariationEditorPanel(project, entry, onSaved);
+      const s = document.createElement('script');
+      s.src = '/js/variation-fixed-editor.js?v=1';
+      s.onload = () => window.openFixedVariationEditorPanel(project, entry, onSaved);
+      s.onerror = () => showToast('Could not load the variation editor. Check the connection and try again.', { error: true });
+      document.head.appendChild(s);
     }
 
     // Makes (or remakes) a fixed-price variation's PDF: the variation document from

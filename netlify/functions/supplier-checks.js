@@ -9,7 +9,7 @@
 //   statement_supplier{ id, supplier_id }          pick the supplier for a statement
 //   statement_reviewed{ id }                       a person has gone through the issues
 //   statement_retry   { id }                       read an emailed statement again
-//   draft_email       { kind, id }                 kind: bill_query | statement_query | request_copies | request_statement
+//   draft_email       { kind, id }                 kind: bill_query | statement_query | request_copies | request_statement | price_match (id = the supplier link)
 //   send_email        { kind, id, to, subject, body }
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
@@ -18,7 +18,7 @@ const { reconcileStatement, startStatementProcessing } = require('./_shared/stat
 const { draft, send } = require('./_shared/supplier-email');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
-const KINDS = ['bill_query', 'statement_query', 'request_copies', 'request_statement'];
+const KINDS = ['bill_query', 'statement_query', 'request_copies', 'request_statement', 'price_match'];
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -79,7 +79,14 @@ exports.handler = async (event) => {
       if (action === 'draft_email') return json(200, { ok: true, ...(await draft(admin, kind, id)) });
       const r = await send(admin, { kind, id, to, subject, body });
       const entity = kind === 'bill_query' ? 'bill' : (kind === 'request_statement' ? 'supplier' : 'statement');
-      if (entity === 'supplier') await log('supplier', id, 'statement_requested', `Statement requested by email (to ${to})`);
+      if (kind === 'price_match') {
+        const { data: link } = await admin.from('material_supplier_links').select('supplier_id, material_id').eq('id', id).maybeSingle();
+        if (link) {
+          await log('supplier', link.supplier_id, 'price_match_sent', `Asked to match a price by email (to ${to}): ${subject}`);
+          await log('material', link.material_id, 'price_match_sent', `Asked ${to} to match a price: ${subject}`);
+        }
+      }
+      else if (entity === 'supplier') await log('supplier', id, 'statement_requested', `Statement requested by email (to ${to})`);
       else {
         const table = entity === 'bill' ? 'supplier_bills' : 'supplier_statements';
         const { data: row } = await admin.from(table).select('supplier_id').eq('id', id).maybeSingle();

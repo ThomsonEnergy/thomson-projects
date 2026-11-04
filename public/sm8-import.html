@@ -125,7 +125,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const BATCH = 5;
@@ -395,6 +395,16 @@
     }
 
     // Claims for the job's notes, so the history stays with the job.
+    // The Completed claims behind "invoiced to date", for the stage's imported_claims (item 45): the
+    // date comes from ServiceM8's own note line ("[2026-07-10] Partial invoice #4515A created").
+    function claimsForImport(e, r) {
+      const claims = e.lines ? e.lines.claimsUsed.filter(c => c.invoiced) : [];
+      return claims.map(c => {
+        const m = String(r.notesText || '').match(new RegExp('\\[(\\d{4}-\\d{2}-\\d{2})\\] Partial invoice #' + String(c.number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' created'));
+        return { number: c.number, amount: c.valueExGst, date: m ? m[1] : null };
+      });
+    }
+
     function claimsNote(e) {
       const claims = e.lines ? e.lines.claimsUsed : [];
       if (!claims.length) return '';
@@ -529,6 +539,8 @@
                 name: e.stageName.trim() || 'Labour & Materials',
                 quotedExGst: Number(e.manualValue) || 0,
                 invoicedExGst: Number(e.invoiced) || 0,
+                // only when the typed figure is still the claims' own total (a hand-edited figure has no claims behind it)
+                claims: Math.abs(claimsForImport(e, r).reduce((t, c) => t + c.amount, 0) - (Number(e.invoiced) || 0)) < 0.01 ? claimsForImport(e, r) : [],
                 stcs: e.lines ? e.lines.stcs || [] : [],
                 lines: linesOf(e).map(l => ({ item_type: l.item_type, description: l.description, quantity: l.quantity, cost: l.cost, price: l.price, group: l.group, base_quantity: l.base_quantity })),
                 groups: e.lines ? e.lines.groups.map(g => ({ key: g.key, description: g.description })) : [],
