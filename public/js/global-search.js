@@ -33,9 +33,10 @@
         const ors = [ilikeOr(['name', 'client_name', 'client_address'], q)];
         if (num) ors.push(`job_number.eq.${num}`, `quote_number.eq.${num}`, `sm8_job_number.eq.${num}`);
         const data = must(await supabaseClient.from('projects')
-          .select('id, name, job_number, quote_number, client_name, client_address')
+          .select('id, name, job_number, quote_number, client_name, client_address, merged_into_project_id')
           .or(ors.join(',')).order('created_at', { ascending: false }).limit(PER_GROUP));
-        return data.map(p => ({ title: projectRef(p), sub: [p.client_name, p.client_address].filter(Boolean).join(' · '), href: `/project.html?id=${p.id}` }));
+        // a merged job's J number opens the job it was merged into (item 47)
+        return data.map(p => ({ title: projectRef(p) + (p.merged_into_project_id ? ' (merged)' : ''), sub: [p.client_name, p.client_address].filter(Boolean).join(' · '), href: `/project.html?id=${p.merged_into_project_id || p.id}${p.merged_into_project_id ? '&merged_from=' + p.id : ''}` }));
       },
     },
     {
