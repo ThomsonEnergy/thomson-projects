@@ -212,7 +212,7 @@
             // The claim itself is one line for the client (owner, 4 Nov 2026): the labour / materials
             // split stays on our side (Xero income lines, job costing), never on the invoice.
             const rest = Math.round((lab + mat - itemLab - itemMat) * 100) / 100;
-            if (rest > 0) rows.push(itemRow(partial ? `${c.cost_centre_name} - progress claim` : c.cost_centre_name, rest));
+            if (rest > 0) rows.push(itemRow(c.cost_centre_name, rest));
             if (!rows.length) rows.push(itemRow(c.cost_centre_name, 0));
           }
           sections.push({ title: `${c.cost_centre_name}${partial ? ` - progress claim (${pct}% of this stage)` : ''}`, rows });
