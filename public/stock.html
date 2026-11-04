@@ -45,6 +45,7 @@
           <button id="create-stock-po-btn" style="margin-right:8px;">+ Create PO</button>
           <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
+          <button class="secondary" id="scan-part-btn" style="margin-right:8px;">&#128247; Scan a part</button>
           <button id="add-material-btn">+ Add material</button>
         </div>
       </div>
@@ -58,7 +59,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=122"></script>
+  <script src="/js/supabase-client.js?v=123"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
@@ -140,7 +141,7 @@
       const listEl = document.getElementById('stock-list');
       const q = document.getElementById('stock-search').value.trim().toLowerCase();
       const filtered = q
-        ? allMaterials.filter(m => (m.name || '').toLowerCase().includes(q) || (m.category || '').toLowerCase().includes(q) || (m.suppliers?.name || '').toLowerCase().includes(q))
+        ? allMaterials.filter(m => [m.name, m.category, m.suppliers?.name, m.brand, m.part_number, m.barcode].some(f => (f || '').toLowerCase().includes(q)))
         : allMaterials;
 
       const totalStockCost = allMaterials.reduce((s, m) => s + (Number(m.quantity_on_hand) || 0) * (Number(m.cost_price) || 0), 0);
@@ -168,7 +169,7 @@
           ].filter(Boolean).join(' ');
           return `
           <tr>
-            <td data-label="Name">${escapeHtml(m.name)}${chips ? `<div style="margin-top:3px; display:flex; gap:4px; flex-wrap:wrap;">${chips}</div>` : ''}</td>
+            <td data-label="Name">${escapeHtml(m.name)}${m.brand || m.part_number ? `<div class="subtitle" style="font-size:11px;">${escapeHtml([m.brand, m.part_number].filter(Boolean).join(' \u00b7 '))}</div>` : ''}${chips ? `<div style="margin-top:3px; display:flex; gap:4px; flex-wrap:wrap;">${chips}</div>` : ''}</td>
             <td data-label="Category">${escapeHtml(m.category || '-')}</td>
             <td data-label="Supplier">${escapeHtml(m.suppliers?.name || '-')}</td>
             <td class="num" data-label="Cost">${money(m.cost_price)}</td>
@@ -240,10 +241,17 @@
               <input id="mat-category" value="${escapeHtml(material?.category)}" placeholder="e.g. Cable" />
             </div>
             <div>
-              <label>Supplier</label>
+              <label>Buy from (supplier)</label>
               <select id="mat-supplier"><option value="">-- None --</option>${allSuppliers.map(s => `<option value="${s.id}" ${material?.supplier_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select>
             </div>
           </div>
+          <div class="grid cols-3">
+            <div><label>Brand</label><input id="mat-brand" value="${escapeHtml(material?.brand)}" /></div>
+            <div><label>Part number</label><input id="mat-part" value="${escapeHtml(material?.part_number)}" autocapitalize="characters" /></div>
+            <div><label>Barcode</label><input id="mat-barcode" value="${escapeHtml(material?.barcode)}" inputmode="numeric" /></div>
+          </div>
+          ${material?.photo_path ? `<img id="mat-photo" alt="Label" style="width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--border); margin-top:8px; display:none;" />` : ''}
+          ${material && isPricingRole(myRole) ? `<div id="mat-prices" style="margin-top:8px;"></div>` : ''}
           <div class="grid cols-3">
             <div>
               <label>Cost price</label>
@@ -306,6 +314,9 @@
           sell_price: parseFloat(overlay.querySelector('#mat-sell').value) || 0,
           minimum_quantity: parseFloat(overlay.querySelector('#mat-minimum').value) || 0,
           notes: overlay.querySelector('#mat-notes').value.trim() || null,
+          brand: overlay.querySelector('#mat-brand').value.trim() || null,
+          part_number: overlay.querySelector('#mat-part').value.trim() || null,
+          barcode: overlay.querySelector('#mat-barcode').value.trim() || null,
           is_consumable: overlay.querySelector('#mat-consumable').checked,
           pack_label: overlay.querySelector('#mat-pack').value.trim() || null,
         };
@@ -339,6 +350,11 @@
         }
       });
 
+      if (material?.photo_path) {
+        getSignedDocUrl(material.photo_path).then(url => { const img = overlay.querySelector('#mat-photo'); if (img) { img.src = url; img.style.display = 'block'; } }).catch(() => {});
+      }
+      if (material && overlay.querySelector('#mat-prices')) renderSupplierPrices(overlay, material);
+
       if (material) {
         overlay.querySelector('#mat-delete-btn').addEventListener('click', async () => {
           if (!confirm(`Delete ${material.name}?`)) return;
@@ -351,7 +367,36 @@
       }
     }
 
+    // Every supplier's last price for the item (price lists and bills, item 44): the cheapest marked,
+    // "Buy from this one" moves the cost price to that supplier's, "Ask to match" drafts the email.
+    async function renderSupplierPrices(overlay, material) {
+      const el = overlay.querySelector('#mat-prices');
+      const { data: links } = await supabaseClient.from('material_supplier_links').select('id, supplier_id, part_number, last_cost, last_cost_at, last_cost_source, suppliers(name)').eq('material_id', material.id);
+      const rows = (links || []).sort((a, b) => (a.last_cost ?? Infinity) - (b.last_cost ?? Infinity));
+      if (!rows.length) { el.innerHTML = '<p class="subtitle" style="font-size:12px;">No supplier prices yet: a price list or a bill with this part number adds one.</p>'; return; }
+      const cheapest = rows.find(r => r.last_cost != null);
+      const SOURCE = { price_list: 'price list', bill: 'bill' };
+      el.innerHTML = `<label style="margin-top:0">Supplier prices</label>` + rows.map(r => `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--border); font-size:13px; flex-wrap:wrap;">
+          <span><strong>${escapeHtml(r.suppliers?.name || '')}</strong>${r.supplier_id === material.supplier_id ? ' <span class="badge draft">Buy from</span>' : ''}${cheapest && r.id === cheapest.id && rows.length > 1 ? ' <span class="badge draft" style="color:var(--green);">Cheapest</span>' : ''}
+            <br><span class="subtitle">${escapeHtml(r.part_number || '')}${r.last_cost != null ? `${r.part_number ? ' · ' : ''}${money(r.last_cost)} (${escapeHtml(SOURCE[r.last_cost_source] || '')}${r.last_cost_at ? ', ' + escapeHtml(dayText(r.last_cost_at)) : ''})` : ' no price yet'}</span></span>
+          <span style="display:flex; gap:6px;">
+            ${r.supplier_id !== material.supplier_id && r.last_cost != null ? `<button type="button" class="secondary btn-sm mat-buy-from" data-id="${r.supplier_id}">Buy from this one</button>` : ''}
+            ${r.last_cost != null && r.id !== cheapest.id ? `<button type="button" class="secondary btn-sm mat-ask-match" data-id="${r.id}">Ask to match</button>` : ''}
+          </span>
+        </div>`).join('');
+      el.querySelectorAll('.mat-buy-from').forEach(btn => btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const { error } = await supabaseClient.rpc('material_set_buy_from', { p_material_id: material.id, p_supplier_id: btn.dataset.id });
+        if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
+        overlay.remove();
+        await loadMaterials();
+      }));
+      el.querySelectorAll('.mat-ask-match').forEach(btn => btn.addEventListener('click', () => openSupplierEmail({ kind: 'price_match', id: btn.dataset.id, intro: 'Sent from invoice@thomsonenergy.com.au. Edit it first if you like.' })));
+    }
+
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
+    document.getElementById('scan-part-btn').addEventListener('click', () => loadStockScan().then(() => openStockScanPanel({ loc: 'warehouse', onDone: loadMaterials })).catch(err => alert(err.message)));
     document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'warehouse', vehicleId: null, placeLabel: 'Warehouse', onDone: loadMaterials }));
 
     document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
