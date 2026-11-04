@@ -24,7 +24,7 @@ async function requirePricingRole(event) {
   if (profileErr || !profile || !profile.active) return null;
   if (!['admin', 'finance', 'sales'].includes(profile.role)) return null;
 
-  return { supabaseAdmin, user: userData.user };
+  return { supabaseAdmin, user: userData.user, role: profile.role };
 }
 
 module.exports = { requirePricingRole };

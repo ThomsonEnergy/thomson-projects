@@ -22,6 +22,8 @@ const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFra
 const normNum = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^(inv|invoice)/, '').replace(/^0+/, '');
 const qty = (n) => Number(n || 0).toLocaleString('en-AU', { maximumFractionDigits: 2 });
 const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+// a real calendar date as YYYY-MM-DD (2026-11-31 is not one)
+const isCalendarDate = (s) => { const d = new Date(String(s || '') + 'T00:00:00Z'); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 // same rule as _is_freight() in the database
 const isFreight = (s) => /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(String(s || ''));
 
@@ -131,4 +133,4 @@ async function checkBillAndSiblings(admin, billId) {
   return r;
 }
 
-module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isFreight };
+module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isCalendarDate, isFreight };

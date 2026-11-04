@@ -74,7 +74,7 @@
       all: null,
     };
     const STATUS_TEXT = { pending: 'Waiting to be read', processing: 'Being read', to_check: 'To check', failed: 'Could not be read', saved: 'Saved', duplicate: 'Duplicate', not_a_bill: 'Not a bill' };
-    let all = [], filter = 'check', suppliers = [], openPOs = [];
+    let all = [], filter = 'check', suppliers = [], openPOs = [], canPay = false;
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
@@ -109,6 +109,7 @@
       const reasonClass = item.status === 'failed' ? 'bad' : (item.match_confidence || 'none');
       const lines = (ex.line_items || []);
       let body = '';
+      const deleteBtn = `<button type="button" class="secondary sb-delete">Delete</button>`;
 
       // supplier not recognised but our PO number is on the bill: offer that PO's supplier
       const guessSupplierId = ((item.po_candidates || [])[0] || {}).supplier_id || '';
@@ -123,19 +124,22 @@
         body += supplier && readable ? `<div class="sb-row"><select class="sb-po">${poOptions(item)}</select></div>` : '';
         body += `<div class="sb-actions">
             ${supplier && readable ? `<button type="button" class="sb-save">Save bill</button>` : ''}
+            ${supplier && readable && canPay ? `<button type="button" class="secondary sb-paid">Already paid</button>` : ''}
             ${readable ? `<button type="button" class="secondary sb-review">Review in full</button>` : ''}
             ${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}
             <button type="button" class="secondary sb-not-bill">Not a bill</button>
+            ${deleteBtn}
           </div>
-          ${supplier && readable ? `<div class="sb-meta">Save bill links it to the PO and leaves stock and material prices as they are. Review in full opens the usual review screen to update those too.</div>` : ''}`;
+          ${supplier && readable ? `<div class="sb-meta">Save bill links it to the PO and leaves stock and material prices as they are.${canPay ? ' Already paid saves it the same way and records it paid, so it never shows in Pay bills due.' : ''} Review in full opens the usual review screen to update those too.</div>` : ''}`;
       } else if (item.status === 'failed') {
-        body += `<div class="sb-actions"><button type="button" class="sb-retry">Try again</button>${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-not-bill">Not a bill</button></div>`;
+        body += `<div class="sb-actions"><button type="button" class="sb-retry">Try again</button>${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-not-bill">Not a bill</button>${deleteBtn}</div>`;
       } else if (item.status === 'saved') {
         const po = item.po_id ? (openPOs.find(p => p.id === item.po_id) || (item.po_candidates || []).find(c => c.po_id === item.po_id)) : null;
-        body += `<div class="sb-actions">${item.supplier_id ? `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${item.supplier_id}">Open supplier</a>` : ''}${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}</div>
-          <div class="sb-meta">Saved ${dateText(item.resolved_at)}${po ? ' against ' + esc(po.po_number) : ' with no PO'}${item.resolved_by ? '' : ' automatically'}.</div>`;
+        const unpaid = !!item.bill && !item.bill.paid;
+        body += `<div class="sb-actions">${item.supplier_id ? `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${item.supplier_id}">Open supplier</a>` : ''}${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}${unpaid && canPay ? `<button type="button" class="secondary sb-paid">Already paid</button>` : ''}</div>
+          <div class="sb-meta">Saved ${dateText(item.resolved_at)}${po ? ' against ' + esc(po.po_number) : ' with no PO'}${item.resolved_by ? '' : ' automatically'}.${item.bill ? (item.bill.paid ? ' Paid.' : ' Not paid yet.') : ''}</div>`;
       } else if (item.status === 'duplicate' || item.status === 'not_a_bill') {
-        body += `<div class="sb-actions">${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-reopen">${item.status === 'duplicate' ? 'Not a duplicate' : 'It is a bill'}</button></div>`;
+        body += `<div class="sb-actions">${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}<button type="button" class="secondary sb-reopen">${item.status === 'duplicate' ? 'Not a duplicate' : 'It is a bill'}</button>${deleteBtn}</div>`;
       }
 
       return `<div class="sb-item" data-id="${item.id}">
@@ -175,10 +179,27 @@
     function wire(el, item) {
       const msg = el.querySelector('.sb-msg');
       const showErr = (err) => { msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; };
-      const run = async (btn, body, busyText) => {
+      const run = async (btn, body, busyText, reloadOnError = false) => {
         const text = btn.textContent;
         btn.disabled = true; btn.textContent = busyText;
-        try { await callInbox(body); await load(); } catch (err) { showErr(err); btn.disabled = false; btn.textContent = text; }
+        try { await callInbox(body); await load(); }
+        catch (err) {
+          // save_paid can save the bill and then fail to record the payment: show the list as it is now, with the message
+          if (reloadOnError) await load().catch(() => {});
+          (document.querySelector(`.sb-item[data-id="${item.id}"] .sb-msg`) || msg).innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+          btn.disabled = false; btn.textContent = text;
+        }
+      };
+      // the PO picked and the total read off the bill, confirmed (or corrected) by a person before it is saved (M4)
+      const askPoAndTotal = () => {
+        const po_id = el.querySelector('.sb-po')?.value || null;
+        if (!po_id && !confirm('Save this bill with no PO?')) return null;
+        const ex = item.extracted || {};
+        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
+        if (raw === null) return null;
+        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
+        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return null; }
+        return { po_id, amount };
       };
 
       el.querySelector('.sb-open')?.addEventListener('click', async () => {
@@ -192,19 +213,33 @@
         run(e.target, { action: 'set_supplier', id: item.id, supplier_id: supplierId }, 'Matching...');
       });
       el.querySelector('.sb-save')?.addEventListener('click', (e) => {
-        const poId = el.querySelector('.sb-po')?.value || null;
-        if (!poId && !confirm('Save this bill with no PO?')) return;
-        // the total read off the bill is shown and confirmed (or corrected) by a person before it is saved (M4)
-        const ex = item.extracted || {};
-        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
-        if (raw === null) return;
-        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return; }
-        run(e.target, { action: 'save', id: item.id, po_id: poId, amount }, 'Saving...');
+        const picked = askPoAndTotal();
+        if (picked) run(e.target, { action: 'save', id: item.id, ...picked }, 'Saving...');
       });
       el.querySelector('.sb-not-bill')?.addEventListener('click', (e) => run(e.target, { action: 'not_a_bill', id: item.id }, 'Putting aside...'));
       el.querySelector('.sb-reopen')?.addEventListener('click', (e) => run(e.target, { action: 'reopen', id: item.id }, 'Moving...'));
       el.querySelector('.sb-retry')?.addEventListener('click', (e) => run(e.target, { action: 'retry', id: item.id }, 'Starting...'));
+      el.querySelector('.sb-delete')?.addEventListener('click', (e) => {
+        if (!confirm('Delete this emailed bill? It goes for good (the file too) and will not come back from the mailbox.')) return;
+        run(e.target, { action: 'delete', id: item.id }, 'Deleting...');
+      });
+      // paid before the email came in (card at the counter, paid up front): save it and record it paid in one go
+      el.querySelector('.sb-paid')?.addEventListener('click', (e) => {
+        const body = { action: 'save_paid', id: item.id };
+        if (item.status !== 'saved') {
+          const picked = askPoAndTotal();
+          if (!picked) return;
+          Object.assign(body, picked);
+        }
+        const paidOn = prompt('Paid on which day? (YYYY-MM-DD)', sydneyDateKey(new Date()));
+        if (paidOn === null) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn.trim())) { showErr(new Error('Enter the date as YYYY-MM-DD.')); return; }
+        body.paid_on = paidOn.trim();
+        const reference = prompt('How was it paid? (optional, e.g. card, Airwallex, bank reference)', '');
+        if (reference === null) return;
+        body.reference = reference;
+        run(e.target, body, 'Recording...', true);
+      });
 
       // Opens the usual review screen on the supplier's page (stock, material prices, new PO),
       // with the file and what was read already filled in.
@@ -233,7 +268,8 @@
 
     async function load() {
       const [inbox, sup, pos] = await Promise.all([
-        supabaseClient.from('supplier_bill_inbox').select('*').order('created_at', { ascending: false }).limit(300),
+        // deleted ones stay in the table (so the mailbox search does not bring them back) but never show
+        supabaseClient.from('supplier_bill_inbox').select('*, bill:supplier_bills!supplier_bill_inbox_bill_id_fkey(paid)').neq('status', 'deleted').order('created_at', { ascending: false }).limit(300),
         supabaseClient.from('suppliers').select('id, name').order('name'),
         supabaseClient.from('purchase_orders').select('id, po_number, description, supplier_id, status, projects(name, job_number, quote_number)').is('closed_at', null).order('created_at', { ascending: false }),
       ]);
@@ -252,10 +288,12 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      if (!isPricingRole(await getMyRole())) {
+      const myRole = await getMyRole();
+      if (!isPricingRole(myRole)) {
         document.getElementById('sb-list').innerHTML = `<div class="error-box">Emailed bills are for Admin, Finance and Sales.</div>`;
         return;
       }
+      canPay = isFinanceRole(myRole); // Already paid records money: Admin and Finance only, like Record as paid
       document.querySelectorAll('#sb-filters button').forEach(b => b.addEventListener('click', () => {
         filter = b.dataset.f;
         document.querySelectorAll('#sb-filters button').forEach(x => x.classList.toggle('active', x === b));
