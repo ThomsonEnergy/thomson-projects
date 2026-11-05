@@ -81,12 +81,14 @@ function findPart(payload, partId) {
   return null;
 }
 
-async function downloadAttachment(gmailMessageId, partId) {
-  const msg = await gmailRequest(`messages/${gmailMessageId}?format=full`);
+// One attachment of an email as a Buffer. mailbox: the conversation's own mailbox (a My inbox);
+// left out, it is sales@.
+async function downloadAttachment(gmailMessageId, partId, mailbox = null) {
+  const msg = await gmailRequest(`messages/${gmailMessageId}?format=full`, {}, mailbox);
   const part = findPart(msg.payload, String(partId));
   if (!part) throw new Error('That attachment is no longer in Gmail.');
   let b64url = part.body.data;
-  if (!b64url) b64url = (await gmailRequest(`messages/${gmailMessageId}/attachments/${part.body.attachmentId}`)).data;
+  if (!b64url) b64url = (await gmailRequest(`messages/${gmailMessageId}/attachments/${part.body.attachmentId}`, {}, mailbox)).data;
   if (!b64url) throw new Error('Gmail returned an empty file.');
   return Buffer.from(b64url.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 }
@@ -706,6 +708,6 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
 }
 
 module.exports = {
-  INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, findPart, startSupplierBillProcessing,
+  INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing,
   processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore, downloadAttachment,
 };

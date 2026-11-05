@@ -2,7 +2,7 @@
 // Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId? }
 //   mailboxId: send a new email from your own inbox (My inbox) instead of sales@
 //   draftId:   the draft this came from: marked sent, and removed from Gmail's drafts
-//   attachments: [{ bucket: 'email-attachments' | 'project-documents', path, name }]
+//   attachments: [{ bucket: 'email-attachments' | 'project-documents' | 'site-photos' (job photos only), path, name }]
 //                (files are uploaded to storage by the browser first - never sent through
 //                 here - and attached from there; up to 10 files, 20 MB in total)
 //   tagProjectId: also tag the conversation to that job (kind: materials_quote | client | supplier | other)
@@ -21,11 +21,22 @@ const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require(
 const { signatureForUser } = require('./_shared/build-email-signature');
 const { sendRecordedEmail } = require('./_shared/send-recorded-email');
 
-const ALLOWED_BUCKETS = ['email-attachments', 'project-documents'];
+const ALLOWED_BUCKETS = ['email-attachments', 'project-documents', 'site-photos'];
 const MAX_FILES = 10;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', dwg: 'application/acad', mp4: 'video/mp4' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// site-photos is a public bucket: a path is only sent when it is a real job photo (a project_photos
+// row), so nobody can attach a file by guessing a path. Stored URLs may have the path encoded.
+async function isJobPhoto(supabaseAdmin, path) {
+  const esc = (s) => s.replace(/[\\%_]/g, (m) => '\\' + m);
+  for (const p of [...new Set([path, encodeURI(path)])]) {
+    const { count } = await supabaseAdmin.from('project_photos').select('id', { count: 'exact', head: true }).like('url', `%/object/public/site-photos/${esc(p)}`);
+    if (count) return true;
+  }
+  return false;
+}
 
 async function loadAttachments(supabaseAdmin, list) {
   if (!Array.isArray(list) || !list.length) return [];
@@ -33,6 +44,7 @@ async function loadAttachments(supabaseAdmin, list) {
   const out = []; let total = 0;
   for (const a of list) {
     if (!a || !ALLOWED_BUCKETS.includes(a.bucket) || typeof a.path !== 'string' || !a.path || a.path.includes('..')) throw new Error('One of the attachments is not valid.');
+    if (a.bucket === 'site-photos' && !(await isJobPhoto(supabaseAdmin, a.path))) throw new Error(`"${a.name || 'A photo'}" is not on a job any more.`);
     const { data, error } = await supabaseAdmin.storage.from(a.bucket).download(a.path);
     if (error || !data) throw new Error(`Could not read the attachment "${a.name || a.path}": ${error ? error.message : 'not found'}`);
     const content = Buffer.from(await data.arrayBuffer());

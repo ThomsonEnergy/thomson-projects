@@ -1,6 +1,5 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { gmailRequest } = require('./_shared/google-client');
-const { findPart } = require('./_shared/supplier-bill-intake');
+const { downloadAttachment } = require('./_shared/supplier-bill-intake');
 const { threadForUser } = require('./_shared/mailboxes');
 
 // POST { email_id, part_id } - returns one attachment (or inline image) of an email in
@@ -22,24 +21,14 @@ exports.handler = async (event) => {
     const { data: email } = await auth.supabaseAdmin.from('emails').select('gmail_message_id, attachments, thread_id').eq('id', emailId).maybeSingle();
     const seen = email ? await threadForUser(auth.supabaseAdmin, email.thread_id, auth.user.id) : null;
     if (!email || !seen) return json(404, { ok: false, error: 'Email not found.' });
-    const mailbox = seen.mailbox;
     // only things we listed for this email can be asked for
     const listed = (email.attachments || []).find(a => String(a.part_id) === String(partId));
     if (!listed) return json(404, { ok: false, error: 'That attachment is not on this email.' });
     if (listed.size > MAX_BYTES) return json(413, { ok: false, error: 'This file is too big to open here. Open the email in Gmail to get it.' });
 
-    const msg = await gmailRequest(`messages/${email.gmail_message_id}?format=full`, {}, mailbox);
-    const part = findPart(msg.payload, String(partId));
-    if (!part) return json(404, { ok: false, error: 'That attachment is no longer in Gmail.' });
-    let b64url = part.body.data;
-    if (!b64url) {
-      const att = await gmailRequest(`messages/${email.gmail_message_id}/attachments/${part.body.attachmentId}`, {}, mailbox);
-      b64url = att.data;
-    }
-    if (!b64url) return json(404, { ok: false, error: 'Gmail returned an empty file.' });
-    const data = b64url.replace(/-/g, '+').replace(/_/g, '/');
-    if (data.length * 0.75 > MAX_BYTES) return json(413, { ok: false, error: 'This file is too big to open here. Open the email in Gmail to get it.' });
-    return json(200, { ok: true, name: listed.name, mime: listed.mime || part.mimeType || 'application/octet-stream', data });
+    const buf = await downloadAttachment(email.gmail_message_id, partId, seen.mailbox);
+    if (buf.length > MAX_BYTES) return json(413, { ok: false, error: 'This file is too big to open here. Open the email in Gmail to get it.' });
+    return json(200, { ok: true, name: listed.name, mime: listed.mime || 'application/octet-stream', data: buf.toString('base64') });
   } catch (err) {
     console.error('get-email-attachment failed:', err.message);
     return json(500, { ok: false, error: err.message });

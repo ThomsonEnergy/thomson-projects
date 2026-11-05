@@ -1,8 +1,10 @@
 // Sending email from the Sales inbox (sales@) or your own My inbox - used by the Inbox page and by the job page.
 //   emailAction(action, body)  posts to email-actions (labels, sections, drafts, clean up) and returns its answer
-//   emailLocalFilePicker(el)   an "Attach files" button + chips; returns { files(), clear() }
+//   emailLocalFilePicker(el, opts)  "Attach files" (and "Add from job") + chips + running total
+//   emailAttachLimitError(n, bytes) the 10 file / 20 MB limit as a message, or ''
+//   emailJobFilesReady()       downloads js/email-job-files.js once, when a page first needs it
 //   emailSendNow(payload)      uploads nothing itself: posts to send-gmail and returns { threadId }
-//   openEmailComposer(opts)    the compose / reply window, with job documents to attach
+//   openEmailComposer(opts)    the compose / reply window; with opts.projectId, Add from job (email-job-files.js)
 //   openTagEmailModal(opts)    tag a conversation to a job (or pick a conversation for a job)
 //   EMAIL_KINDS                why an email is tagged to a job
 // Needs supabase-client.js (supabaseClient, escapeHtml, projectRef, searchProjects).
@@ -42,15 +44,30 @@ function emailAddressOnly(raw) {
   return (m ? m[1] : String(raw || '')).trim();
 }
 
-function emailLocalFilePicker(el) {
-  let files = [];
-  el.innerHTML = `<input type="file" multiple style="display:none;" /><button type="button" class="secondary" style="font-size:12px; padding:6px 12px;">&#128206; Attach files</button><div class="eml-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div><div class="eml-pick-msg" style="font-size:12px; margin-top:4px;"></div>`;
-  const input = el.querySelector('input'), chips = el.querySelector('.eml-chips'), msg = el.querySelector('.eml-pick-msg');
+// The "Attach files" button and its chips. opts.jobs: [{ id, label? }] adds "Add from job" (the job's
+// documents and site photos, js/email-job-files.js); opts.extra(): { count, bytes } of files ticked
+// elsewhere in the same window, for the running total. Returns { files(), refs(), setJobs(jobs), refresh() }.
+function emailLocalFilePicker(el, opts = {}) {
+  let files = [], refs = [], jobs = opts.jobs || [];
+  el.innerHTML = `<input type="file" multiple style="display:none;" /><div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="secondary eml-local" style="font-size:12px; padding:6px 12px;">&#128206; Attach files</button><button type="button" class="secondary eml-job" style="font-size:12px; padding:6px 12px; display:none;">&#128193; Add from job</button></div><div class="eml-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div><div class="eml-total subtitle" style="font-size:12px; margin:4px 0 0;"></div><div class="eml-pick-msg" style="font-size:12px; margin-top:4px;"></div>`;
+  const input = el.querySelector('input'), chips = el.querySelector('.eml-chips'), msg = el.querySelector('.eml-pick-msg'), total = el.querySelector('.eml-total'), jobBtn = el.querySelector('.eml-job');
+  const chip = (label, size, attr) => `<span class="mt-chip" style="font-size:12px; padding:3px 10px; border:1px solid var(--border); border-radius:20px;">${escapeHtml(label)}${size ? ` (${emailSize(size)})` : ''} <a href="#" ${attr} style="margin-left:4px;" title="Remove">&times;</a></span>`;
   const render = () => {
-    chips.innerHTML = files.map((f, i) => `<span class="mt-chip" style="font-size:12px; padding:3px 10px; border:1px solid var(--border); border-radius:20px;">${escapeHtml(f.name)} (${emailSize(f.size)}) <a href="#" data-rm="${i}" style="margin-left:4px;" title="Remove">&times;</a></span>`).join('');
+    chips.innerHTML = files.map((f, i) => chip(f.name, f.size, `data-rm="${i}"`)).join('') + refs.map((r, i) => chip(r.name, r.size, `data-rmref="${i}"`)).join('');
     chips.querySelectorAll('[data-rm]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); files.splice(Number(a.dataset.rm), 1); render(); }));
+    chips.querySelectorAll('[data-rmref]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); refs.splice(Number(a.dataset.rmref), 1); render(); }));
+    const extra = opts.extra ? opts.extra() : { count: 0, bytes: 0 };
+    const n = files.length + refs.length + extra.count;
+    const bytes = files.reduce((t, f) => t + f.size, 0) + refs.reduce((t, r) => t + (r.size || 0), 0) + extra.bytes;
+    const over = n > EMAIL_MAX_FILES || bytes > EMAIL_MAX_TOTAL;
+    total.innerHTML = n ? `<span style="${over ? 'color:var(--red); font-weight:700;' : ''}">${n} file${n === 1 ? '' : 's'}${bytes ? ', ' + emailSize(bytes) : ''} of ${EMAIL_MAX_FILES} files and ${emailSize(EMAIL_MAX_TOTAL)}</span>` : '';
+    jobBtn.style.display = jobs.length ? '' : 'none';
   };
-  el.querySelector('button').addEventListener('click', () => input.click());
+  el.querySelector('.eml-local').addEventListener('click', () => input.click());
+  jobBtn.addEventListener('click', async () => {
+    try { await emailJobFilesReady(); } catch (err) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; return; }
+    openJobFilePicker({ jobs, chosen: refs, onDone: (list) => { refs = list; render(); } });
+  });
   input.addEventListener('change', () => {
     msg.textContent = '';
     for (const f of input.files) {
@@ -60,7 +77,28 @@ function emailLocalFilePicker(el) {
     input.value = '';
     render();
   });
-  return { files: () => files, clear: () => { files = []; render(); } };
+  render();
+  return { files: () => files, refs: () => refs, setJobs: (j) => { jobs = j || []; render(); }, refresh: render };
+}
+
+// js/email-job-files.js (Save to job, Add from job), downloaded the first time a page needs it so the
+// job page, Inbox and PO pages stay within their weight budgets. Resolves once it is ready.
+function emailJobFilesReady() {
+  if (typeof openJobFilePicker === 'function') return Promise.resolve();
+  return (emailJobFilesReady.p ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/js/email-job-files.js?v=1';
+    s.onload = resolve;
+    s.onerror = () => { emailJobFilesReady.p = null; s.remove(); reject(new Error('Could not load the job files. Check your signal and try again.')); };
+    document.head.appendChild(s);
+  }));
+}
+
+// The send limits, checked in the browser before anything is uploaded (send-gmail checks them again).
+function emailAttachLimitError(count, bytes) {
+  if (count > EMAIL_MAX_FILES) return `Attach up to ${EMAIL_MAX_FILES} files.`;
+  if (bytes > EMAIL_MAX_TOTAL) return 'The attachments add up to more than 20 MB. Send them in more than one email.';
+  return '';
 }
 
 // Uploads local files to the private email-attachments bucket.
@@ -138,7 +176,12 @@ function openEmailComposer(opts) {
       <div id="ec-msg" style="margin-top:8px;"></div>
     </div>`;
   document.body.appendChild(overlay);
-  const picker = emailLocalFilePicker(overlay.querySelector('#ec-picker'));
+  const ticked = () => [...overlay.querySelectorAll('.ec-opt:checked')].map(c => options[Number(c.dataset.i)]);
+  const picker = emailLocalFilePicker(overlay.querySelector('#ec-picker'), {
+    jobs: opts.projectId ? [{ id: opts.projectId }] : [],
+    extra: () => ({ count: ticked().length, bytes: ticked().reduce((n, o) => n + (o.size || 0), 0) }),
+  });
+  overlay.querySelectorAll('.ec-opt').forEach(c => c.addEventListener('change', picker.refresh));
   overlay.querySelector('#ec-cancel').addEventListener('click', () => overlay.remove());
   let draftId = opts.draftId || null;
   const saveBtn = overlay.querySelector('#ec-save');
@@ -164,10 +207,10 @@ function openEmailComposer(opts) {
     const to = overlay.querySelector('#ec-to').value.trim(), subject = overlay.querySelector('#ec-subject').value.trim();
     let bodyText = overlay.querySelector('#ec-body').value.trim();
     if (!to || !subject || !bodyText) { msg.innerHTML = '<div class="error-box">Fill in who it is to, the subject and a message.</div>'; return; }
-    const chosen = [...overlay.querySelectorAll('.ec-opt:checked')].map(c => options[Number(c.dataset.i)]);
+    const chosen = [...ticked(), ...picker.refs()];
     const totalGuess = chosen.reduce((n, o) => n + (o.size || 0), 0) + picker.files().reduce((n, f) => n + f.size, 0);
-    if (chosen.length + picker.files().length > EMAIL_MAX_FILES) { msg.innerHTML = `<div class="error-box">Attach up to ${EMAIL_MAX_FILES} files.</div>`; return; }
-    if (totalGuess > EMAIL_MAX_TOTAL) { msg.innerHTML = '<div class="error-box">The attachments add up to more than 20 MB. Send them in more than one email.</div>'; return; }
+    const limit = emailAttachLimitError(chosen.length + picker.files().length, totalGuess);
+    if (limit) { msg.innerHTML = `<div class="error-box">${escapeHtml(limit)}</div>`; return; }
     const ql = overlay.querySelector('#ec-quote-link');
     if (ql && ql.checked && opts.quoteLink) bodyText += `\n\n[[button: ${opts.quoteLink.buttonText || 'Click to view your quote online'} | ${opts.quoteLink.url}]]`;
     const wantsReview = !!(opts.reviewRequest && overlay.querySelector('#ec-review') && overlay.querySelector('#ec-review').checked);

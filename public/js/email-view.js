@@ -9,6 +9,9 @@
 // pictures. So a sender cannot run code, and cannot track you with a hidden picture
 // unless you choose to load them.
 //
+// With ctx.jobs (the jobs the conversation is tagged to), each received attachment also gets
+// "Save to job" and the email "Save all to job" (js/email-job-files.js, backlog item 53).
+//
 // Needs supabase-client.js (escapeHtml, openPhotoLightbox).
 
 // "Always show pictures" is a per-browser preference
@@ -93,6 +96,7 @@ async function emailOpenAttachment(emailId, att, ctx) {
 
 // ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }   (received mail, from Gmail)
 // ctx.fetchStored(attachment)          -> { name, mime, data(base64) }   (mail we sent, from storage)
+// ctx.jobs()                           -> [{ id, label }] the conversation's jobs (optional: Save to job)
 async function mountEmailBody(el, email, ctx) {
   if (!el) return;
   const attachments = Array.isArray(email.attachments) ? email.attachments : [];
@@ -147,10 +151,13 @@ async function mountEmailBody(el, email, ctx) {
   const isPhoto = (a) => /^image\/(jpeg|jpg|png|gif|webp)$/i.test(a.mime || '') && (a.size || 0) <= 4 * 1024 * 1024 && (a.size || 0) > 3000;
   const photos = (ctx && (ctx.fetchAttachment || ctx.fetchStored) ? files.filter(isPhoto) : []).slice(0, 12);
   const chips = files.filter(a => !photos.includes(a));
+  const canSave = !!(ctx && ctx.jobs && typeof wireEmailSaveJob === 'function');
+  const items = files.map(a => ({ emailId: email.id, att: a }));
+  const saveBtn = (a) => (canSave ? emailSaveJobBtnsHtml(items, files.indexOf(a)) : '');
   if (photos.length) {
     const grid = document.createElement('div');
     grid.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
-    grid.innerHTML = photos.map(a => `<div class="email-photo" style="width:150px; height:112px; border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); text-align:center; padding:4px; cursor:pointer;" title="${escapeHtml(a.name)}">Loading ${escapeHtml(a.name)}...</div>`).join('');
+    grid.innerHTML = photos.map(a => `<div style="width:150px; display:flex; flex-direction:column; gap:4px;"><div class="email-photo" style="width:150px; height:112px; border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); text-align:center; padding:4px; cursor:pointer;" title="${escapeHtml(a.name)}">Loading ${escapeHtml(a.name)}...</div>${saveBtn(a)}</div>`).join('');
     el.appendChild(grid);
     const urls = new Array(photos.length).fill(null);
     const cells = [...grid.querySelectorAll('.email-photo')];
@@ -177,12 +184,17 @@ async function mountEmailBody(el, email, ctx) {
   if (chips.length) {
     const box = document.createElement('div');
     box.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
-    box.innerHTML = chips.map(a => `<button type="button" class="secondary email-att" data-idx="${attachments.indexOf(a)}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>`).join('');
+    box.innerHTML = chips.map(a => `<span style="display:inline-flex; gap:4px; max-width:100%;"><button type="button" class="secondary email-att" data-idx="${attachments.indexOf(a)}" style="font-size:12px; padding:6px 10px; max-width:100%;">&#128206; ${escapeHtml(a.name)} <span style="color:var(--muted);">(${emailFileSize(a.size || 0)})</span></button>${saveBtn(a)}</span>`).join('');
     el.appendChild(box);
     box.querySelectorAll('.email-att').forEach(btn => btn.addEventListener('click', async () => {
       const original = btn.innerHTML; btn.disabled = true; btn.textContent = 'Opening...';
       await emailOpenAttachment(email.id, attachments[Number(btn.dataset.idx)], ctx);
       btn.disabled = false; btn.innerHTML = original;
     }));
+  }
+  if (canSave && files.some(emailAttSavable)) {
+    const all = emailSaveAllBtnHtml(items);
+    if (all) { const row = document.createElement('div'); row.style.marginTop = '8px'; row.innerHTML = all; el.appendChild(row); }
+    wireEmailSaveJob(el, items, { jobs: ctx.jobs, onSaved: ctx.onSavedToJob });
   }
 }

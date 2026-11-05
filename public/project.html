@@ -41,8 +41,8 @@
   </style>
   <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/feed.js?v=11"></script>
-  <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=9"></script>
+  <script src="/js/email-view.js?v=4"></script>
+  <script src="/js/email-compose.js?v=10"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
   <script src="/js/project-invoice-actuals.js?v=4"></script>
@@ -6156,12 +6156,9 @@
     }
 
     // ---------- Emails tab: conversations tagged to this job, and emailing from the job ----------
-    async function jobEmailAttachOptions(project, withQuote) {
-      const opts = [];
-      if (project.quote_pdf_path) opts.push({ group: 'Quote', label: 'Quote PDF', bucket: 'project-documents', path: project.quote_pdf_path, name: `${projectRef(project)} - Quote.pdf`, checked: !project.job_number || !!withQuote });
-      const { data: docs } = await supabaseClient.from('project_documents').select('folder, file_path, file_name').eq('project_id', project.id).order('created_at', { ascending: false });
-      (docs || []).forEach(d => opts.push({ group: 'Job documents - ' + d.folder, label: d.file_name, bucket: 'project-documents', path: d.file_path, name: d.file_name }));
-      return opts;
+    // The quote PDF; the job's documents and site photos are under "Add from job" (email-job-files.js).
+    function jobEmailAttachOptions(project, withQuote) {
+      return project.quote_pdf_path ? [{ group: 'Quote', label: 'Quote PDF', bucket: 'project-documents', path: project.quote_pdf_path, name: `${projectRef(project)} - Quote.pdf`, checked: !project.job_number || !!withQuote }] : [];
     }
 
     async function openJobEmailComposer(project, reply, opts) {
@@ -6178,7 +6175,7 @@
         projectId: project.id, tagKind: 'client',
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
         quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
-        attachOptions: await jobEmailAttachOptions(project, withQuote),
+        attachOptions: jobEmailAttachOptions(project, withQuote),
         onSent: async () => {
           // Only moves a quote still at draft_quote, so re-sending can't push it backwards.
           if (isQuote && !reply && !project.job_number) {
@@ -6215,6 +6212,7 @@
     async function loadJobEmails(project) {
       const el = document.getElementById('job-emails-list');
       if (!el) return;
+      const filesReady = emailJobFilesReady().catch(() => null); // Save to job on the attachment chips
       const { data: links, error } = await supabaseClient.from('email_job_links')
         .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at)').eq('project_id', project.id);
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
@@ -6246,10 +6244,10 @@
         </div>`).join('');
       if (!sorted.length) { el.innerHTML = reviewsHtml + '<p class="subtitle">No emails on this job yet. Use "Email the client" or tag one from the Inbox.</p>'; return; }
       const ctx = { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment };
+      await filesReady;
       el.innerHTML = reviewsHtml + sorted.map(l => {
         const thread = l.email_threads || {}; const list = byThread[l.thread_id] || [];
         const last = list[0];
-        const atts = list.flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(a => ({ m, a })));
         const snippet = last ? String(last.body_text || '').replace(/\s+/g, ' ').trim().slice(0, 180) : '';
         const out = last && last.direction === 'outbound';
         const st = jobThreadStatus(thread, last);
@@ -6269,20 +6267,16 @@
           </div>
           ${l.note ? `<p class="subtitle" style="margin:4px 0 0;">Note: ${escapeHtml(l.note)}</p>` : ''}
           ${last ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">${out ? 'Last sent to ' + escapeHtml((last.to_addresses || [])[0] || 'unknown') : 'Last received from ' + escapeHtml(String(last.from_address || '').replace(/<.*>/, '').trim() || 'unknown')}: ${escapeHtml(snippet)}${snippet.length >= 180 ? '...' : ''}</p>` : ''}
-          ${atts.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">${atts.map((x, i) => `<button type="button" class="secondary job-email-att" data-t="${l.thread_id}" data-i="${i}" style="font-size:12px; padding:4px 10px;">&#128206; ${escapeHtml(x.a.name)}</button>`).join('')}</div>` : ''}
+          <div class="job-email-atts" data-t="${l.thread_id}"></div>
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;">
             <a class="btn secondary" href="/inbox.html?thread=${l.thread_id}" style="font-size:12px; padding:5px 10px;">Open conversation</a>
             <button type="button" class="secondary job-email-reply" data-link="${l.id}" style="font-size:12px; padding:5px 10px;">Reply</button>
             <button type="button" class="secondary job-email-untag" data-link="${l.id}" style="font-size:12px; padding:5px 10px;">Remove from job</button>
           </div></div>`;
       }).join('');
-      sorted.forEach(l => { l._atts = (byThread[l.thread_id] || []).flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(a => ({ m, a }))); });
-      el.querySelectorAll('.job-email-att').forEach(btn => btn.addEventListener('click', async () => {
-        const l = sorted.find(x => x.thread_id === btn.dataset.t); const x = l._atts[Number(btn.dataset.i)];
-        const original = btn.innerHTML; btn.disabled = true; btn.textContent = 'Opening...';
-        await emailOpenAttachment(x.m.id, x.a, ctx);
-        btn.disabled = false; btn.innerHTML = original;
-      }));
+      if (typeof mountJobEmailAttachments === 'function') el.querySelectorAll('.job-email-atts').forEach(box => mountJobEmailAttachments(box,
+        (byThread[box.dataset.t] || []).flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(att => ({ emailId: m.id, att }))),
+        { project, ctx, onSaved: (kind) => (kind === 'photo' ? loadSitePhotos(project.id) : loadDocuments(project.id)) }));
       el.querySelectorAll('.job-email-reply').forEach(btn => btn.addEventListener('click', () => {
         const l = sorted.find(x => x.id === btn.dataset.link); const list = byThread[l.thread_id] || [];
         const inbound = list.find(m => m.direction === 'inbound') || list[0];
