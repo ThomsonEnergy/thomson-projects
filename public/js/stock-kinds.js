@@ -1,4 +1,4 @@
-// Stock kinds and cable drums (docs/IDEAS_BACKLOG.md item 53, spec A12). Loaded on demand by
+// Stock kinds and cable drums (docs/IDEAS_BACKLOG.md item 57, spec A12). Loaded on demand by
 // supabase-client.js (loadStockKinds) from the Stock page, a vehicle page, the Used stock panel and
 // the scan panel.
 //

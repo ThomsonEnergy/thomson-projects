@@ -1,4 +1,4 @@
--- Stock kinds and cable drums (docs/IDEAS_BACKLOG.md item 53, spec A12, A11b, A10).
+-- Stock kinds and cable drums (docs/IDEAS_BACKLOG.md item 57, spec A12, A11b, A10).
 --
 -- What this does:
 --  1. materials.kind: part, cable or consumable, guessed from the name when nobody says (trigger
@@ -203,7 +203,7 @@ end;
 $$;
 revoke all on function public._material_units_reconcile(uuid, text, uuid) from public, anon, authenticated;
 
--- Same as migration 20261025000000 plus the drum reconcile at the end (item 53).
+-- Same as migration 20261025000000 plus the drum reconcile at the end (item 57).
 create or replace function public._stock_adjust(p_material uuid, p_loc text, p_vehicle uuid, p_delta numeric, p_allow_short boolean default false)
 returns numeric language plpgsql security definer set search_path = public as $$
 declare
@@ -409,7 +409,7 @@ $$;
 revoke all on function public._po_line_autolink(uuid) from public, anon, authenticated;
 
 -- Same as migration 20261111000000 plus: an unlinked line to the Warehouse or a van is linked or added
--- to Stock first; a supplier PO line of cable lands as drums and metres (item 53).
+-- to Stock first; a supplier PO line of cable lands as drums and metres (item 57).
 create or replace function public._po_line_land(p_line uuid, p_dest text, p_job uuid, p_vehicle uuid, p_cost_centre uuid, p_first_receive boolean)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -489,7 +489,7 @@ $$;
 revoke all on function public._po_line_land(uuid, text, uuid, uuid, uuid, boolean) from public, anon, authenticated;
 
 -- Same as migration 20261124160000 plus: a supplier PO line of cable taken back from the Warehouse or
--- a van takes its full drums back (a drum that has been used stops it) (item 53).
+-- a van takes its full drums back (a drum that has been used stops it) (item 57).
 create or replace function public._po_line_take_back(p_line uuid, p_qty numeric)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -628,7 +628,7 @@ grant execute on function public.po_line_add_to_stock(uuid, text, text, uuid, nu
 -- ---------------------------------------------------------------------------------------------------
 -- 5. Stock pulls off a drum, and undo back onto it
 -- ---------------------------------------------------------------------------------------------------
--- Same as migration 20261110000000 plus cable lines (item 53): { material_id, quantity (metres used),
+-- Same as migration 20261110000000 plus cable lines (item 57): { material_id, quantity (metres used),
 -- unit_id (the drum, or null for "a full one"), left_after (metres left on that drum) }. The drum's
 -- reading is what was typed; the count moves by the difference; a drum at 0 is finished; the line
 -- remembers the drum so undo puts the metres back on it.
@@ -771,7 +771,7 @@ revoke all on function public.po_create_stock_pull(uuid, uuid, text, uuid, jsonb
 grant execute on function public.po_create_stock_pull(uuid, uuid, text, uuid, jsonb, text) to authenticated;
 
 -- Same as migration 20261108000000 plus: metres from a cable stock pull go back onto the drum they
--- came off (or a new drum when that one is finished) before the count moves (item 53).
+-- came off (or a new drum when that one is finished) before the count moves (item 57).
 create or replace function public.po_undo_receive(p_line_id uuid, p_note text default null, p_backorder boolean default false, p_eta date default null)
 returns void language plpgsql security definer set search_path = public as $$
 declare
@@ -847,7 +847,7 @@ grant execute on function public.po_undo_receive(uuid, text, boolean, date) to a
 -- ---------------------------------------------------------------------------------------------------
 -- 6. Stocktake per drum, scan sets the count
 -- ---------------------------------------------------------------------------------------------------
--- Same as migration 20261110000000 plus drum lines (item 53): { unit_id, count } sets what is left on
+-- Same as migration 20261110000000 plus drum lines (item 57): { unit_id, count } sets what is left on
 -- a drum, { material_id, add_unit } adds a drum the app did not know about.
 create or replace function public.stock_stocktake(p_loc text, p_vehicle_id uuid, p_counts jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -895,7 +895,7 @@ $$;
 revoke all on function public.stock_stocktake(text, uuid, jsonb) from public, anon;
 grant execute on function public.stock_stocktake(text, uuid, jsonb) to authenticated;
 
--- Same as migration 20261128050000 plus (item 53): kind, pack_qty and pack_label from the label reader
+-- Same as migration 20261128050000 plus (item 57): kind, pack_qty and pack_label from the label reader
 -- or the person; set_count (the clock-out panel's Took + Left is the whole count at that place, so it
 -- is set, not added); a cable item gets a drum of that many metres and the drum id comes back.
 create or replace function public.material_add_from_scan(p jsonb)
@@ -982,7 +982,7 @@ grant execute on function public.material_add_from_scan(jsonb) to authenticated;
 -- ---------------------------------------------------------------------------------------------------
 -- 7. Prices: first price lands whoever bills it; cable per metre
 -- ---------------------------------------------------------------------------------------------------
--- Same as migration 20261128050000 plus (item 53):
+-- Same as migration 20261128050000 plus (item 57):
 --  * a $0 item takes its first price from any supplier (that supplier becomes Buy from only when the
 --    item had none);
 --  * cable is priced per metre: the line's unit (m, metre: as is; drum, roll, coil, each: divided by
@@ -1104,7 +1104,7 @@ $$;
 revoke all on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean, numeric, text) from public, anon;
 grant execute on function public.material_supplier_price_set(uuid, uuid, numeric, text, text, text, uuid, uuid, uuid, boolean, numeric, text) to authenticated;
 
--- Same as migration 20261128050000 plus the line's quantity and unit for the cable rule (item 53).
+-- Same as migration 20261128050000 plus the line's quantity and unit for the cable rule (item 57).
 create or replace function public.supplier_bill_price_lines(p_bill_id uuid, p_checked boolean default true)
 returns void language plpgsql security definer set search_path = public as $$
 declare

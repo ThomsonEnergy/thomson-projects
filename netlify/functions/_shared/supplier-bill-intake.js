@@ -549,7 +549,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     if (po && isFreight(l.description)) { poLine = null; flag = 'Freight / delivery charge'; }
     else if (noCharge) { /* a $0 or 0-supplied line: shows as No charge, nothing to accept or add */ }
     else if (po && !poLine && poOpen) {
-      // the new PO line carries the Stock item too, so receiving it moves the count (item 53)
+      // the new PO line carries the Stock item too, so receiving it moves the count (item 57)
       const { data: added, error: addErr } = await supabaseAdmin.from('purchase_order_line_items')
         .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId, material_id: byCode }).select('id, material_id').single();
       if (addErr) throw addErr;

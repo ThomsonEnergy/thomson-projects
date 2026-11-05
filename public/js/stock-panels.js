@@ -1,10 +1,10 @@
 // Stocktake and Move stock panels (spec A12). Loaded on demand by supabase-client.js
 // (loadStockPanels) from the Stock page (Stocktake (Warehouse)) and a vehicle page (Stocktake, Move
-// stock here from Warehouse). Both need js/stock-kinds.js (loaded first) for cable drums (item 53).
+// stock here from Warehouse). Both need js/stock-kinds.js (loaded first) for cable drums (item 57).
 //
 // Stocktake of one place: every item with stock there (plus any you search for), type the real count,
 // one Save. Consumables are OK / Low / Out, no numbers. Cable is drum by drum: metres left on each,
-// plus any drum the app did not know about (item 53). Differences are logged as count corrections.
+// plus any drum the app did not know about (item 57). Differences are logged as count corrections.
 async function openStocktakePanel({ loc, vehicleId, placeLabel, onDone }) {
   await loadStockKinds();
   const [{ data: materials }, have, drums] = await Promise.all([
@@ -87,7 +87,7 @@ async function openStocktakePanel({ loc, vehicleId, placeLabel, onDone }) {
 }
 
 // Move gear between the Warehouse and a vehicle in one step (no PO). Fixes the source count on the spot.
-// Cable moves drum by drum (item 53).
+// Cable moves drum by drum (item 57).
 async function openStockTransferPanel({ fromLoc, fromVehicleId, fromLabel, toLoc, toVehicleId, toLabel, onDone }) {
   await loadStockKinds();
   const [{ data: materials }, have, drums] = await Promise.all([

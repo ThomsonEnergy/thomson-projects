@@ -5,7 +5,7 @@
 // Camera -> compressImage() -> the phone's own barcode reader (BarcodeDetector, where the browser has
 // one) and the read-part-label function (Claude reads the barcode digits, part number, brand, a
 // name and what kind of thing it is: part, cable with the drum size, consumable with the pack, or a
-// tool, item 53) -> a check panel (everything editable, how many, where) -> material_add_from_scan, the one
+// tool, item 57) -> a check panel (everything editable, how many, where) -> material_add_from_scan, the one
 // database step that makes the item at $0 flagged Needs a price (or adds the count to the item that
 // already has that barcode or part number) and sets the count where the person is.
 // Writes: materials and the counts through material_add_from_scan only; on Save the photo goes to

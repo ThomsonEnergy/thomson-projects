@@ -5,7 +5,7 @@
 // not in Stock yet is added with a name and flagged "Needs a price", or by a photo of its label
 // (js/stock-scan.js, loaded on demand, item 44). Makes a closed stock PO through
 // po_create_stock_pull, costed to the job. Consumables (counted by the pack) are not asked about;
-// they get a one-tap "Running low" instead. Cable (item 53, js/stock-kinds.js): pick the drum, say
+// they get a one-tap "Running low" instead. Cable (item 57, js/stock-kinds.js): pick the drum, say
 // what is left on it now (or Finished it); the metres used go to the job and the drum keeps its reading.
 const USED_STOCK_SOURCE_KEY = 'teops-used-stock-source';
 const USED_STOCK_RECENT_KEY = 'teops-used-stock-recent';

@@ -33,7 +33,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 | N | None |
 | 46 | Charge rates per client and per job (Standard, Commercial 115%, Mates rates 85%...) applied to quotes, variations, invoice actuals and the Schedule of Rates | LIVE 4 Nov 2026 (spec D1a), migration 20261128070000 | N | None |
 | 48 | Commercial agreements: a builder's % off the Schedule of Rates, sent as a letter, shown on invoices as full rates then the agreement line, withdrawn in one click | Built 5 Nov 2026 (spec D1a), migration 20261128090000, straight to `main` on the owner's say | N | None |
-| 53 | Stock kinds: cable by the drum (drums tracked one by one), consumables and tools known from the name and the label, every receive counted, first price lands on $0 items | Built 5 Nov 2026, PR into `staging` (spec A12, A11b, A10), migration 20261130000000 | N | None |
+| 57 | Stock kinds: cable by the drum (drums tracked one by one), consumables and tools known from the name and the label, every receive counted, first price lands on $0 items | Built 5 Nov 2026, PR into `staging` (spec A12, A11b, A10), migration 20261130000000 | N | None |
 | 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | LIVE 4 Nov 2026 (spec A13e), migration 20261128080000 | N | None |
 
 ## High lead time, start now
@@ -1124,7 +1124,7 @@ Touches: `public/js/supabase-client.js` (paid tick and chip, scan button hook, l
 
 Owner asked whether bills reach Xero and whether to link payments in the app or in Xero. Today nothing about supplier bills reaches Xero (only client invoices, credit notes, timesheets and pay rates). Push from the app and let Xero confirm: when a bill is approved in TEops, push it as a Xero Bill (supplier contact by ABN, created when missing; date, number, lines coded to the purchases account, GST); when it is marked paid, push the payment against that Bill (bank account for transfers and Airwallex, the card or cash account for counter purchases). The bank feed line then shows a suggested match and Jade taps OK (the Xero API cannot press that final OK). Needs first: the purchases and card account codes in `docs/BUSINESS_FACTS.md` (only sales codes today), a run on the Xero demo company. Same ground as item 1 and the spec's Tier 4.
 
-## 53. Stock kinds: cable by the drum, consumables and tools known by themselves, every receive counted (owner's yes 5 Nov 2026, built the same day, PR into `staging`, see PROJECT_SPEC.md A12, A11b, A10)
+## 57. Stock kinds: cable by the drum, consumables and tools known by themselves, every receive counted (owner's yes 5 Nov 2026, built the same day, PR into `staging`, see PROJECT_SPEC.md A12, A11b, A10)
 
 Building in: `feat/stock-kinds-drums`.
 

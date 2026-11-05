@@ -6716,7 +6716,7 @@ function poNextStep(po, bills, { emailed, role } = {}) {
 // Lines with a tick box each. Tick what arrived, then one Receive button (wirePoTickLines).
 // Received lines show where they went. Everything else for a line sits under its "..." button.
 // Words that usually mean a tool, so an unlinked PO line gets a "Looks like a tool, mark it?" hint
-// (never set by itself: tools go to the Tools register, a different place to receive to) (item 53).
+// (never set by itself: tools go to the Tools register, a different place to receive to) (item 57).
 // The same list as looks_tool in the database's _stock_kind_guess; js/stock-kinds.js uses this one.
 const STOCK_TOOL_WORDS = /\b(drill|drills|driver|impact|grinder|saw|saws|multimeter|clamp meter|tester|testers|crimper|crimpers|crimping tool|stripper|strippers|ladder|ladders|torch|laser|vacuum|blower|heat gun|rotary hammer|charger|milwaukee|dewalt|makita|bosch|festool|hilti|fluke|knipex|klein|kincrome|sidchrome|megger)\b/i;
 function renderPoTickLines(po, canEdit) {
@@ -7505,7 +7505,7 @@ function buildMaterialSearchRow(materials, containerId) {
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
     resultsEl.innerHTML = [
       ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(p.name)} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
-      // cable is priced and counted per metre but bought by the drum: the line is one drum at drum price (item 53)
+      // cable is priced and counted per metre but bought by the drum: the line is one drum at drum price (item 57)
       ...materialMatches.map(m => { const drum = m.kind === 'cable' && Number(m.pack_qty) > 0; const cost = drum ? Math.round(Number(m.cost_price) * Number(m.pack_qty) * 100) / 100 : m.cost_price; return `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${escapeHtml(m.name)}" data-cost="${cost}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${drum ? `drum of ${poQty(m.pack_qty)}m, ${money(cost)}` : money(m.cost_price)})</span></div>`; }),
     ].join('');
     resultsEl.style.display = 'block';

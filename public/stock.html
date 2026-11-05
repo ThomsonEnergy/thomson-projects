@@ -68,7 +68,7 @@
     let locationRows = [];
     let lowFlags = [];
     let corrections = []; // last 90 days of count corrections, moves and prices (activity_log on the item)
-    let drumRows = [];    // every cable drum (material_units): where it is and what is left on it (item 53)
+    let drumRows = [];    // every cable drum (material_units): where it is and what is left on it (item 57)
     let myRole = 'staff';
     const drumsAt = (materialId, loc, vehicleId) => drumRows.filter(u => u.material_id === materialId && u.location_type === loc && (loc === 'warehouse' || u.vehicle_id === vehicleId));
     const dayText = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
@@ -536,7 +536,7 @@
       const noSupplier = [];
       (materialsWithSupplier || []).forEach(m => {
         const shortfall = Number(m.minimum_quantity) - Number(m.quantity_on_hand);
-        // cable is short by metres but bought by the drum (item 53)
+        // cable is short by metres but bought by the drum (item 57)
         const item = stockIsDrumItem(m)
           ? { materialId: m.id, description: m.name, quantity: Math.ceil(shortfall / Number(m.pack_qty)), unit_cost: Math.round(Number(m.cost_price) * Number(m.pack_qty) * 100) / 100 }
           : { materialId: m.id, description: m.name, quantity: shortfall, unit_cost: m.cost_price };
