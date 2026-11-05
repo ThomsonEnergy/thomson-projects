@@ -30,7 +30,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=124"></script>
+  <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -133,7 +133,7 @@
                     <td class="num" data-label="Amount">${money(b.amount)}</td>
                     <td data-label="Terms due">${dayText(b.due_date)}</td>
                     <td data-label="Pay on">${b.paid ? '-' : (b.approved_for_payment ? dayText(b.pay_on || b.due_date) : '<span class="subtitle" style="font-size:12px;">after approval</span>')}</td>
-                    <td data-label="Status">${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">Paid ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}</span>`
+                    <td data-label="Status">${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">Paid ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}${b.paid_method ? ' by ' + escapeHtml(poPaidLabel(b.paid_method)) : ''}</span>`
                       : b.approved_for_payment ? '<span class="badge sent">Approved</span>'
                       : b.purchase_orders && !b.purchase_orders.closed_at ? '<span class="badge draft">Waiting on PO close</span>'
                       : '<span class="badge draft">Not approved</span>'}</td>
@@ -141,7 +141,7 @@
                       b.purchase_orders
                         ? (b.purchase_orders.closed_at ? '<span class="subtitle" style="font-size:12px;">See Bill checks</span>' : '<span class="subtitle" style="font-size:12px;">Approved when the PO is closed</span>')
                         : (supplier.needs_review ? '<span class="subtitle" style="font-size:12px;">Check supplier details first</span>' : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`)
-                    ) : ''}${!b.paid && b.approved_for_payment && canPay ? `<button class="secondary paid-bill-btn" data-id="${b.id}" data-number="${escapeHtml(b.bill_number || '')}" style="font-size:12px; padding:6px 10px;">Paid</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
+                    ) : ''}${!b.paid && canPay ? `<button class="secondary paid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="${b.approved_for_payment ? 'Record the payment' : 'Paid upfront or at the counter: approves it too'}">Paid</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>`}
@@ -178,14 +178,8 @@
       };
       document.querySelectorAll('.approve-bill-btn').forEach(btn => btn.addEventListener('click', () =>
         busy(btn, 'Approving...', () => callServer('supplier-checks', { action: 'approve_bill', id: btn.dataset.id }))));
-      document.querySelectorAll('.paid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
-        const paidOn = prompt(`Bill ${btn.dataset.number} paid on which day? (YYYY-MM-DD)`, sydneyDateKey(new Date()));
-        if (paidOn === null) return;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn.trim())) { alert('Enter the date as YYYY-MM-DD.'); return; }
-        const reference = prompt('Payment reference (optional, e.g. Airwallex transfer or bank reference)', '');
-        if (reference === null) return;
-        busy(btn, 'Saving...', () => callServer('run-supplier-payments', { action: 'mark_paid', bill_ids: [btn.dataset.id], paid_on: paidOn.trim(), reference }));
-      }));
+      // Paid any time (item 51): approved or not, with the date, how and a reference (shared panel, Admin/Finance)
+      document.querySelectorAll('.paid-bill-btn').forEach(btn => btn.addEventListener('click', () => loadPoScan().then(() => openBillPaidPanel(bills.find(b => b.id === btn.dataset.id), loadSupplier)).catch(err => alert(err.message))));
       document.querySelectorAll('.unpaid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
         const note = prompt('Mark this bill as not paid. Why?', '');
         if (note === null) return;

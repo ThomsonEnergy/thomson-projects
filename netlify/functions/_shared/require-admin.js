@@ -85,4 +85,10 @@ async function requireAdmin(event) {
   return { supabaseAdmin, user: userData.user };
 }
 
-module.exports = { getAdminClient, getAuthCheckClient, requireAdmin };
+// A client that runs as the person calling (their JWT), so a database function sees auth.uid() and
+// applies its own role rules. For a server step that must act as the caller, not as the service role.
+function getUserClient(token) {
+  return createClient(process.env.SUPABASE_URL, SUPABASE_ANON_KEY, { ...SERVER_CLIENT_OPTS, global: { ...(SERVER_CLIENT_OPTS.global || {}), headers: { Authorization: `Bearer ${token}` } } });
+}
+
+module.exports = { getAdminClient, getAuthCheckClient, getUserClient, requireAdmin };

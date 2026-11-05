@@ -8,6 +8,10 @@
 //      gets paid, paid_at, paid_by, payment_id and the reference. Refuses a bill that is not approved.
 //      One database step (supplier_bills_mark_paid): the bills are locked, checked and marked with
 //      their batch rows all or nothing, so two presses within seconds cannot record them twice.
+// POST { action: 'mark_paid_any', bill_id, paid_on, method, reference }
+//      A bill paid before approval (card at the counter, paid upfront; item 51): approved by the
+//      person pressing the button and marked paid in one database step
+//      (supplier_bills_approve_and_mark_paid), method card / cash / bank_transfer / airwallex.
 // POST { action: 'undo_paid', bill_id, note }
 //      Takes a bill back to unpaid (wrong tick) and reduces its batch row (the last bill of a batch
 //      removes the batch row: the status list has no 'reversed').
@@ -20,6 +24,7 @@ const { requireFinanceRole } = require('./_shared/require-finance-role');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+const PAID_METHODS = ['card', 'cash', 'bank_transfer', 'airwallex', 'other'];
 const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 exports.handler = async (event) => {
@@ -73,6 +78,17 @@ exports.handler = async (event) => {
       if (error) throw error;
       const results = (paid || []).map(r => ({ supplierId: r.supplier_id, supplier: r.supplier || 'Supplier', amount: Number(r.amount) || 0, billCount: Number(r.bill_count) || 0 }));
       return json(200, { ok: true, results });
+    }
+
+    if (body.action === 'mark_paid_any') {
+      if (!body.bill_id) return json(400, { ok: false, error: 'bill_id is required' });
+      const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(body.paid_on || '') ? body.paid_on : sydneyToday();
+      const method = PAID_METHODS.includes(body.method) ? body.method : null;
+      const reference = String(body.reference || '').trim().slice(0, 120) || null;
+      const { data: paid, error } = await admin.rpc('supplier_bills_approve_and_mark_paid', { p_bill_id: body.bill_id, p_paid_on: paidOn, p_reference: reference, p_user: user.id, p_method: method });
+      if (error && error.code === 'P0001') return json(400, { ok: false, error: error.message });
+      if (error) throw error;
+      return json(200, { ok: true, results: paid || [] });
     }
 
     if (body.action === 'undo_paid') {

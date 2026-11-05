@@ -482,7 +482,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   let po = null;
   if (poId) {
     const { data } = await supabaseAdmin.from('purchase_orders')
-      .select('id, po_number, po_type, closed_at, supplier_id, supplier_name, purchase_order_line_items(id, material_id, description, quantity, unit_cost)').eq('id', poId).maybeSingle();
+      .select('id, po_number, po_type, closed_at, supplier_id, supplier_name, paid_method, purchase_order_line_items(id, material_id, description, quantity, unit_cost)').eq('id', poId).maybeSingle();
     if (!data) throw new Error('That PO no longer exists.');
     // a suggested PO can be another supplier's (our PO number on their bill): never save against it (same rule as supplier_bill_save_review)
     if (data.supplier_id !== supplier.id) throw new Error(`${data.po_number || 'That PO'} is for ${data.supplier_name || 'another supplier'}, not ${supplier.name}. Pick one of ${supplier.name}'s POs, or save with no PO.`);
@@ -569,6 +569,11 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   // each line's price lands on its Stock item (one database step; the auto-save, nobody looking, follows the 20% rule)
   const { error: priceErr } = await supabaseAdmin.rpc('supplier_bill_price_lines', { p_bill_id: bill.id, p_checked: !!userId });
   if (priceErr) throw priceErr;
+  // the PO was paid at the counter (card, cash; item 51): this bill is approved and paid with the PO's details
+  if (po?.paid_method) {
+    const { error: paidErr } = await supabaseAdmin.rpc('_bill_paid_from_po', { p_bill_id: bill.id, p_po_id: po.id });
+    if (paidErr) throw paidErr;
+  }
 
   await supabaseAdmin.from('supplier_bill_inbox').update({
     status: 'saved', bill_id: bill.id, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),
