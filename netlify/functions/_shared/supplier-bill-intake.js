@@ -97,6 +97,12 @@ async function enqueueNewBillEmails(supabaseAdmin, { extractAttachments, extract
   return added;
 }
 
+// An email with no file may still be a bill (a portal link, a bill typed into the email): kept to
+// check and upload by hand when the subject uses a bill word, or the text a clear bill phrase.
+// The text test is narrow because footers say "privacy statement" and dispatch notices "receipt".
+const BILL_SUBJECT = /\b(invoices?|invoiced|inv|tax inv|bills?|statements?|credit notes?|remittance|receipts?|overdue)\b/i;
+const BILL_TEXT = /(tax invoice|invoice (no|number|#|is ready|attached|is attached)|amount (due|owing)|payment due|remittance advice|credit note|statement of account|view (your )?invoice)/i;
+
 // Adds one Gmail message (in the sales@ connection) to the bill inbox: one row per file, or a
 // "no PDF" row. Also used by Postie for an invoice a supplier sent to sales@ (_shared/routing-replies.js).
 async function enqueueBillMessage(supabaseAdmin, id, { extractAttachments, extractPlainText }) {
@@ -128,14 +134,20 @@ async function enqueueBillMessage(supabaseAdmin, id, { extractAttachments, extra
     if (!files.length) return 0; // just a reply, nothing to read as a bill
   }
 
+  // No file: only an email whose subject or text talks about a bill makes an "upload by hand"
+  // row to check. Dispatch notices, sales and newsletters sent to invoice@ are filed as Not a
+  // bill (no Ops manager line, no push), still listed under Emailed bills > Put aside (item 54).
+  const emailText = files.length ? '' : (extractPlainText(msg.payload) || '').slice(0, 2000);
+  const looksLikeBill = BILL_SUBJECT.test(base.email_subject || '') || BILL_TEXT.test(emailText);
+  const [status, reason] = looksLikeBill
+    ? ['to_check', 'No PDF or photo attached. Open the email in Gmail (Supplier Bills label) and upload the bill by hand.']
+    : ['not_a_bill', 'No PDF or photo, and the email never says invoice, bill, statement, receipt or credit: filed as not a bill.'];
   const rows = files.length
     ? files.map(f => ({ ...base, attachment_part_id: String(f.part_id), file_name: f.name, mime_type: f.mime }))
-    : [{ ...base, attachment_part_id: 'none', status: 'to_check', match_confidence: 'none', processed_at: new Date().toISOString(),
-        match_reason: 'No PDF or photo attached. Open the email in Gmail (Supplier Bills label) and upload the bill by hand.',
-        extracted: { email_text: (extractPlainText(msg.payload) || '').slice(0, 2000) } }];
+    : [{ ...base, attachment_part_id: 'none', status, match_confidence: 'none', processed_at: new Date().toISOString(), match_reason: reason, extracted: { email_text: emailText } }];
   const { error } = await supabaseAdmin.from('supplier_bill_inbox').upsert(rows, { onConflict: 'gmail_message_id,attachment_part_id', ignoreDuplicates: true });
   if (error) throw error;
-  if (!files.length) await notifyToCheck(supabaseAdmin, rows[0], 'An emailed bill has no PDF attached');
+  if (!files.length && looksLikeBill) await notifyToCheck(supabaseAdmin, rows[0], 'An emailed bill has no PDF attached');
   return rows.length;
 }
 
