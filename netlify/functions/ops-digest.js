@@ -5,13 +5,14 @@
 // (company_settings.ops_manager_user_ids) and keeps the full text as an agent_runs row, which the
 // Ops page (ops.html) shows. Also clears worker log rows older than 90 days.
 //
-// What it covers: what the workers did in the last 24 hours, what is waiting on a person (emailed
-// bills to check, stock running low, open "Needs me" tasks), and any worker that has stopped
-// working. Emailed bills, price lists, statements and stock low make no bell row of their own
+// What it covers: what is new since yesterday (the last 24 hours), what is still waiting on a
+// person (emailed bills to check, stock running low, open "Needs me" tasks), and any worker that
+// has stopped working. The push says only what is new and is not sent at all when nothing is new
+// and every worker is working (item 54); the full text, with mail and AI use, is on the Ops page. Emailed bills, price lists, statements and stock low make no bell row of their own
 // (migration 20261120000000): this digest and the Ops page are where they show.
 
 const { getAdminClient } = require('./_shared/require-admin');
-const { runAgent, notifyManagers } = require('./_shared/agent-log');
+const { runAgent, notifyManagers, AGENT_DOWN_PREFIX } = require('./_shared/agent-log');
 const { missingStatements } = require('./_shared/statement-intake');
 
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + 's')}`;
@@ -26,29 +27,57 @@ async function buildDigest(admin) {
   const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts, lowRes] = await Promise.all([
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
-    admin.from('agent_tasks').select('title').eq('status', 'open').order('created_at'),
-    admin.from('supplier_bill_inbox').select('status').in('status', ['to_check', 'failed']),
+    admin.from('agent_tasks').select('title, dedupe_key, created_at').eq('status', 'open').order('created_at'),
+    admin.from('supplier_bill_inbox').select('status, created_at').in('status', ['to_check', 'failed']),
     admin.from('supplier_bill_inbox').select('resolved_by').eq('status', 'saved').gte('resolved_at', since),
-    admin.from('price_changes').select('status, kind, change_pct, resolved_by').or(`status.eq.waiting,resolved_at.gte.${since}`),
-    admin.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems', 'queried']),
-    admin.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
+    admin.from('price_changes').select('status, resolved_by, created_at').or(`status.eq.waiting,resolved_at.gte.${since}`),
+    admin.from('supplier_bills').select('check_status, approved_for_payment, created_at, query_reply_at').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems', 'queried']),
+    admin.from('supplier_statements').select('created_at, query_reply_at').eq('status', 'issues'),
     missingStatements(admin),
-    admin.from('stock_low_flags').select('id', { count: 'exact', head: true }).is('cleared_at', null),
+    admin.from('stock_low_flags').select('created_at').is('cleared_at', null),
   ]);
-  const runs = runsRes.data || [], beats = beatsRes.data || [], tasks = tasksRes.data || [];
-  const toCheck = (billsRes.data || []).filter(b => b.status === 'to_check').length;
-  const failedBills = (billsRes.data || []).filter(b => b.status === 'failed').length;
+  const runs = runsRes.data || [], beats = beatsRes.data || [];
+  // a worker-down task is already the "Not working" line, so it is not listed twice
+  const tasks = (tasksRes.data || []).filter(t => !String(t.dedupe_key || '').startsWith(AGENT_DOWN_PREFIX));
+  const cutoff = Date.parse(since);
+  const isNew = (iso) => !!iso && Date.parse(iso) >= cutoff;
+  // an emailed bill is read up to an hour after it arrives, so its 24 hours run 2 hours behind:
+  // each bill is new in exactly one digest, and Try again never makes it new again
+  const LAG = 2 * 3600 * 1000;
+  const isNewEmail = (iso) => !!iso && Date.parse(iso) >= cutoff - LAG && Date.parse(iso) < Date.now() - LAG;
+  const bills = billsRes.data || [];
   const saved = savedRes.data || [];
   const savedAuto = saved.filter(s => !s.resolved_by).length;
   const prices = pricesRes.data || [];
-  const priceWaiting = prices.filter(p => p.status === 'waiting').length;
-  const checks = checkRes.data || [];
-  const toApprove = checks.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment).length;
-  const billProblems = checks.filter(b => b.check_status === 'problems').length;
-  const queried = checks.filter(b => b.check_status === 'queried').length;
-  const stIssues = stIssuesRes.count || 0;
   const priceAuto = prices.filter(p => p.status === 'applied' && !p.resolved_by).length;
-  const stockLow = lowRes.count || 0;
+  const checks = checkRes.data || [];
+  const sts = stIssuesRes.data || [];
+  // open queries: a supplier's reply waits on a person, no reply yet waits on the supplier
+  const queried = checks.filter(b => b.check_status === 'queried');
+  const replies = [...queried.filter(b => b.query_reply_at), ...sts.filter(r => r.query_reply_at)];
+  const noReply = queried.filter(b => !b.query_reply_at); // waits on the supplier: listed, never "new", not in needCount
+  const lows = lowRes.data || [];
+
+  // each kind: what is still waiting, and which of those rows are new since yesterday.
+  // A bill is new by when it was saved (created_at), not checked_at, which every re-check moves.
+  const kind = (one, many, rows, fresh) => ({ one, many, all: rows.length, fresh: rows.filter(fresh).length });
+  const kinds = [
+    kind('emailed bill to check', 'emailed bills to check', bills.filter(b => b.status === 'to_check'), (b) => isNewEmail(b.created_at)),
+    kind('bill that could not be read', 'bills that could not be read', bills.filter(b => b.status === 'failed'), (b) => isNewEmail(b.created_at)),
+    kind('bill not matching the PO', 'bills not matching the PO', checks.filter(b => b.check_status === 'problems'), (b) => isNew(b.created_at)),
+    kind('bill to approve for payment', 'bills to approve for payment', checks.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment), (b) => isNew(b.created_at)),
+    kind('statement not reconciling', 'statements not reconciling', sts, (r) => isNew(r.created_at)),
+    kind('supplier reply to a query', 'supplier replies to queries', replies, (r) => isNew(r.query_reply_at)),
+    kind('price list change to check', 'price list changes to check', prices.filter(p => p.status === 'waiting'), (p) => isNew(p.created_at)),
+    kind('stock item running low', 'stock items running low', lows, (r) => isNew(r.created_at)),
+  ];
+  const newTasks = tasks.filter(t => isNew(t.created_at));
+  const newParts = [...kinds.filter(k => k.fresh).map(k => plural(k.fresh, k.one, k.many)), ...newTasks.map(t => t.title)];
+  const waitParts = [...kinds.filter(k => k.all).map(k => plural(k.all, k.one, k.many)), ...tasks.map(t => t.title)];
+  if (missingSts.length) waitParts.push(`no statement yet from ${missingSts.map(m => m.name).join(', ')}`);
+  if (noReply.length) waitParts.push(plural(noReply.length, 'query', 'queries') + ' waiting on suppliers');
+  const newCount = kinds.reduce((n, k) => n + k.fresh, 0) + newTasks.length;
+  const needCount = kinds.reduce((n, k) => n + k.all, 0) + tasks.length + missingSts.length;
 
   // a worker is down if it has not worked for 3 of its usual gaps
   const down = beats.filter(b => b.agent !== 'ops-digest' && (!b.last_ok_at || Date.now() - new Date(b.last_ok_at).getTime() > 3 * b.expected_every_minutes * 60000));
@@ -57,31 +86,22 @@ async function buildDigest(admin) {
   const tokensIn = runs.reduce((n, r) => n + (r.input_tokens || 0), 0);
   const tokensOut = runs.reduce((n, r) => n + (r.output_tokens || 0), 0);
 
-  const needs = [];
-  if (toCheck) needs.push(`${plural(toCheck, 'emailed bill')} to check`);
-  if (failedBills) needs.push(`${plural(failedBills, 'bill')} that could not be read`);
-  if (priceWaiting) needs.push(`${plural(priceWaiting, 'price list change')} to check`);
-  if (billProblems) needs.push(`${plural(billProblems, 'bill')} that do not match the PO`);
-  if (toApprove) needs.push(`${plural(toApprove, 'bill')} to approve for payment`);
-  if (stIssues) needs.push(`${plural(stIssues, 'statement')} that do not reconcile`);
-  if (missingSts.length) needs.push(`no statement yet from ${missingSts.map(s => s.name).join(', ')}`);
-  if (queried) needs.push(`${plural(queried, 'query', 'queries')} waiting on suppliers`);
-  if (stockLow) needs.push(`${plural(stockLow, 'stock item')} running low`);
-  tasks.forEach(t => needs.push(t.title));
-
-  const lines = [];
-  lines.push(needs.length ? `Needs you: ${needs.join('; ')}.` : 'Nothing needs you.');
+  const pushLines = [];
+  if (down.length) pushLines.push(`Not working: ${down.map(d => d.label).join(', ')}.`);
+  if (newParts.length) pushLines.push(`New since yesterday: ${newParts.join('; ')}.`);
+  if (waitParts.length) pushLines.push(`Still waiting: ${waitParts.join('; ')}.`);
+  const lines = [...pushLines];
+  if (!waitParts.length) lines.push('Nothing needs you.');
   lines.push(`Last 24 hours: ${plural(saved.length, 'bill')} saved${savedAuto ? ` (${savedAuto} automatically)` : ''}, email sync brought mail in ${plural(emails, 'time')}${priceAuto ? `, ${plural(priceAuto, 'material price')} updated from price lists` : ''}.`);
-  if (down.length) lines.push(`Not working: ${down.map(d => d.label).join(', ')}.`);
-  else lines.push('All workers OK.');
+  if (!down.length) lines.push('All workers OK.');
   if (failedRuns.length) lines.push(`${plural(failedRuns.length, 'failed run')} in the last 24 hours.`);
   if (tokensIn || tokensOut) lines.push(`AI used: ${tokensIn.toLocaleString('en-AU')} tokens in, ${tokensOut.toLocaleString('en-AU')} out.`);
 
-  const needCount = toCheck + failedBills + tasks.length + priceWaiting + billProblems + toApprove + stIssues + missingSts.length + stockLow;
   const title = down.length ? `Morning: ${down[0].label} is not working`
-    : needCount ? `Morning: ${plural(needCount, 'thing')} need${needCount === 1 ? 's' : ''} you`
-    : 'Morning: all clear';
-  return { title, text: lines.join(' '), needCount, down: down.map(d => d.agent) };
+    : newCount ? `Morning: ${plural(newCount, 'new thing')} since yesterday`
+    : 'Morning: nothing new';
+  const push = !!(down.length || newCount);
+  return { title, text: lines.join(' '), pushText: pushLines.join(' '), push, newCount, needCount, down: down.map(d => d.agent) };
 }
 
 // The Schedule of Rates is reviewed every 6 months (company_settings.rates_reviewed_on, set from
@@ -115,7 +135,8 @@ exports.handler = async (event) => {
     const admin = getAdminClient();
     await ratesReviewCheck(admin).catch((err) => console.error('rates review check failed:', err.message));
     const digest = await buildDigest(admin);
-    await notifyManagers(admin, { kind: 'ops_digest', title: digest.title, body: digest.text.slice(0, 300), link: '/ops.html', dedupe: `ops_digest:${sydneyDate()}` });
+    // nothing new and every worker working: no push, the digest is still on the Ops page
+    if (digest.push) await notifyManagers(admin, { kind: 'ops_digest', title: digest.title, body: digest.pushText.slice(0, 300), link: '/ops.html', dedupe: `ops_digest:${sydneyDate()}` });
     await admin.from('agent_runs').delete().lt('started_at', new Date(Date.now() - 90 * 86400000).toISOString());
     return { summary: `${digest.title}. ${digest.text}`, details: digest, needsMe: digest.needCount };
   });
