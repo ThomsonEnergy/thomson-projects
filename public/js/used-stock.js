@@ -5,14 +5,16 @@
 // not in Stock yet is added with a name and flagged "Needs a price", or by a photo of its label
 // (js/stock-scan.js, loaded on demand, item 44). Makes a closed stock PO through
 // po_create_stock_pull, costed to the job. Consumables (counted by the pack) are not asked about;
-// they get a one-tap "Running low" instead.
+// they get a one-tap "Running low" instead. Cable (item 53, js/stock-kinds.js): pick the drum, say
+// what is left on it now (or Finished it); the metres used go to the job and the drum keeps its reading.
 const USED_STOCK_SOURCE_KEY = 'teops-used-stock-source';
 const USED_STOCK_RECENT_KEY = 'teops-used-stock-recent';
 async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
   const { data: { user } } = await supabaseClient.auth.getUser();
+  await loadStockKinds();
   const [vehicles, { data: materials }, { data: mine }] = await Promise.all([
     stockVehicles(),
-    supabaseClient.from('materials').select('id, name, is_consumable, pack_label, needs_price').order('name'),
+    supabaseClient.from('materials').select('id, name, is_consumable, pack_label, needs_price, kind, pack_qty').order('name'),
     supabaseClient.from('fleet_vehicles').select('id').eq('assigned_staff_id', user.id).eq('holds_stock', true).limit(1).maybeSingle(),
   ]);
   const allMats = materials || [];
@@ -23,7 +25,7 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
   if (mine?.id && vehicles.some(v => v.id === mine.id)) source = valid(source) ? source : { type: 'vehicle', vehicleId: mine.id };
   if (!valid(source)) source = { type: 'warehouse' };
   const recent = lsGet(USED_STOCK_RECENT_KEY, []);
-  const picked = [];   // { materialId, newName, name, qty, left, leftTouched }
+  const picked = [];   // { materialId, newName, name, qty, left, leftTouched } or a drum: { materialId, name, cable: true, unitId, drumLeft, left, qty }
   const low = new Set();
   let have = {};
   const placeLabel = () => source.type === 'vehicle' ? (vehicles.find(v => v.id === source.vehicleId)?.vehicle_name || vehicles.find(v => v.id === source.vehicleId)?.rego || 'the van') : 'Warehouse';
@@ -70,8 +72,17 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
       renderSources(); renderPicked();
     });
   }
-  function addPick(m) {
-    const found = picked.find(p => p.materialId === m.id);
+  async function addPick(m) {
+    if (stockIsDrumItem(m)) {
+      const units = await loadDrums({ materialIds: [m.id], loc: source.type, vehicleId: source.vehicleId });
+      const pick = await openDrumPickPanel({ material: m, units: units.filter(u => !picked.some(p => p.unitId && p.unitId === u.id)), placeLabel: placeLabel() });
+      if (!pick) return;
+      picked.push({ materialId: m.id, name: m.name, cable: true, unitId: pick.unitId, drumLeft: pick.qtyLeft, left: null, qty: null, needsPrice: m.needs_price });
+      lsSet(USED_STOCK_RECENT_KEY, [m.id, ...recent.filter(id => id !== m.id)].slice(0, 10));
+      q('#us-search').value = ''; renderResults(''); renderPicked();
+      return;
+    }
+    const found = picked.find(p => p.materialId === m.id && !p.cable);
     if (found) { found.qty += 1; }
     else picked.push({ materialId: m.id, name: m.name, qty: 1, leftTouched: false, needsPrice: m.needs_price });
     lsSet(USED_STOCK_RECENT_KEY, [m.id, ...recent.filter(id => id !== m.id)].slice(0, 10));
@@ -81,16 +92,32 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     const el = q('#us-results');
     const query = text.trim().toLowerCase();
     let list;
-    if (query.length < 2) list = recent.map(id => parts.find(m => m.id === id)).filter(Boolean).filter(m => !picked.some(p => p.materialId === m.id)).slice(0, 6);
-    else list = parts.filter(m => matchesAllWords(m.name, query) && !picked.some(p => p.materialId === m.id)).slice(0, 8);
+    const taken = (m) => !stockIsDrumItem(m) && picked.some(p => p.materialId === m.id);
+    if (query.length < 2) list = recent.map(id => parts.find(m => m.id === id)).filter(Boolean).filter(m => !taken(m)).slice(0, 6);
+    else list = parts.filter(m => matchesAllWords(m.name, query) && !taken(m)).slice(0, 8);
     if (!list.length) { el.innerHTML = query.length >= 2 ? '<p class="subtitle" style="font-size:12px; margin:4px 0;">Nothing in Stock by that name. Use "Not in Stock? + Add it".</p>' : ''; return; }
-    el.innerHTML = `${query.length < 2 ? '<p class="subtitle" style="font-size:12px; margin:6px 0 2px;">Recent</p>' : ''}<div style="display:flex; flex-direction:column; gap:4px;">${list.map(m => `<button type="button" class="secondary us-pick" data-id="${m.id}" style="text-align:left; ${bigBtn}">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} in ${escapeHtml(placeLabel())})</span></button>`).join('')}</div>`;
+    el.innerHTML = `${query.length < 2 ? '<p class="subtitle" style="font-size:12px; margin:6px 0 2px;">Recent</p>' : ''}<div style="display:flex; flex-direction:column; gap:4px;">${list.map(m => `<button type="button" class="secondary us-pick" data-id="${m.id}" style="text-align:left; ${bigBtn}">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)}${stockIsDrumItem(m) ? 'm' : ''} in ${escapeHtml(placeLabel())})</span></button>`).join('')}</div>`;
     el.querySelectorAll('.us-pick').forEach(b => b.addEventListener('click', () => addPick(parts.find(m => m.id === b.dataset.id))));
   }
   function renderPicked() {
     const el = q('#us-picked');
     if (!picked.length) { el.innerHTML = ''; return; }
     el.innerHTML = picked.map((p, i) => {
+      if (p.cable) {
+        return `<div class="us-line" data-i="${i}" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:6px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <strong style="font-size:14px;">${escapeHtml(p.name)} <span class="subtitle">(${p.unitId ? 'the drum with ' + poQty(p.drumLeft) + 'm' : 'a full drum, ' + poQty(p.drumLeft) + 'm'})</span></strong>
+            <button type="button" class="secondary btn-sm us-remove">&times;</button>
+          </div>
+          <div style="display:flex; gap:10px; align-items:end; margin-top:6px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:120px;"><label style="margin-top:0; font-size:12px;">Metres left on it now?</label>
+              <input class="us-drum-left" type="number" inputmode="decimal" step="1" min="0" value="${p.left ?? ''}" placeholder="e.g. 70" /></div>
+            <div><label style="margin-top:0; font-size:12px;">Used (m)</label>
+              <input class="us-drum-used" type="number" inputmode="decimal" step="1" min="0" value="${p.qty ?? ''}" style="width:80px; text-align:center;" /></div>
+            <button type="button" class="secondary us-drum-finished" style="${bigBtn}">Finished it</button>
+          </div>
+        </div>`;
+      }
       const h = p.materialId ? (have[p.materialId] || 0) : 0;
       if (!p.leftTouched && p.materialId) p.left = Math.max(0, Math.round((h - p.qty) * 100) / 100);
       return `<div class="us-line" data-i="${i}" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:6px;">
@@ -112,6 +139,14 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     }).join('');
     el.querySelectorAll('.us-line').forEach(line => {
       const p = picked[Number(line.dataset.i)];
+      if (p.cable) {
+        const leftEl = line.querySelector('.us-drum-left'), usedEl = line.querySelector('.us-drum-used');
+        leftEl.addEventListener('input', () => { p.left = leftEl.value === '' ? null : Math.max(0, parseFloat(leftEl.value) || 0); if (p.left != null) { p.qty = Math.max(0, Math.round((p.drumLeft - p.left) * 100) / 100); usedEl.value = p.qty; } });
+        usedEl.addEventListener('input', () => { p.qty = usedEl.value === '' ? null : Math.max(0, parseFloat(usedEl.value) || 0); });
+        line.querySelector('.us-drum-finished').addEventListener('click', () => { p.left = 0; leftEl.value = 0; if (p.qty == null) { p.qty = p.drumLeft; usedEl.value = p.qty; } });
+        line.querySelector('.us-remove').addEventListener('click', () => { picked.splice(Number(line.dataset.i), 1); renderPicked(); renderResults(q('#us-search').value); });
+        return;
+      }
       const qtyEl = line.querySelector('.us-qty'), leftEl = line.querySelector('.us-left');
       const sync = () => { p.qty = Math.max(1, parseInt(qtyEl.value, 10) || 1); qtyEl.value = p.qty; if (!p.leftTouched && p.materialId) { p.left = Math.max(0, (have[p.materialId] || 0) - p.qty); leftEl.value = p.left; } };
       line.querySelector('.us-minus').addEventListener('click', () => { qtyEl.value = Math.max(1, p.qty - 1); sync(); });
@@ -131,10 +166,15 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     try { await loadStockScan(); } catch (err) { q('#us-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return; }
     openStockScanPanel({ loc: source.type, vehicleId: source.vehicleId, askTook: true, onDone: async (r) => {
       have = await loadPlaceCounts(source.type, source.vehicleId);
-      const found = picked.find(p => p.materialId === r.material_id);
-      if (found) { found.qty += r.took; found.leftTouched = false; }
-      else picked.push({ materialId: r.material_id, name: r.name, qty: r.took, left: r.left, leftTouched: true, needsPrice: r.needs_price });
-      if (!parts.some(m => m.id === r.material_id)) parts.push({ id: r.material_id, name: r.name, needs_price: r.needs_price });
+      if (r.unit_id) {
+        // a cable drum: the scan saved a drum of took + left metres; the pull takes took off it
+        picked.push({ materialId: r.material_id, name: r.name, cable: true, unitId: r.unit_id, drumLeft: r.took + r.left, left: r.left, qty: r.took, needsPrice: r.needs_price });
+      } else {
+        const found = picked.find(p => p.materialId === r.material_id && !p.cable);
+        if (found) { found.qty += r.took; found.leftTouched = false; }
+        else picked.push({ materialId: r.material_id, name: r.name, qty: r.took, left: r.left, leftTouched: true, needsPrice: r.needs_price });
+      }
+      if (!parts.some(m => m.id === r.material_id)) parts.push({ id: r.material_id, name: r.name, needs_price: r.needs_price, kind: r.kind, pack_qty: r.pack_qty });
       q('#us-new').style.display = 'none';
       renderPicked();
     } });
@@ -143,9 +183,10 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     const name = q('#us-new-name').value.trim();
     if (!name) { q('#us-new-name').focus(); return; }
     const existing = allMats.find(m => m.name.toLowerCase() === name.toLowerCase());
-    if (existing && !existing.is_consumable) { addPick(existing); }
-    else picked.push({ newName: name, name, qty: Math.max(1, parseInt(q('#us-new-qty').value, 10) || 1), left: Math.max(0, parseInt(q('#us-new-left').value, 10) || 0), leftTouched: true });
+    const newQty = Math.max(1, parseInt(q('#us-new-qty').value, 10) || 1), newLeft = Math.max(0, parseInt(q('#us-new-left').value, 10) || 0);
     q('#us-new').style.display = 'none'; q('#us-new-name').value = ''; q('#us-new-qty').value = '1'; q('#us-new-left').value = '0';
+    if (existing && !existing.is_consumable) { addPick(existing); return; }
+    picked.push({ newName: name, name, qty: newQty, left: newLeft, leftTouched: true });
     renderPicked();
   });
   overlay.querySelectorAll('.us-low-btn').forEach(b => b.addEventListener('click', () => {
@@ -160,7 +201,12 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
     const btn = q('#us-done');
     if (!pulled) {
       if (!picked.length && !low.size) { msg.innerHTML = '<div class="error-box">Pick what you took, or Cancel.</div>'; return; }
-      for (const p of picked) if (p.left == null || p.left < 0) { msg.innerHTML = `<div class="error-box">Say how many ${escapeHtml(p.name)} are left in ${escapeHtml(placeLabel())}.</div>`; return; }
+      for (const p of picked) {
+        if (p.cable) {
+          if (p.left == null) { msg.innerHTML = `<div class="error-box">Say how many metres are left on the drum of ${escapeHtml(p.name)}, or tap Finished it.</div>`; return; }
+          if (!(p.qty > 0)) { msg.innerHTML = `<div class="error-box">How many metres of ${escapeHtml(p.name)} did you use?</div>`; return; }
+        } else if (p.left == null || p.left < 0) { msg.innerHTML = `<div class="error-box">Say how many ${escapeHtml(p.name)} are left in ${escapeHtml(placeLabel())}.</div>`; return; }
+      }
     }
     btn.disabled = true; btn.textContent = 'Saving...';
     try {
@@ -168,7 +214,7 @@ async function openUsedStockPanel({ projectId, jobLabel, onDone }) {
       if (picked.length && !po) {
         const { data, error } = await supabaseClient.rpc('po_create_stock_pull', {
           p_project_id: projectId, p_cost_centre_id: null, p_source: source.type, p_vehicle_id: source.type === 'vehicle' ? source.vehicleId : null,
-          p_lines: picked.map(p => ({ material_id: p.materialId || null, new_name: p.newName || null, quantity: p.qty, left_after: p.left })),
+          p_lines: picked.map(p => ({ material_id: p.materialId || null, new_name: p.newName || null, quantity: p.qty, left_after: p.left, unit_id: p.cable ? (p.unitId || null) : null })),
           p_description: `Stock used on site (My Day)`,
         });
         if (error) throw error;

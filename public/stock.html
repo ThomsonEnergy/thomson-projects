@@ -28,7 +28,7 @@
 
   <div class="wrap wide">
     <h1>Stock</h1>
-    <p class="subtitle">Materials on hand - cost and sell price, so job costing has real numbers to work from once this feeds into quoting.</p>
+    <p class="subtitle">Materials on hand: cost and sell price feed quotes, POs and job costing. Cable is counted by the drum (metres, each drum shown), consumables by the pack.</p>
 
     <div class="grid cols-2">
       <div class="stat"><div class="label">Total stock cost</div><div class="value" id="stat-total-stock-cost">-</div></div>
@@ -46,7 +46,7 @@
           <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
           <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
           <button class="secondary" id="scan-part-btn" style="margin-right:8px;">&#128247; Scan a part</button>
-          <button id="add-material-btn">+ Add material</button>
+          <button id="add-material-btn" style="display:none;">+ Add material</button>
         </div>
       </div>
       <div id="stock-list"><p class="subtitle">Loading...</p></div>
@@ -59,7 +59,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=125"></script>
+  <script src="/js/supabase-client.js?v=126"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
@@ -68,7 +68,9 @@
     let locationRows = [];
     let lowFlags = [];
     let corrections = []; // last 90 days of count corrections, moves and prices (activity_log on the item)
+    let drumRows = [];    // every cable drum (material_units): where it is and what is left on it (item 53)
     let myRole = 'staff';
+    const drumsAt = (materialId, loc, vehicleId) => drumRows.filter(u => u.material_id === materialId && u.location_type === loc && (loc === 'warehouse' || u.vehicle_id === vehicleId));
     const dayText = (iso) => new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
     const placeName = (loc, vehicleId) => loc === 'vehicle' ? (vehicleList.find(v => v.id === vehicleId)?.vehicle_name || vehicleList.find(v => v.id === vehicleId)?.rego || 'a vehicle') : 'Warehouse';
 
@@ -114,7 +116,9 @@
       vehicleList = vehicles || [];
       const { data: locations } = await supabaseClient.from('material_stock_by_location').select('*');
       locationRows = locations || [];
+      drumRows = await loadDrums();
       myRole = await getMyRole();
+      document.getElementById('add-material-btn').style.display = isPricingRole(myRole) ? '' : 'none'; // the database only lets pricing roles add by hand
       const since = new Date(Date.now() - 90 * 86400000).toISOString();
       const [{ data: flags }, { data: log }] = await Promise.all([
         supabaseClient.from('stock_low_flags').select('*, materials(name, pack_label), profiles!stock_low_flags_flagged_by_fkey(full_name)').is('cleared_at', null).order('created_at', { ascending: false }),
@@ -127,13 +131,16 @@
       renderMaterials();
     }
 
-    function locationBreakdown(materialId) {
-      const warehouseQty = locationRows.find(r => r.material_id === materialId && r.location_type === 'warehouse')?.quantity || 0;
-      const parts = [`${warehouseQty} Warehouse`];
-      vehicleList.forEach(v => {
-        const qty = locationRows.find(r => r.material_id === materialId && r.location_type === 'vehicle' && r.vehicle_id === v.id)?.quantity || 0;
-        parts.push(`${escapeHtml(qty)} ${escapeHtml(v.vehicle_name || v.rego)}`);
-      });
+    function locationBreakdown(m) {
+      const drum = stockIsDrumItem(m);
+      const place = (loc, vehicleId, label) => {
+        const qty = locationRows.find(r => r.material_id === m.id && r.location_type === loc && (loc === 'warehouse' || r.vehicle_id === vehicleId))?.quantity || 0;
+        if (!drum) return `${escapeHtml(poQty(qty))} ${escapeHtml(label)}`;
+        const units = drumsAt(m.id, loc, vehicleId);
+        return `${escapeHtml(poQty(qty))}m ${escapeHtml(label)}${units.length ? ` (${escapeHtml(drumSummary(units, m.pack_qty).replace(/^[^:]*: /, ''))})` : ''}`;
+      };
+      const parts = [place('warehouse', null, 'Warehouse')];
+      vehicleList.forEach(v => parts.push(place('vehicle', v.id, v.vehicle_name || v.rego)));
       return parts.join(' &middot; ');
     }
 
@@ -164,7 +171,7 @@
           const lastFix = corrections.find(c => c.action === 'stock_count_corrected' && c.entity_id === m.id && new Date(c.created_at) > new Date(Date.now() - 30 * 86400000));
           const chips = [
             m.needs_price ? '<span class="badge draft" style="color:var(--red);">Needs a price</span>' : '',
-            m.is_consumable ? `<span class="badge draft" title="Counted by the pack, never asked about at clock-out">Consumable${m.pack_label ? ': ' + escapeHtml(m.pack_label) : ''}</span>` : '',
+            stockKindChip(m),
             lastFix ? `<span class="badge draft" title="${escapeHtml(lastFix.description)}">Count corrected ${escapeHtml(dayText(lastFix.created_at))} by ${escapeHtml(lastFix.profiles?.full_name || 'someone')}</span>` : '',
           ].filter(Boolean).join(' ');
           return `
@@ -172,12 +179,12 @@
             <td data-label="Name">${escapeHtml(m.name)}${m.brand || m.part_number ? `<div class="subtitle" style="font-size:11px;">${escapeHtml([m.brand, m.part_number].filter(Boolean).join(' \u00b7 '))}</div>` : ''}${chips ? `<div style="margin-top:3px; display:flex; gap:4px; flex-wrap:wrap;">${chips}</div>` : ''}</td>
             <td data-label="Category">${escapeHtml(m.category || '-')}</td>
             <td data-label="Supplier">${escapeHtml(m.suppliers?.name || '-')}</td>
-            <td class="num" data-label="Cost">${money(m.cost_price)}</td>
-            <td class="num" data-label="Sell">${money(m.sell_price)}</td>
+            <td class="num" data-label="Cost">${money(m.cost_price)}${m.kind === 'cable' ? '<span class="subtitle">/m</span>' : ''}</td>
+            <td class="num" data-label="Sell">${money(m.sell_price)}${m.kind === 'cable' ? '<span class="subtitle">/m</span>' : ''}</td>
             ${showQtyCols ? `
               <td class="num" data-label="Qty" style="${isBelowMin ? 'color:var(--red); font-weight:600;' : ''}">
-                ${escapeHtml(m.quantity_on_hand)}${isBelowMin ? ' &#9888;' : ''}
-                ${vehicleList.length ? `<div class="subtitle" style="font-size:11px; font-weight:400; white-space:nowrap;">${locationBreakdown(m.id)}</div>` : ''}
+                ${escapeHtml(poQty(m.quantity_on_hand))}${stockIsDrumItem(m) ? 'm' : ''}${isBelowMin ? ' &#9888;' : ''}
+                ${vehicleList.length || stockIsDrumItem(m) ? `<div class="subtitle" style="font-size:11px; font-weight:400;">${locationBreakdown(m)}</div>` : ''}
               </td>
               <td class="num" data-label="Minimum">${escapeHtml(m.minimum_quantity || '-')}</td>
             ` : ''}
@@ -252,9 +259,14 @@
           </div>
           ${material?.photo_path ? `<img id="mat-photo" alt="Label" style="width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--border); margin-top:8px; display:none;" />` : ''}
           ${material && isPricingRole(myRole) ? `<div id="mat-prices" style="margin-top:8px;"></div>` : ''}
+          ${stockKindFieldsHtml('mat', material)}
+          ${material && stockIsDrumItem(material) ? `<div id="mat-drums" style="margin-top:8px;">
+            <label>Drums <span class="subtitle">(tap one to set what is left on it)</span></label>
+            ${[{ loc: 'warehouse', vehicleId: null, label: 'Warehouse' }, ...vehicleList.map(v => ({ loc: 'vehicle', vehicleId: v.id, label: v.vehicle_name || v.rego }))].map(pl => `<div style="font-size:13px; margin-top:4px;"><strong>${escapeHtml(pl.label)}</strong> <span class="subtitle">${escapeHtml(drumSummary(drumsAt(material.id, pl.loc, pl.vehicleId), material.pack_qty))}</span>${drumListHtml(drumsAt(material.id, pl.loc, pl.vehicleId), material, { loc: pl.loc, vehicleId: pl.vehicleId, placeLabel: pl.label })}</div>`).join('')}
+          </div>` : ''}
           <div class="grid cols-3">
             <div>
-              <label>Cost price</label>
+              <label>Cost price${material?.kind === 'cable' || !material ? ' <span class="subtitle">(per metre for cable)</span>' : ''}</label>
               <input id="mat-cost" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.cost_price || 0)}" />
             </div>
             <div>
@@ -262,17 +274,15 @@
               <input id="mat-sell" type="number" inputmode="decimal" step="0.01" value="${escapeHtml(material?.sell_price || 0)}" />
             </div>
             <div>
-              <label>Warehouse qty</label>
+              <label>Warehouse qty${material?.kind === 'cable' ? ' (metres)' : ''}</label>
               <input id="mat-qty" type="number" inputmode="decimal" step="1" value="${escapeHtml(startWarehouseQty)}" />
             </div>
           </div>
-          ${vehicleList.length ? `<div class="grid cols-3">${vehicleList.map(v => `<div><label>${escapeHtml(v.vehicle_name || v.rego)} qty</label><input class="mat-vqty" data-vehicle-id="${escapeHtml(v.id)}" data-start="${vehicleQty(v)}" type="number" inputmode="decimal" step="1" value="${vehicleQty(v)}" /></div>`).join('')}</div>` : ''}
+          ${vehicleList.length ? `<div class="grid cols-3">${vehicleList.map(v => `<div><label>${escapeHtml(v.vehicle_name || v.rego)} qty${material?.kind === 'cable' ? ' (m)' : ''}</label><input class="mat-vqty" data-vehicle-id="${escapeHtml(v.id)}" data-start="${vehicleQty(v)}" type="number" inputmode="decimal" step="1" value="${vehicleQty(v)}" /></div>`).join('')}</div>` : ''}
           <label>Why the count changed <span class="subtitle">(needed when you change a count; logged on the item)</span></label>
           <input id="mat-count-reason" placeholder="e.g. stocktake, damaged, miscounted" />
-          <label>Minimum quantity - flags for restocking below this</label>
+          <label>Minimum quantity${material?.kind === 'cable' ? ' (metres)' : ''}: flags for restocking below this</label>
           <input id="mat-minimum" type="number" inputmode="decimal" step="1" value="${escapeHtml(material?.minimum_quantity || 0)}" />
-          <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="mat-consumable" style="width:auto;" ${material?.is_consumable ? 'checked' : ''} /> Consumable: counted by the pack, never asked about at clock-out (zip ties, saddles, tape)</label>
-          <input id="mat-pack" placeholder="Pack, e.g. bag of 100" value="${escapeHtml(material?.pack_label)}" />
           <label>Notes</label>
           <textarea id="mat-notes" style="min-height:60px;">${escapeHtml(material?.notes)}</textarea>
           <div style="margin-top:14px; display:flex; justify-content:space-between;">
@@ -285,6 +295,10 @@
           <div id="mat-msg"></div>
         </div>`;
       document.body.appendChild(overlay);
+      wireStockKindFields(overlay, 'mat');
+      if (overlay.querySelector('#mat-drums')) wireDrumLists(overlay, { [material.id]: material }, async () => { overlay.remove(); await loadMaterials(); openMaterialPanel(allMaterials.find(m => m.id === material.id)); });
+      // the kind is set through its own server step (drums made from the count, or dropped), never by a plain update
+      if (!isPricingRole(myRole)) overlay.querySelectorAll('#mat-kind, #mat-pack-qty, #mat-pack-label').forEach(el => { el.disabled = true; });
 
       overlay.querySelector('#mat-cancel-btn').addEventListener('click', () => overlay.remove());
       overlay.querySelector('#mat-save-btn').addEventListener('click', async () => {
@@ -317,9 +331,12 @@
           brand: overlay.querySelector('#mat-brand').value.trim() || null,
           part_number: overlay.querySelector('#mat-part').value.trim() || null,
           barcode: overlay.querySelector('#mat-barcode').value.trim() || null,
-          is_consumable: overlay.querySelector('#mat-consumable').checked,
-          pack_label: overlay.querySelector('#mat-pack').value.trim() || null,
         };
+        const kindFields = readStockKindFields(overlay, 'mat');
+        const kindChanged = material && isPricingRole(myRole) && (kindFields.kind !== material.kind
+          || (kindFields.kind === 'cable' && Number(kindFields.pack_qty) !== Number(material.pack_qty))
+          || (kindFields.kind === 'consumable' && (kindFields.pack_label || null) !== (material.pack_label || null)));
+        if (!material) Object.assign(fields, kindFields);
         let materialId = material ? material.id : null;
         if (material) {
           // Only write the details when something changed, so a count-only edit by any role goes through;
@@ -331,6 +348,10 @@
             if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
             if (!upd || !upd.length) { msg.innerHTML = `<div class="error-box">Only Admin, Finance or Sales can change an item's details. Put the details back as they were to save a count change.</div>`; return; }
             await logActivity('material', material.id, 'updated', `Material "${name}" updated`);
+          }
+          if (kindChanged) {
+            const { error } = await supabaseClient.rpc('material_set_kind', { p_material_id: material.id, p_kind: kindFields.kind, p_pack_qty: kindFields.pack_qty, p_pack_label: kindFields.pack_label });
+            if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
           }
         } else {
           const { data: newMat, error } = await supabaseClient.from('materials').insert(fields).select('id').single();
@@ -357,9 +378,9 @@
 
       if (material) {
         overlay.querySelector('#mat-delete-btn').addEventListener('click', async () => {
-          if (!confirm(`Delete ${material.name}?`)) return;
+          if (!confirm(`Delete ${material.name}?${Number(material.quantity_on_hand) > 0 ? ` Its count of ${poQty(material.quantity_on_hand)} goes with it.` : ''}`)) return;
           const { error } = await supabaseClient.from('materials').delete().eq('id', material.id);
-          if (error) { alert(error.message); return; }
+          if (error) { alert(/foreign key|violates/i.test(error.message) ? `${material.name} is on a PO, a bill or a job, so it cannot be deleted. Set its counts to 0 instead.` : friendlyError(error)); return; }
           await logActivity('material', material.id, 'deleted', `Material "${material.name}" deleted`);
           overlay.remove();
           await loadMaterials();
@@ -397,7 +418,7 @@
 
     document.getElementById('add-material-btn').addEventListener('click', () => openMaterialPanel(null));
     document.getElementById('scan-part-btn').addEventListener('click', () => loadStockScan().then(() => openStockScanPanel({ loc: 'warehouse', onDone: loadMaterials })).catch(err => alert(err.message)));
-    document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'warehouse', vehicleId: null, placeLabel: 'Warehouse', onDone: loadMaterials }));
+    document.getElementById('stocktake-btn').addEventListener('click', () => loadStockPanels().then(() => openStocktakePanel({ loc: 'warehouse', vehicleId: null, placeLabel: 'Warehouse', onDone: loadMaterials })).catch(err => alert(err.message)));
 
     document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
 
@@ -509,13 +530,16 @@
         return;
       }
 
-      const { data: materialsWithSupplier } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, quantity_on_hand, minimum_quantity, suppliers(name)').in('id', belowMinimum.map(m => m.id));
+      const { data: materialsWithSupplier } = await supabaseClient.from('materials').select('id, name, cost_price, supplier_id, quantity_on_hand, minimum_quantity, kind, pack_qty, suppliers(name)').in('id', belowMinimum.map(m => m.id));
 
       const grouped = {}; // supplier_id -> { supplierName, items: [] }
       const noSupplier = [];
       (materialsWithSupplier || []).forEach(m => {
         const shortfall = Number(m.minimum_quantity) - Number(m.quantity_on_hand);
-        const item = { materialId: m.id, description: m.name, quantity: shortfall, unit_cost: m.cost_price };
+        // cable is short by metres but bought by the drum (item 53)
+        const item = stockIsDrumItem(m)
+          ? { materialId: m.id, description: m.name, quantity: Math.ceil(shortfall / Number(m.pack_qty)), unit_cost: Math.round(Number(m.cost_price) * Number(m.pack_qty) * 100) / 100 }
+          : { materialId: m.id, description: m.name, quantity: shortfall, unit_cost: m.cost_price };
         if (m.supplier_id) {
           if (!grouped[m.supplier_id]) grouped[m.supplier_id] = { supplierName: m.suppliers?.name || 'Unknown', items: [] };
           grouped[m.supplier_id].items.push(item);
@@ -598,6 +622,7 @@
         .from('purchase_orders')
         .select('id, po_number, supplier_id, supplier_name, project_id, vehicle_id, po_kind, po_type, stock_source, status, closed_at, amount, created_at, description, purchase_order_line_items(id, quantity, unit_cost, received, is_backordered), suppliers(name), fleet_vehicles!vehicle_id(vehicle_name, rego), supplier_bills(id, paid, check_status)')
         .is('project_id', null)
+        .is('vehicle_id', null)
         .is('closed_at', null)
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
@@ -637,6 +662,7 @@
       });
       const { data: suppliersData } = await supabaseClient.from('suppliers').select('id, name').order('name');
       allSuppliers = suppliersData || [];
+      await loadStockKinds();
       await loadMaterials();
       await loadStockPOs();
     })();

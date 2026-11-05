@@ -3,8 +3,9 @@
 // panel in supabase-client.js (Take a photo of the label, loaded on demand).
 //
 // Camera -> compressImage() -> the phone's own barcode reader (BarcodeDetector, where the browser has
-// one) and the read-part-label function (Claude reads the barcode digits, part number, brand and a
-// name) -> a check panel (everything editable, how many, where) -> material_add_from_scan, the one
+// one) and the read-part-label function (Claude reads the barcode digits, part number, brand, a
+// name and what kind of thing it is: part, cable with the drum size, consumable with the pack, or a
+// tool, item 53) -> a check panel (everything editable, how many, where) -> material_add_from_scan, the one
 // database step that makes the item at $0 flagged Needs a price (or adds the count to the item that
 // already has that barcode or part number) and sets the count where the person is.
 // Writes: materials and the counts through material_add_from_scan only; on Save the photo goes to
@@ -13,8 +14,9 @@
 //   openStockScanPanel({ loc, vehicleId, askTook, onDone })
 //     loc / vehicleId: the place prefilled ('warehouse' or 'vehicle'); the panel lets it be changed
 //     askTook: the clock-out mode: "Took" and "Left there" instead of "How many here"; the count
-//              saved is took + left (the stock pull then takes "took" off it)
-//     onDone({ material_id, name, existed, needs_price, quantity, took, left })
+//              saved is took + left and SET at that place (not added), the stock pull then takes
+//              "took" off it; a cable item gets one drum of took + left metres (unit_id comes back)
+//     onDone({ material_id, name, existed, needs_price, quantity, took, left, kind, pack_qty, unit_id })
 
 const STOCK_SCAN_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'];
 
@@ -67,7 +69,7 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
   const small = await compressImage(file, 1600, 0.85).catch(() => file);
   const preview = URL.createObjectURL(small);
   const [vehicles, localCode, read] = await Promise.all([
-    stockVehicles(),
+    stockVehicles().then(async v => { await loadStockKinds(); return v; }),
     stockScanLocalBarcode(small),
     stockScanReadLabel(small).catch(err => ({ error: err.message })),
   ]);
@@ -80,12 +82,16 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
   if (barcode || partNumber) {
     const { data: id } = await supabaseClient.rpc('_material_by_code', { p_barcode: barcode || null, p_part_number: partNumber || null });
     if (id) {
-      const { data: m } = await supabaseClient.from('materials').select('id, name, part_number, barcode, brand, cost_price, needs_price, photo_path').eq('id', id).maybeSingle();
+      const { data: m } = await supabaseClient.from('materials').select('id, name, part_number, barcode, brand, cost_price, needs_price, photo_path, kind, pack_qty, pack_label').eq('id', id).maybeSingle();
       existing = m || null;
     }
   }
   let useExisting = !!existing;
   let place = loc === 'vehicle' && vehicles.some(v => v.id === vehicleId) ? { type: 'vehicle', vehicleId } : { type: 'warehouse' };
+  // what kind of thing: the label reader's call, else the same word rules the database uses
+  const guess = stockKindGuess(label.name || label.description || '', label.category);
+  const kindGuess = { kind: ['part', 'cable', 'consumable'].includes(label.kind) ? label.kind : guess.kind, pack_qty: label.pack_qty || guess.packQty || null, pack_label: label.pack_label || guess.packLabel || null };
+  const looksTool = label.kind === 'tool' || guess.looksTool;
 
   overlay.querySelector('.card').innerHTML = `
     <h2 style="margin-bottom:4px;">Scan a part</h2>
@@ -104,15 +110,17 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
       <div><label style="font-size:12px;">Part number</label><input id="ss-part" value="${escapeHtml(partNumber)}" autocapitalize="characters" /></div>
       <div><label style="font-size:12px;">Barcode</label><input id="ss-barcode" value="${escapeHtml(barcode)}" inputmode="numeric" /></div>
     </div>
+    ${looksTool ? `<div class="error-box" style="margin-top:8px;">Looks like a tool. Tools go in the Tools register (buy it on a PO and mark the line as a tool), not Stock.</div>` : ''}
+    <div id="ss-kind-fields">${stockKindFieldsHtml('ss', kindGuess)}</div>
     <label>Where is it?</label>
     <div id="ss-places" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
     ${askTook ? `
     <div class="grid cols-2">
-      <div><label style="font-size:12px;">Took for the job</label><input id="ss-took" type="number" inputmode="numeric" step="1" min="1" value="1" /></div>
-      <div><label style="font-size:12px;">Left there</label><input id="ss-left" type="number" inputmode="numeric" step="1" min="0" value="0" /></div>
+      <div><label style="font-size:12px;">Took for the job <span class="ss-unit"></span></label><input id="ss-took" type="number" inputmode="decimal" step="1" min="1" value="1" /></div>
+      <div><label style="font-size:12px;">Left there <span class="ss-unit"></span></label><input id="ss-left" type="number" inputmode="decimal" step="1" min="0" value="0" /></div>
     </div>` : `
-    <label>How many here?</label>
-    <input id="ss-qty" type="number" inputmode="numeric" step="1" min="0" value="1" />`}
+    <label>How many here? <span class="ss-unit"></span></label>
+    <input id="ss-qty" type="number" inputmode="decimal" step="1" min="0" value="1" />`}
     <p class="subtitle" style="margin-top:8px; font-size:12px;" id="ss-note"></p>
     <div style="margin-top:12px; display:flex; gap:8px;">
       <button id="ss-save" style="flex:1; ${bigBtn}">Save</button>
@@ -127,7 +135,7 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
       ? `<div style="border:1px solid var(--green); border-radius:8px; padding:6px 8px; margin-bottom:6px; font-size:13px;">Already in Stock: <strong>${escapeHtml(existing.name)}</strong>${existing.needs_price ? ' <span class="badge draft" style="color:var(--red);">Needs a price</span>' : ` (${money(existing.cost_price)})`}<br><span class="subtitle">The count is added to it.</span> <a href="#" id="ss-not-same" class="link-quiet">Not the same item?</a></div>`
       : `<p class="subtitle" style="margin-bottom:6px; font-size:12px;">A new item will be made. <a href="#" id="ss-same" class="link-quiet">It is the same as ${escapeHtml(existing.name)}</a></p>`;
     const toggle = el.querySelector('#ss-not-same, #ss-same');
-    if (toggle) toggle.addEventListener('click', (e) => { e.preventDefault(); useExisting = !useExisting; renderExisting(); renderNote(); });
+    if (toggle) toggle.addEventListener('click', (e) => { e.preventDefault(); useExisting = !useExisting; renderExisting(); renderNote(); renderKind(); });
   }
   function renderPlaces() {
     renderStockPlaceButtons(q('#ss-places'), vehicles, place, (p) => { place = p; renderPlaces(); });
@@ -135,21 +143,31 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
   function renderNote() {
     q('#ss-note').textContent = useExisting ? '' : 'Saved at $0 and flagged Needs a price. A price list or a bill with this part number prices it by itself; Admin can set it on the Stock page too.';
   }
-  renderExisting(); renderPlaces(); renderNote();
+  // the kind boxes: hidden for an item already in Stock (its kind is set on the Stock page); cable counts in metres
+  function renderKind() {
+    q('#ss-kind-fields').style.display = useExisting ? 'none' : '';
+    const k = useExisting ? existing : readStockKindFields(overlay, 'ss');
+    overlay.querySelectorAll('.ss-unit').forEach(el => { el.textContent = stockIsDrumItem(k) || (k.kind === 'cable') ? '(metres on the drum)' : ''; });
+  }
+  wireStockKindFields(overlay, 'ss');
+  q('#ss-kind').addEventListener('change', renderKind);
+  renderExisting(); renderPlaces(); renderNote(); renderKind();
   if (useExisting) q('#ss-name').value = existing.name;
 
   q('#ss-cancel').addEventListener('click', () => { URL.revokeObjectURL(preview); overlay.remove(); });
   q('#ss-save').addEventListener('click', async () => {
     const msg = q('#ss-msg');
     const btn = q('#ss-save');
-    const took = askTook ? Math.max(1, parseInt(q('#ss-took').value, 10) || 1) : null;
-    const left = askTook ? Math.max(0, parseInt(q('#ss-left').value, 10) || 0) : null;
-    const quantity = askTook ? took + left : Math.max(0, parseInt(q('#ss-qty').value, 10) || 0);
+    const took = askTook ? Math.max(1, parseFloat(q('#ss-took').value) || 1) : null;
+    const left = askTook ? Math.max(0, parseFloat(q('#ss-left').value) || 0) : null;
+    const quantity = askTook ? took + left : Math.max(0, parseFloat(q('#ss-qty').value) || 0);
+    const kindFields = useExisting ? {} : readStockKindFields(overlay, 'ss');
     const payload = {
       material_id: useExisting ? existing.id : null, force_new: !!existing && !useExisting,
       name: q('#ss-name').value.trim(), part_number: q('#ss-part').value.trim() || null, barcode: q('#ss-barcode').value.trim() || null,
       brand: q('#ss-brand').value.trim() || null, category: label.category || null, photo_path: null,
       location_type: place.type, vehicle_id: place.type === 'vehicle' ? place.vehicleId : null, quantity,
+      set_count: askTook, ...kindFields,
     };
     if (!payload.material_id && !payload.name) { msg.innerHTML = '<div class="error-box">Give the part a name.</div>'; return; }
     btn.disabled = true; btn.textContent = 'Saving...';
@@ -163,7 +181,8 @@ async function openStockScanPanel({ loc = 'warehouse', vehicleId = null, askTook
     if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.disabled = false; btn.textContent = 'Save'; return; }
     URL.revokeObjectURL(preview);
     overlay.remove();
-    showToast(data.existed ? `${data.name}: ${quantity} added` : `${data.name} added to Stock, needs a price`);
+    const unit = data.kind === 'cable' ? 'm' : '';
+    showToast(data.existed ? `${data.name}: ${askTook ? 'count set to' : ''} ${poQty(quantity)}${unit}${askTook ? '' : ' added'}` : `${data.name} added to Stock${data.kind === 'cable' ? ' (cable, by the drum)' : data.kind === 'consumable' ? ' (consumable)' : ''}, needs a price`);
     if (onDone) await onDone({ ...data, quantity, took, left });
   });
 }

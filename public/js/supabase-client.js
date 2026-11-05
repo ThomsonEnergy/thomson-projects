@@ -6715,6 +6715,9 @@ function poNextStep(po, bills, { emailed, role } = {}) {
 
 // Lines with a tick box each. Tick what arrived, then one Receive button (wirePoTickLines).
 // Received lines show where they went. Everything else for a line sits under its "..." button.
+// Words that usually mean a tool, so an unlinked PO line gets a "Looks like a tool, mark it?" hint
+// (never set by itself: tools go to the Tools register, a different place to receive to) (item 53).
+const PO_TOOL_WORDS = /\b(drill|drills|driver|impact|grinder|saw|saws|multimeter|clamp meter|tester|testers|crimper|crimpers|crimping tool|stripper|strippers|ladder|ladders|torch|laser|vacuum|blower|heat gun|rotary hammer|charger|milwaukee|dewalt|makita|bosch|festool|hilti|fluke|knipex|klein|kincrome|sidchrome|megger)\b/i;
 function renderPoTickLines(po, canEdit) {
   const items = po.purchase_order_line_items || [];
   if (!items.length) return '<p class="subtitle" id="po-lines-empty">No lines yet.</p>';
@@ -6727,7 +6730,8 @@ function renderPoTickLines(po, canEdit) {
     if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${poPlaceLabel(li.destination_type)}</span>`;
     else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
     const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
-    const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>` : '';
+    const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>`
+      : (!li.received && !li.material_id && !po.stock_source && PO_TOOL_WORDS.test(li.description || '')) ? ` <span class="badge draft" style="color:var(--amber);" title="Use the ... on the line and pick This is a tool, so it lands in the Tools register">Looks like a tool, mark it?</span>` : '';
     return `<div class="po-line${li.received ? ' is-received' : ''}" data-line-id="${escapeHtml(li.id)}">
       <label class="po-line-tick">${tickable ? `<input type="checkbox" class="po-line-cb" data-line-id="${escapeHtml(li.id)}" aria-label="Arrived: ${escapeHtml(li.description)}" />` : `<span class="po-line-mark">${li.received ? '&#10003;' : ''}</span>`}</label>
       <div class="po-line-body">
@@ -7071,8 +7075,10 @@ function loadJsOnce(src, isLoaded) {
     document.head.appendChild(s);
   });
 }
-const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=1', () => typeof openUsedStockPanel === 'function');
-const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=1', () => typeof openStockScanPanel === 'function');
+const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=2', () => typeof openUsedStockPanel === 'function');
+const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=2', () => typeof openStockScanPanel === 'function');
+const loadStockKinds = () => loadJsOnce('/js/stock-kinds.js?v=1', () => typeof stockKindGuess === 'function');
+const loadStockPanels = () => loadJsOnce('/js/stock-panels.js?v=1', () => typeof openStocktakePanel === 'function');
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
 const STOCK_BIG_BTN = 'min-height:44px; font-size:15px;';
@@ -7111,133 +7117,6 @@ async function maybeAskUsedStock(entry, project) {
   if (yes) { await loadUsedStock(); await openUsedStockPanel({ projectId: entry.project_id, jobLabel: label }); }
 }
 
-// Stocktake of one place: every item with stock there (plus any you search for), type the real count,
-// one Save. Consumables are OK / Low / Out, no numbers. Differences are logged as count corrections.
-async function openStocktakePanel({ loc, vehicleId, placeLabel, onDone }) {
-  const [{ data: materials }, have] = await Promise.all([
-    supabaseClient.from('materials').select('id, name, is_consumable, pack_label').order('name'),
-    loadPlaceCounts(loc, vehicleId),
-  ]);
-  const all = materials || [];
-  const listed = new Set(all.filter(m => (have[m.id] || 0) > 0 || m.is_consumable).map(m => m.id));
-  const states = {};
-  const overlay = openModal(`
-    <h2>Stocktake: ${escapeHtml(placeLabel)}</h2>
-    <p class="subtitle" style="margin-bottom:10px;">Walk through and type what is really there. Consumables are just OK, Low or Out. Nothing changes until Save.</p>
-    <input id="st-search" placeholder="Add an item that is here but not listed..." autocomplete="off" />
-    <div id="st-results"></div>
-    <div id="st-list" style="margin-top:8px;"></div>
-    <div style="margin-top:14px; display:flex; gap:8px;">
-      <button id="st-save" style="flex:1; min-height:44px;">Save stocktake</button>
-      <button type="button" class="secondary" id="st-cancel" style="min-height:44px;">Cancel</button>
-    </div>
-    <div id="st-msg"></div>`, { maxWidth: 560 });
-  const q = (sel) => overlay.querySelector(sel);
-  function renderList() {
-    const items = all.filter(m => listed.has(m.id));
-    q('#st-list').innerHTML = items.length ? items.map(m => m.is_consumable
-      ? `<div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:6px 0; border-top:1px solid var(--border); flex-wrap:wrap;">
-          <span>${escapeHtml(m.name)}${m.pack_label ? ` <span class="subtitle">(${escapeHtml(m.pack_label)})</span>` : ''}</span>
-          <span style="display:flex; gap:4px;">${['ok', 'low', 'out'].map(s => `<button type="button" class="${states[m.id] === s ? '' : 'secondary'} btn-sm st-state" data-id="${m.id}" data-state="${s}">${s === 'ok' ? 'OK' : s === 'low' ? 'Low' : 'Out'}</button>`).join('')}</span>
-        </div>`
-      : `<div style="display:flex; justify-content:space-between; align-items:center; gap:6px; padding:6px 0; border-top:1px solid var(--border);">
-          <span>${escapeHtml(m.name)} <span class="subtitle">(app: ${poQty(have[m.id] || 0)})</span></span>
-          <input class="st-count" data-id="${m.id}" type="number" inputmode="numeric" step="1" min="0" value="${states[m.id] ?? (have[m.id] || 0)}" style="width:90px; text-align:center;" />
-        </div>`).join('') : '<p class="subtitle">Nothing is recorded here yet. Search above to add items.</p>';
-    q('#st-list').querySelectorAll('.st-state').forEach(b => b.addEventListener('click', () => { states[b.dataset.id] = b.dataset.state; renderList(); }));
-    q('#st-list').querySelectorAll('.st-count').forEach(inp => inp.addEventListener('input', () => { states[inp.dataset.id] = inp.value; }));
-  }
-  renderList();
-  q('#st-search').addEventListener('input', (e) => {
-    const text = e.target.value.trim().toLowerCase();
-    const el = q('#st-results');
-    if (text.length < 2) { el.innerHTML = ''; return; }
-    const list = all.filter(m => !listed.has(m.id) && matchesAllWords(m.name, text)).slice(0, 8);
-    el.innerHTML = list.map(m => `<button type="button" class="secondary btn-sm st-add" data-id="${m.id}" style="margin:2px;">${escapeHtml(m.name)}</button>`).join('') || '<p class="subtitle" style="font-size:12px;">No item by that name.</p>';
-    el.querySelectorAll('.st-add').forEach(b => b.addEventListener('click', () => { listed.add(b.dataset.id); if (!all.find(m => m.id === b.dataset.id).is_consumable) states[b.dataset.id] = states[b.dataset.id] ?? 0; e.target.value = ''; el.innerHTML = ''; renderList(); }));
-  });
-  q('#st-cancel').addEventListener('click', () => overlay.remove());
-  q('#st-save').addEventListener('click', async () => {
-    const btn = q('#st-save'), msg = q('#st-msg');
-    const counts = [];
-    all.filter(m => listed.has(m.id)).forEach(m => {
-      if (m.is_consumable) { if (states[m.id]) counts.push({ material_id: m.id, state: states[m.id] }); }
-      else if (states[m.id] !== undefined && states[m.id] !== '') counts.push({ material_id: m.id, count: Number(states[m.id]) });
-    });
-    if (!counts.length) { msg.innerHTML = '<div class="error-box">Nothing changed.</div>'; return; }
-    btn.disabled = true; btn.textContent = 'Saving...';
-    const { data, error } = await supabaseClient.rpc('stock_stocktake', { p_loc: loc, p_vehicle_id: loc === 'vehicle' ? vehicleId : null, p_counts: counts });
-    if (error) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; btn.disabled = false; btn.textContent = 'Save stocktake'; return; }
-    overlay.remove();
-    showToast(`Stocktake saved: ${data.changed} count${data.changed === 1 ? '' : 's'} corrected${data.low ? `, ${data.low} running low` : ''}`);
-    if (onDone) await onDone();
-  });
-}
-
-// Move gear between the Warehouse and a vehicle in one step (no PO). Fixes the source count on the spot.
-async function openStockTransferPanel({ fromLoc, fromVehicleId, fromLabel, toLoc, toVehicleId, toLabel, onDone }) {
-  const [{ data: materials }, have] = await Promise.all([
-    supabaseClient.from('materials').select('id, name, is_consumable, pack_label').order('name'),
-    loadPlaceCounts(fromLoc, fromVehicleId),
-  ]);
-  const all = materials || [];
-  const picked = [];
-  const overlay = openModal(`
-    <h2>Move stock: ${escapeHtml(fromLabel)} to ${escapeHtml(toLabel)}</h2>
-    <p class="subtitle" style="margin-bottom:10px;">Counts move straight away, no PO. If the app's count at ${escapeHtml(fromLabel)} is wrong, fix "Left" and it is corrected.</p>
-    <input id="tr-search" placeholder="Type part of the name..." autocomplete="off" />
-    <div id="tr-results"></div>
-    <div id="tr-picked" style="margin-top:8px;"></div>
-    <div style="margin-top:14px; display:flex; gap:8px;">
-      <button id="tr-save" style="flex:1; min-height:44px;">Move</button>
-      <button type="button" class="secondary" id="tr-cancel" style="min-height:44px;">Cancel</button>
-    </div>
-    <div id="tr-msg"></div>`, { maxWidth: 520 });
-  const q = (sel) => overlay.querySelector(sel);
-  function renderPicked() {
-    q('#tr-picked').innerHTML = picked.map((p, i) => `<div class="tr-line" data-i="${i}" style="border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:6px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;"><strong>${escapeHtml(p.name)}</strong><button type="button" class="secondary btn-sm tr-remove">&times;</button></div>
-      <div class="grid cols-2" style="margin-top:6px;">
-        <div><label style="margin-top:0; font-size:12px;">Moving</label><input class="tr-qty" type="number" inputmode="numeric" step="1" min="1" value="${p.qty}" /></div>
-        <div><label style="margin-top:0; font-size:12px;">Left at ${escapeHtml(fromLabel)} <span class="subtitle">(app: ${poQty(have[p.id] || 0)})</span></label><input class="tr-left" type="number" inputmode="numeric" step="1" min="0" value="${p.left ?? ''}" /></div>
-      </div></div>`).join('');
-    q('#tr-picked').querySelectorAll('.tr-line').forEach(line => {
-      const p = picked[Number(line.dataset.i)];
-      line.querySelector('.tr-qty').addEventListener('input', (e) => { p.qty = Math.max(1, parseInt(e.target.value, 10) || 1); if (!p.leftTouched) { p.left = Math.max(0, (have[p.id] || 0) - p.qty); line.querySelector('.tr-left').value = p.left; } });
-      line.querySelector('.tr-left').addEventListener('input', (e) => { p.leftTouched = true; p.left = e.target.value === '' ? null : Math.max(0, parseFloat(e.target.value) || 0); });
-      line.querySelector('.tr-remove').addEventListener('click', () => { picked.splice(Number(line.dataset.i), 1); renderPicked(); });
-    });
-  }
-  q('#tr-search').addEventListener('input', (e) => {
-    const text = e.target.value.trim().toLowerCase();
-    const el = q('#tr-results');
-    if (text.length < 2) { el.innerHTML = ''; return; }
-    const list = all.filter(m => matchesAllWords(m.name, text) && !picked.some(p => p.id === m.id)).slice(0, 8);
-    el.innerHTML = `<div style="display:flex; flex-direction:column; gap:4px;">${list.map(m => `<button type="button" class="secondary tr-pick" data-id="${m.id}" style="text-align:left; min-height:40px;">${escapeHtml(m.name)} <span class="subtitle">(${poQty(have[m.id] || 0)} at ${escapeHtml(fromLabel)})</span></button>`).join('') || '<p class="subtitle" style="font-size:12px;">No item by that name.</p>'}</div>`;
-    el.querySelectorAll('.tr-pick').forEach(b => b.addEventListener('click', () => {
-      const m = all.find(x => x.id === b.dataset.id);
-      picked.push({ id: m.id, name: m.name, qty: 1, left: Math.max(0, (have[m.id] || 0) - 1), leftTouched: false });
-      e.target.value = ''; el.innerHTML = ''; renderPicked();
-    }));
-  });
-  q('#tr-cancel').addEventListener('click', () => overlay.remove());
-  q('#tr-save').addEventListener('click', async () => {
-    const btn = q('#tr-save'), msg = q('#tr-msg');
-    if (!picked.length) { msg.innerHTML = '<div class="error-box">Pick what you are moving.</div>'; return; }
-    btn.disabled = true; btn.textContent = 'Moving...';
-    try {
-      for (const p of picked) {
-        if (p.moved) continue; // moved by an earlier attempt: a retry never moves it twice (bug F18)
-        const { error } = await supabaseClient.rpc('stock_transfer', { p_material_id: p.id, p_qty: p.qty, p_from_loc: fromLoc, p_from_vehicle: fromLoc === 'vehicle' ? fromVehicleId : null, p_to_loc: toLoc, p_to_vehicle: toLoc === 'vehicle' ? toVehicleId : null, p_left_after: p.left });
-        if (error) throw new Error(`${p.name}: ${friendlyError(error)}`);
-        p.moved = true;
-      }
-      overlay.remove();
-      showToast(`Moved ${picked.length} item${picked.length === 1 ? '' : 's'} to ${toLabel}`);
-      if (onDone) await onDone();
-    } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; btn.disabled = false; btn.textContent = 'Move'; }
-  });
-}
 
 async function openAddPoItemPanel(po, onComplete) {
   const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
@@ -7625,7 +7504,8 @@ function buildMaterialSearchRow(materials, containerId) {
     if (!prebuildMatches.length && !materialMatches.length) { resultsEl.style.display = 'none'; return; }
     resultsEl.innerHTML = [
       ...prebuildMatches.map(p => `<div class="po-line-pick" data-kind="prebuild" data-id="${p.id}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(p.name)} <span class="subtitle">(Prebuild - adds each material)</span></div>`),
-      ...materialMatches.map(m => `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${escapeHtml(m.name)}" data-cost="${m.cost_price}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${money(m.cost_price)})</span></div>`),
+      // cable is priced and counted per metre but bought by the drum: the line is one drum at drum price (item 53)
+      ...materialMatches.map(m => { const drum = m.kind === 'cable' && Number(m.pack_qty) > 0; const cost = drum ? Math.round(Number(m.cost_price) * Number(m.pack_qty) * 100) / 100 : m.cost_price; return `<div class="po-line-pick" data-kind="material" data-id="${m.id}" data-name="${escapeHtml(m.name)}" data-cost="${cost}" style="padding:8px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);">${escapeHtml(m.name)} <span class="subtitle">(${drum ? `drum of ${poQty(m.pack_qty)}m, ${money(cost)}` : money(m.cost_price)})</span></div>`; }),
     ].join('');
     resultsEl.style.display = 'block';
     resultsEl.querySelectorAll('.po-line-pick').forEach(pick => {
