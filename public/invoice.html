@@ -283,10 +283,16 @@
           <div class="inv-foot"></div>
         </section>`;
 
+      // A job under a commercial agreement (item 48): its line is one of the labour items above; the note
+      // says what the line is and when it stands, so the full Schedule of Rates is what is agreed.
+      const agreement = inv.commercial_agreement || null;
+      const agreementNote = agreement
+        ? `Labour is charged as per our Schedule of Rates. The commercial agreement line is a conditional reduction under our agreement with you${agreement.sent_at ? ` dated ${dateText(new Date(agreement.sent_at))}` : ''}. It applies when this invoice is paid in full by the due date and is otherwise withdrawn, with the balance payable.`
+        : '';
       const finalHtml = `
         <div class="inv-final">
           <div class="inv-final-top">
-            <div class="inv-terms">${esc(TERMS_TEXT)}</div>
+            <div class="inv-terms">${agreementNote ? `${esc(agreementNote)}<br><br>` : ''}${esc(TERMS_TEXT)}</div>
             <div class="inv-totals">
               <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
