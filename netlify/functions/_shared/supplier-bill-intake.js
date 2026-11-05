@@ -518,28 +518,31 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     const noCharge = isNoCharge({ quantity, unit_cost: unitCost }); // nothing charged: not an extra, never added to a PO
     const partNumber = String(l.part_number || '').trim() || null;
     let poLine = matchPoLine(poLines, { part_number: partNumber, description: l.description }, billedQty)?.line || null;
+    // a Stock item scanned on site carries its part number or barcode: the bill finds it by that
+    let byCode = null;
+    if (!poLine?.material_id && partNumber && !isFreight(l.description)) {
+      const { data: found, error: codeErr } = await supabaseAdmin.rpc('_material_by_code', { p_barcode: partNumber, p_part_number: partNumber });
+      if (codeErr) throw codeErr;
+      byCode = found || null;
+    }
     let flag = null, resolution = null;
     if (po && isFreight(l.description)) { poLine = null; flag = 'Freight / delivery charge'; }
     else if (noCharge) { /* a $0 or 0-supplied line: shows as No charge, nothing to accept or add */ }
     else if (po && !poLine && poOpen) {
+      // the new PO line carries the Stock item too, so receiving it moves the count (item 57)
       const { data: added, error: addErr } = await supabaseAdmin.from('purchase_order_line_items')
-        .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId }).select('id, material_id').single();
+        .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId, material_id: byCode }).select('id, material_id').single();
       if (addErr) throw addErr;
       poLine = added; resolution = 'added';
     }
     else if (po && !poLine) flag = 'Not on the linked PO';
     else if (poLine && unitCost > Number(poLine.unit_cost) * 1.01) flag = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
     if (poLine && !noCharge) billedQty[poLine.id] = (billedQty[poLine.id] || 0) + quantity;
-    let materialId = poLine?.material_id || null;
-    if (!materialId && partNumber && !isFreight(l.description)) {
-      // a Stock item scanned on site carries its part number or barcode: the bill finds it by that
-      const { data: byCode, error: codeErr } = await supabaseAdmin.rpc('_material_by_code', { p_barcode: partNumber, p_part_number: partNumber });
-      if (codeErr) throw codeErr;
-      materialId = byCode || null;
-    }
+    const materialId = poLine?.material_id || byCode || null;
     lines.push({
       bill_id: bill.id, material_id: materialId, description: l.description, part_number: partNumber,
-      quantity, unit_cost: unitCost, po_line_item_id: poLine?.id || null, flag_reason: flag, resolution,
+      quantity, unit_cost: unitCost, unit: String(l.unit || '').trim().slice(0, 20) || null,
+      po_line_item_id: poLine?.id || null, flag_reason: flag, resolution,
     });
   }
   if (lines.length) {
