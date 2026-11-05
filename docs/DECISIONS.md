@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 5 Nov 2026
+
+- Bug found (owner, J7069), planned, waiting on yes: a ServiceM8 job imported as "Quoted" with a $0 value (J7063 and J7069, both ZASK) shows no Invoice button at all: the job page only offers Invoice actual costs on no-quote jobs (`proposal_template` `direct_job`), and the quoted job's Invoice project button hides when nothing is left to claim. Fix: one rule "no quote behind it" (`direct_job`, or no source quote and $0 quoted) on the job page and in `create-invoice.js`'s invoice naming, and the import (`sm8-import-jobs.js`) makes a $0 job do-and-charge. No migration. Optional now: set J7063 and J7069 to no-quote on production so they can be invoiced before the fix.
+
 ## 4 Nov 2026
 
 - LIVE (owner: yes, push live; migration 20261128080000): item 47, Merge another job into this one (Admin, Summary): a client's other open jobs merge into one job in one server step, each old job's stages renamed "J7010: ...", everything on them following, the old J number still opening the merged job. Detail: `docs/PROJECT_SPEC.md` A13e.
