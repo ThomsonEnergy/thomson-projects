@@ -171,6 +171,38 @@ function fuzzyMatchScore(a, b) {
   return matches / Math.max(wordsA.size, wordsB.length);
 }
 
+// Part numbers compare with case and punctuation removed, the same as _part_norm in the database.
+function partNorm(p) { return String(p || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || null; }
+
+// A description has to share at least this much of its wording with a PO line to link without a part number.
+// Near misses ("10A DOUBLE C2000SERIES" against "10A DOUBLE ICONIC WITH USB") score about 0.6.
+const DESCRIPTION_LINK_MIN = 0.75;
+
+// Which PO line a bill line is for, or null (the line is then "Not on the linked PO").
+//   1. Part number first: the bill line's part number is the Stock item's part number, the supplier's own
+//      part number for that item, or a word in the PO line's description.
+//   2. Only when the bill line has no part number, or the PO line has none to compare: the description,
+//      at DESCRIPTION_LINK_MIN or better. If both sides have a part number and they differ, it is a different item.
+//   A PO line already billed in full is not offered to a description match, so a second, different item
+//   cannot take over a line that is already covered by another bill.
+// poLines carry part_numbers (already normalised) and quantity; billedQty is bill quantity per PO line id.
+function matchPoLine(poLines, line, billedQty = {}) {
+  const part = partNorm(line.part_number);
+  if (part) {
+    const hit = poLines.find(pl => (pl.part_numbers || []).includes(part)
+      || (part.length >= 4 && String(pl.description || '').split(/\s+/).some(w => partNorm(w) === part)));
+    if (hit) return { line: hit, how: 'part number', score: 1 };
+  }
+  let best = null, bestScore = 0;
+  poLines.forEach(pl => {
+    if (part && (pl.part_numbers || []).length) return;
+    if ((billedQty[pl.id] || 0) >= Number(pl.quantity || 0)) return;
+    const score = fuzzyMatchScore(pl.description, line.description);
+    if (score > bestScore) { bestScore = score; best = pl; }
+  });
+  return bestScore >= DESCRIPTION_LINK_MIN ? { line: best, how: 'description', score: bestScore } : null;
+}
+
 // Supplier names without the words every company has ("Pty", "Ltd", "Australia", "Electrical"...),
 // so "WINAICO AUSTRALIA PTY LTD" no longer half matches every "X Pty Ltd". Same list as
 // SUPPLIER_NAME_FILLER in supabase-client.js.
@@ -450,7 +482,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   let po = null;
   if (poId) {
     const { data } = await supabaseAdmin.from('purchase_orders')
-      .select('id, po_number, po_type, closed_at, supplier_id, supplier_name, purchase_order_line_items(id, material_id, description, unit_cost)').eq('id', poId).maybeSingle();
+      .select('id, po_number, po_type, closed_at, supplier_id, supplier_name, purchase_order_line_items(id, material_id, description, quantity, unit_cost)').eq('id', poId).maybeSingle();
     if (!data) throw new Error('That PO no longer exists.');
     // a suggested PO can be another supplier's (our PO number on their bill): never save against it (same rule as supplier_bill_save_review)
     if (data.supplier_id !== supplier.id) throw new Error(`${data.po_number || 'That PO'} is for ${data.supplier_name || 'another supplier'}, not ${supplier.name}. Pick one of ${supplier.name}'s POs, or save with no PO.`);
@@ -483,18 +515,28 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   if (billErr) throw billErr;
 
   const poLines = po?.purchase_order_line_items || [];
+  const billedQty = {};
+  if (poLines.length) {
+    const ids = poLines.map(pl => pl.id);
+    const matIds = [...new Set(poLines.map(pl => pl.material_id).filter(Boolean))];
+    const [{ data: mats }, { data: links }, { data: billed }] = await Promise.all([
+      matIds.length ? supabaseAdmin.from('materials').select('id, part_number').in('id', matIds) : { data: [] },
+      matIds.length ? supabaseAdmin.from('material_supplier_links').select('material_id, part_number').eq('supplier_id', supplier.id).in('material_id', matIds) : { data: [] },
+      supabaseAdmin.from('supplier_bill_line_items').select('po_line_item_id, quantity, resolution').in('po_line_item_id', ids),
+    ]);
+    poLines.forEach(pl => {
+      pl.part_numbers = [...(mats || []).filter(m => m.id === pl.material_id).map(m => m.part_number),
+        ...(links || []).filter(k => k.material_id === pl.material_id).map(k => k.part_number)].map(partNorm).filter(Boolean);
+    });
+    (billed || []).filter(b => b.resolution !== 'denied').forEach(b => { billedQty[b.po_line_item_id] = (billedQty[b.po_line_item_id] || 0) + (Number(b.quantity) || 0); });
+  }
   const poOpen = !!po && po.po_type === 'open' && !po.closed_at; // an open PO takes its lines from the bill
   const lines = [];
   for (const l of (ex.line_items || []).filter(l => l.description)) {
     const unitCost = Number(l.unit_cost) || 0;
     const quantity = Number(l.quantity) || 1;
     const partNumber = String(l.part_number || '').trim() || null;
-    let best = null, bestScore = 0;
-    poLines.forEach(pl => {
-      const score = fuzzyMatchScore(pl.description, l.description);
-      if (score > bestScore) { bestScore = score; best = pl; }
-    });
-    let poLine = bestScore >= 0.5 ? best : null;
+    let poLine = matchPoLine(poLines, { part_number: partNumber, description: l.description }, billedQty)?.line || null;
     let flag = null, resolution = null;
     if (po && isFreight(l.description)) { poLine = null; flag = 'Freight / delivery charge'; }
     else if (po && !poLine && poOpen) {
@@ -505,6 +547,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     }
     else if (po && !poLine) flag = 'Not on the linked PO';
     else if (poLine && unitCost > Number(poLine.unit_cost) * 1.01) flag = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
+    if (poLine) billedQty[poLine.id] = (billedQty[poLine.id] || 0) + quantity;
     let materialId = poLine?.material_id || null;
     if (!materialId && partNumber && !isFreight(l.description)) {
       // a Stock item scanned on site carries its part number or barcode: the bill finds it by that

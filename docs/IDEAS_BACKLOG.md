@@ -1068,6 +1068,8 @@ Touches: `public/invoice.html`, `public/clients.html` (two buttons, loads the ne
 
 ## 49. Purchase orders with less manual work: bills link by themselves, open POs accept their charges, extras on a fixed PO flagged red with tick-and-act (planned 5 Nov 2026, revised the same day, waiting on the owner's yes)
 
+Built first, 5 Nov 2026 (bug fix, PR into `main`): the emailed bill matcher in `supplier-bill-intake.js` links by part number first, then by description at 75% or better, and never to a PO line already billed in full. Auto-accept on open POs (below) relies on it: with the old 50% rule a wrong link would have been accepted with nobody looking.
+
 Owner's ask (5 Nov 2026): "The purchase orders seem to be too much manual work. Make it so the bill links automatically accepting the charge, and we can tick stuff and move to another job or stock or query price with supplier." Then: "If it's a fixed line PO then flag it red as additional or something so we can query supplier or change it job/stock." On production today: 20 emailed bills waiting on the Emailed bills page, 6 saved bills with problems, 28 red bill lines waiting (all "Not on the linked PO": 7 on open POs, $169.62; 13 on closed fixed POs, $3,072.58; 8 on bills with no PO any more, $27,896.80), auto-save off.
 
 - **Bills save themselves when the PO is clear.** Auto-save turns on (`api_keys` `supplier_bill_auto_save` = on) for confident matches only: our PO number on the bill (that supplier's PO), or the supplier's one open PO with the total within $1. A name alone, a "New, check details" supplier or an ABN or bank warning still waits for a person. Never approves for payment, never touches Xero.
