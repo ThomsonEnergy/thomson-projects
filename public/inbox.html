@@ -700,16 +700,25 @@
       if (aiBtn) aiBtn.addEventListener('click', async () => {
         const msg = document.getElementById('reply-msg');
         if (document.getElementById('reply-body').value.trim() && !confirm('Replace what you have typed with a draft from ' + S.assistant + '?')) return;
+        const box = document.getElementById('reply-body');
+        const typed = () => box.value + '|' + replyPicker.files().length + '|' + (replyPicker.refs ? replyPicker.refs().length : 0); // what the person has in the box now
+        const atClick = typed();
         aiBtn.disabled = true;
         aiBtn.textContent = 'Drafting...';
-        msg.innerHTML = `<p class="subtitle" style="font-size:12px;">${escapeHtml(S.assistant)} is writing a draft. It takes up to a minute and fills in here.</p>`;
+        msg.innerHTML = `<p class="subtitle" style="font-size:12px;">${escapeHtml(S.assistant)} is writing a draft. It takes about a minute and fills in here.</p>`;
         try {
           await act('draft_reply', { thread_id: threadId });
           for (let i = 0; i < 30; i++) {
             await new Promise(r => setTimeout(r, 3000));
             if (S.activeThreadId !== threadId) return; // moved on: the draft waits in Drafts
             const { data } = await supabaseClient.from('email_drafts').select('id').eq('thread_id', threadId).eq('status', 'draft').limit(1);
-            if (data && data.length) { reload(true); return; }
+            if (!data || !data.length) continue;
+            // typed or attached something meanwhile: never wipe it, offer the draft instead
+            if (typed() === atClick) { reload(true); return; }
+            msg.innerHTML = `<p class="subtitle" style="font-size:12px;">The draft is ready. <a href="#" id="reply-ai-use">Use it</a> (replaces what you have typed), or find it in Drafts.</p>`;
+            document.getElementById('reply-ai-use').addEventListener('click', (e) => { e.preventDefault(); reload(true); });
+            aiBtn.remove();
+            return;
           }
           throw new Error(`${S.assistant} did not finish a draft. Try again, or write it yourself.`);
         } catch (err) {

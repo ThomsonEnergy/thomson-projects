@@ -3,32 +3,29 @@
 // email_drafts and Gmail Drafts; the Inbox waits for that row and fills the reply box.
 //
 // Started only by email-actions.js (action draft_reply), which checks the person may use the
-// mailbox and that no draft is open; this function checks the internal secret and checks the
-// person's access again. A background function, as an Opus draft can take longer than the 10
-// second limit. Nothing is ever sent.
+// mailbox, that no draft is open and that the AI key is set; this function checks the internal
+// secret and the person's access again. A background function, as an Opus draft can take longer
+// than the 10 second limit. Reports to the ops manager as "draft-reply" (runs, AI use, a
+// failure alert). Nothing is ever sent.
 
 const { requireInternal } = require('./_shared/require-internal');
 const { getAdminClient } = require('./_shared/require-admin');
+const { runAgent } = require('./_shared/agent-log');
 const { threadForUser } = require('./_shared/mailboxes');
 const { draftOnRequest } = require('./_shared/email-agent');
 
-exports.handler = async (event) => {
+exports.handler = (event) => {
   if (!requireInternal(event)) {
     console.error('draft-reply-background: refused, no internal secret');
     return { statusCode: 202, body: '' };
   }
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 202, body: '' }; }
-  try {
+  return runAgent('draft-reply', async () => {
     const admin = getAdminClient();
     const t = await threadForUser(admin, body.thread_id, body.user_id);
-    if (!t || !t.owner) { console.error('draft-reply-background: no access to', body.thread_id); return { statusCode: 202, body: '' }; }
-    const { count } = await admin.from('email_drafts').select('id', { count: 'exact', head: true }).eq('thread_id', t.thread.id).eq('status', 'draft');
-    if (count) return { statusCode: 202, body: '' }; // someone saved a draft meanwhile
+    if (!t || !t.owner) return { summary: 'Draft reply refused: no access to that conversation' };
     const r = await draftOnRequest(admin, t.mailbox, t.thread);
-    if (!r.drafted) console.error('draft-reply-background: nothing drafted for', t.thread.id);
-  } catch (err) {
-    console.error('draft-reply-background failed:', err.message);
-  }
-  return { statusCode: 202, body: '' };
+    return { summary: `${t.mailbox.address}: ${r.drafted ? 'reply drafted on request' : 'no draft (a reply or draft came in first)'}`, usage: r.usage };
+  });
 };

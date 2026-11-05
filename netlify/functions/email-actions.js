@@ -27,6 +27,7 @@ const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { startMailboxWork } = require('./_shared/gmail-sync');
 const { selfBaseUrl } = require('./_shared/site-url');
+const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { internalHeaders } = require('./_shared/require-internal');
 const {
   mailboxById, canUseMailbox, canMirror, threadForUser, archiveInGmail, markReadInGmail, labelInGmail,
@@ -189,6 +190,7 @@ exports.handler = async (event) => {
         if (count) throw new Refused('There is already a draft on this conversation.');
         const { count: fromThem } = await admin.from('emails').select('id', { count: 'exact', head: true }).eq('thread_id', t.thread.id).eq('direction', 'inbound');
         if (!fromThem) throw new Refused('Nothing to reply to: every email here is from us.');
+        await getIntegrationKey('anthropic').catch(() => { throw new Refused('Drafting needs the AI key in Settings > API Keys.'); });
         const res = await fetch(`${selfBaseUrl()}/.netlify/functions/draft-reply-background`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() },
           body: JSON.stringify({ thread_id: t.thread.id, user_id: userId }), timeout: 8000,
