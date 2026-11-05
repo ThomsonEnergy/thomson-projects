@@ -1,8 +1,10 @@
 // Sending email from the Sales inbox (sales@) or your own My inbox - used by the Inbox page and by the job page.
 //   emailAction(action, body)  posts to email-actions (labels, sections, drafts, clean up) and returns its answer
-//   emailLocalFilePicker(el)   an "Attach files" button + chips; returns { files(), clear() }
+//   emailLocalFilePicker(el, opts)  "Attach files" (and "Add from job") + chips + running total
+//   emailAttachLimitError(n, bytes) the 10 file / 20 MB limit as a message, or ''
+//   emailJobFilesReady()       downloads js/email-job-files.js once, when a page first needs it
 //   emailSendNow(payload)      uploads nothing itself: posts to send-gmail and returns { threadId }
-//   openEmailComposer(opts)    the compose / reply window, with job documents to attach
+//   openEmailComposer(opts)    the compose / reply window; with opts.projectId, Add from job (email-job-files.js)
 //   openTagEmailModal(opts)    tag a conversation to a job (or pick a conversation for a job)
 //   EMAIL_KINDS                why an email is tagged to a job
 // Needs supabase-client.js (supabaseClient, escapeHtml, projectRef, searchProjects).
@@ -10,6 +12,7 @@
 const EMAIL_MAX_FILE = 15 * 1024 * 1024;
 const EMAIL_MAX_TOTAL = 20 * 1024 * 1024;
 const EMAIL_MAX_FILES = 10;
+const EMAIL_MAX_TOTAL_LABEL = '20 MB';
 const EMAIL_KINDS = { materials_quote: 'Materials quote', client: 'Client', supplier: 'Supplier', other: 'Other' };
 
 const emailSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
@@ -23,18 +26,21 @@ async function fetchStoredAttachment(att) {
   return { name: att.name, mime: att.mime || data.type || 'application/octet-stream', data: btoa(bin) };
 }
 
-// One attachment (or inline picture) of a received email, fetched from Gmail when asked for.
-async function fetchEmailAttachment(emailId, partId) {
+// Posts to a Netlify function as the signed-in person; returns its answer or throws its error.
+// failText: what went wrong, in words, when the answer is not { ok: true }.
+async function emailPostFn(name, body, failText) {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  const res = await fetch('/.netlify/functions/get-email-attachment', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ email_id: emailId, part_id: partId }),
+  const res = await fetch('/.netlify/functions/' + name, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body),
   });
   const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch (e) { throw new Error('Could not get that file (status ' + res.status + '). Try again.'); }
-  if (!data.ok) throw new Error(data.error || 'Could not get that file.');
+  let data; try { data = JSON.parse(text); } catch (e) { throw new Error(`${failText} (status ${res.status}). Try again.`); }
+  if (!data.ok) throw new Error(data.error || failText + '.');
   return data;
 }
+
+// One attachment (or inline picture) of a received email, fetched from Gmail when asked for.
+const fetchEmailAttachment = (emailId, partId) => emailPostFn('get-email-attachment', { email_id: emailId, part_id: partId }, 'Could not get that file');
 
 // "Bob Jones <bob@x.com>" -> "bob@x.com"
 function emailAddressOnly(raw) {
@@ -42,15 +48,33 @@ function emailAddressOnly(raw) {
   return (m ? m[1] : String(raw || '')).trim();
 }
 
-function emailLocalFilePicker(el) {
-  let files = [];
-  el.innerHTML = `<input type="file" multiple style="display:none;" /><button type="button" class="secondary" style="font-size:12px; padding:6px 12px;">&#128206; Attach files</button><div class="eml-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div><div class="eml-pick-msg" style="font-size:12px; margin-top:4px;"></div>`;
-  const input = el.querySelector('input'), chips = el.querySelector('.eml-chips'), msg = el.querySelector('.eml-pick-msg');
-  const render = () => {
-    chips.innerHTML = files.map((f, i) => `<span class="mt-chip" style="font-size:12px; padding:3px 10px; border:1px solid var(--border); border-radius:20px;">${escapeHtml(f.name)} (${emailSize(f.size)}) <a href="#" data-rm="${i}" style="margin-left:4px;" title="Remove">&times;</a></span>`).join('');
-    chips.querySelectorAll('[data-rm]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); files.splice(Number(a.dataset.rm), 1); render(); }));
+// The "Attach files" button and its chips. opts.jobs: [{ id, label? }] adds "Add from job" (the job's
+// documents and site photos, js/email-job-files.js); opts.extra(): { count, bytes } of files ticked
+// elsewhere in the same window, counted in the total and the limits.
+// Returns { files(), refs(), setJobs(jobs), refresh(), limitError() }.
+function emailLocalFilePicker(el, opts = {}) {
+  let files = [], refs = [], jobs = opts.jobs || [];
+  el.innerHTML = `<input type="file" multiple style="display:none;" /><div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="secondary eml-local" style="font-size:12px; padding:6px 12px;">&#128206; Attach files</button><button type="button" class="secondary eml-job" style="font-size:12px; padding:6px 12px; display:none;">&#128193; Add from job</button></div><div class="eml-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div><div class="eml-total subtitle" style="font-size:12px; margin:4px 0 0;"></div><div class="eml-pick-msg" style="font-size:12px; margin-top:4px;"></div>`;
+  const input = el.querySelector('input'), chips = el.querySelector('.eml-chips'), msg = el.querySelector('.eml-pick-msg'), total = el.querySelector('.eml-total'), jobBtn = el.querySelector('.eml-job');
+  const chip = (label, size, attr) => `<span class="mt-chip" style="font-size:12px; padding:3px 10px; border:1px solid var(--border); border-radius:20px;">${escapeHtml(label)}${size ? ` (${emailSize(size)})` : ''} <a href="#" ${attr} style="margin-left:4px;" title="Remove">&times;</a></span>`;
+  const totals = () => {
+    const extra = opts.extra ? opts.extra() : { count: 0, bytes: 0 };
+    return { n: files.length + refs.length + extra.count, bytes: files.reduce((t, f) => t + f.size, 0) + refs.reduce((t, r) => t + (r.size || 0), 0) + extra.bytes };
   };
-  el.querySelector('button').addEventListener('click', () => input.click());
+  const render = () => {
+    chips.innerHTML = files.map((f, i) => chip(f.name, f.size, `data-rm="${i}"`)).join('') + refs.map((r, i) => chip(r.name, r.size, `data-rmref="${i}"`)).join('');
+    chips.querySelectorAll('[data-rm]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); files.splice(Number(a.dataset.rm), 1); render(); }));
+    chips.querySelectorAll('[data-rmref]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); refs.splice(Number(a.dataset.rmref), 1); render(); }));
+    const { n, bytes } = totals();
+    const over = !!emailAttachLimitError(n, bytes);
+    total.innerHTML = n ? `<span style="${over ? 'color:var(--red); font-weight:700;' : ''}">${n} file${n === 1 ? '' : 's'}${bytes ? ', ' + emailSize(bytes) : ''} of ${EMAIL_MAX_FILES} files and ${EMAIL_MAX_TOTAL_LABEL}</span>` : '';
+    jobBtn.style.display = jobs.length ? '' : 'none';
+  };
+  el.querySelector('.eml-local').addEventListener('click', () => input.click());
+  jobBtn.addEventListener('click', async () => {
+    try { await emailJobFilesReady(); } catch (err) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message)}</span>`; return; }
+    openJobFilePicker({ jobs, chosen: refs, onDone: (list) => { refs = list; render(); } });
+  });
   input.addEventListener('change', () => {
     msg.textContent = '';
     for (const f of input.files) {
@@ -60,7 +84,22 @@ function emailLocalFilePicker(el) {
     input.value = '';
     render();
   });
-  return { files: () => files, clear: () => { files = []; render(); } };
+  render();
+  return { files: () => files, refs: () => refs, setJobs: (j) => { jobs = j || []; render(); }, refresh: render, limitError: () => { const t = totals(); return emailAttachLimitError(t.n, t.bytes); } };
+}
+
+// js/email-job-files.js (Save to job, Add from job), downloaded the first time a page needs it so the
+// job page, Inbox and PO pages stay within their weight budgets. Resolves once it is ready.
+function emailJobFilesReady() {
+  return (emailJobFilesReady.p ||= loadJsOnce('/js/email-job-files.js?v=1', () => typeof openJobFilePicker === 'function')
+    .catch((err) => { emailJobFilesReady.p = null; throw err; }));
+}
+
+// The send limits, checked in the browser before anything is uploaded (send-gmail checks them again).
+function emailAttachLimitError(count, bytes) {
+  if (count > EMAIL_MAX_FILES) return `Attach up to ${EMAIL_MAX_FILES} files.`;
+  if (bytes > EMAIL_MAX_TOTAL) return `The attachments add up to more than ${EMAIL_MAX_TOTAL_LABEL}. Send them in more than one email.`;
+  return '';
 }
 
 // Uploads local files to the private email-attachments bucket.
@@ -77,27 +116,8 @@ async function emailUploadFiles(files) {
   return out;
 }
 
-async function emailAction(action, body) {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  const res = await fetch('/.netlify/functions/email-actions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action, ...(body || {}) }),
-  });
-  const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch (e) { throw new Error(`That did not work (status ${res.status}). Try again.`); }
-  if (!data.ok) throw new Error(data.error || 'That did not work.');
-  return data;
-}
-
-async function emailSendNow(payload) {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  const res = await fetch('/.netlify/functions/send-gmail', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(payload),
-  });
-  const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch (e) { throw new Error(`The email did not go (status ${res.status}). Try again.`); }
-  if (!data.ok) throw new Error(data.error || 'The email did not go.');
-  return data;
-}
+const emailAction = (action, body) => emailPostFn('email-actions', { action, ...(body || {}) }, 'That did not work');
+const emailSendNow = (payload) => emailPostFn('send-gmail', payload, 'The email did not go');
 
 // opts: { title, to, cc, subject, body, replyToThreadId, projectId, tagKind, quoteLink: {url, label, buttonText, checked},
 //         reviewRequest: {projectId, clientName, clientEmail} (shows "Ask for a review"),
@@ -138,7 +158,12 @@ function openEmailComposer(opts) {
       <div id="ec-msg" style="margin-top:8px;"></div>
     </div>`;
   document.body.appendChild(overlay);
-  const picker = emailLocalFilePicker(overlay.querySelector('#ec-picker'));
+  const ticked = () => [...overlay.querySelectorAll('.ec-opt:checked')].map(c => options[Number(c.dataset.i)]);
+  const picker = emailLocalFilePicker(overlay.querySelector('#ec-picker'), {
+    jobs: opts.projectId ? [{ id: opts.projectId }] : [],
+    extra: () => ({ count: ticked().length, bytes: ticked().reduce((n, o) => n + (o.size || 0), 0) }),
+  });
+  overlay.querySelectorAll('.ec-opt').forEach(c => c.addEventListener('change', picker.refresh));
   overlay.querySelector('#ec-cancel').addEventListener('click', () => overlay.remove());
   let draftId = opts.draftId || null;
   const saveBtn = overlay.querySelector('#ec-save');
@@ -164,10 +189,9 @@ function openEmailComposer(opts) {
     const to = overlay.querySelector('#ec-to').value.trim(), subject = overlay.querySelector('#ec-subject').value.trim();
     let bodyText = overlay.querySelector('#ec-body').value.trim();
     if (!to || !subject || !bodyText) { msg.innerHTML = '<div class="error-box">Fill in who it is to, the subject and a message.</div>'; return; }
-    const chosen = [...overlay.querySelectorAll('.ec-opt:checked')].map(c => options[Number(c.dataset.i)]);
-    const totalGuess = chosen.reduce((n, o) => n + (o.size || 0), 0) + picker.files().reduce((n, f) => n + f.size, 0);
-    if (chosen.length + picker.files().length > EMAIL_MAX_FILES) { msg.innerHTML = `<div class="error-box">Attach up to ${EMAIL_MAX_FILES} files.</div>`; return; }
-    if (totalGuess > EMAIL_MAX_TOTAL) { msg.innerHTML = '<div class="error-box">The attachments add up to more than 20 MB. Send them in more than one email.</div>'; return; }
+    const chosen = [...ticked(), ...picker.refs()];
+    const limit = picker.limitError();
+    if (limit) { msg.innerHTML = `<div class="error-box">${escapeHtml(limit)}</div>`; return; }
     const ql = overlay.querySelector('#ec-quote-link');
     if (ql && ql.checked && opts.quoteLink) bodyText += `\n\n[[button: ${opts.quoteLink.buttonText || 'Click to view your quote online'} | ${opts.quoteLink.url}]]`;
     const wantsReview = !!(opts.reviewRequest && overlay.querySelector('#ec-review') && overlay.querySelector('#ec-review').checked);
@@ -185,7 +209,8 @@ function openEmailComposer(opts) {
       const data = await emailSendNow({
         to, cc: overlay.querySelector('#ec-cc').value.trim() || undefined, subject, bodyText,
         replyToThreadId: opts.replyToThreadId || undefined,
-        attachments: [...chosen.map(o => ({ bucket: o.bucket, path: o.path, name: o.name })), ...uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name }))],
+        // the same file ticked twice (the quote PDF box and again from the job) goes once
+        attachments: [...chosen, ...uploaded].filter((o, i, all) => all.findIndex(x => x.bucket === o.bucket && x.path === o.path) === i).map(o => ({ bucket: o.bucket, path: o.path, name: o.name })),
         tagProjectId: opts.projectId || undefined, tagKind: opts.tagKind || 'client',
         mailboxId: opts.mailbox && !opts.replyToThreadId ? opts.mailbox.id : undefined, draftId: draftId || undefined,
       });
