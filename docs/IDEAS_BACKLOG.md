@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 4 Nov 2026 (item 48 planned)
+Last updated 5 Nov 2026 (item 48 built)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -32,7 +32,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 40 | Delete and Already paid buttons on the Emailed bills page | LIVE 4 Nov 2026 (spec A11), migration 20261128030919 | N | None |
 | 44 | Scan a part into Stock (photo of part number or barcode), one price per supplier from price lists and bills, ask to match | LIVE 4 Nov 2026 (spec A12, A11b), migration 20261128050000 | N | None |
 | 46 | Charge rates per client and per job (Standard, Commercial 115%, Mates rates 85%...) applied to quotes, variations, invoice actuals and the Schedule of Rates | LIVE 4 Nov 2026 (spec D1a), migration 20261128070000 | N | None |
-| 48 | Commercial agreements: a builder's % off the Schedule of Rates, sent as an FYI letter, shown on invoices as full rates then the agreement line, withdrawn in one click (SOPA, legal action, our choice) | Planned 4 Nov 2026, waiting on owner's yes | N | Builds on 46 |
+| 48 | Commercial agreements: a builder's % off the Schedule of Rates, sent as a letter, shown on invoices as full rates then the agreement line, withdrawn in one click | Built 5 Nov 2026 (spec D1a), migration 20261128090000, straight to `main` on the owner's say | N | None |
 | 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | LIVE 4 Nov 2026 (spec A13e), migration 20261128080000 | N | None |
 
 ## High lead time, start now
@@ -1040,7 +1040,9 @@ Done means:
 
 Touches: `public/project.html` (one button, loads the new script), `public/js/job-merge.js` (new: the picker, counts and confirm), `public/js/supabase-client.js` (job lookup follows the pointer), `public/js/global-search.js`, `public/projects.html` (merged rows hidden or badged), one migration (`projects.merged_into_project_id`, `project_merges`, `project_merge` function, the pointer on the lookups). Overlaps: none today; build after item 46 if both are yes (both touch `project.html`, one chat, one after the other). Kind: feature (into `staging`); migration yes; money yes (invoices, claims and POs change job), stock no (counts untouched), RLS yes (`project_merges` admin read), payroll no: backup before the production migration. Size: medium to large (most of a day, the long part is the table list and the tests). Test on staging: admin@staging.test and staff@staging.test, the four clicks above; the two seed jobs on staging will do. Best model: Fable 5.1, effort xhigh, because it moves invoices, claims and time across jobs in one step with a migration.
 
-## 48. Commercial agreements: a builder's % off the Schedule of Rates (planned 4 Nov 2026, waiting on the owner's yes)
+## 48. Commercial agreements: a builder's % off the Schedule of Rates (owner's yes 4 Nov 2026, built 5 Nov 2026, see PROJECT_SPEC.md D1a)
+
+Built as planned, with two choices made while building: a level over 100% stays a surcharge folded into the rates (item 46), and do and charge variations on a quoted job keep the agreement inside their stage price like the quote (only Invoice actual costs and hand-added labour items get the separate line). The composer script is downloaded on first use so the Clients page stays near its budget (raised 690 to 700 KB for the new controls).
 
 Owner's ask (4 Nov 2026): give specific builders 10% or so off the Schedule of Rates on do and charge work, adjust it per client, send it to them as an FYI, and word it as a commercial agreement rather than a discount, so it disappears if there is a SOPA claim or legal action, or whenever we decide to stop it. The invoice shows the Schedule of Rates pricing first, then the agreement's percentage off as its own line, with a note.
 

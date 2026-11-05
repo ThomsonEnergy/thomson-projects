@@ -82,14 +82,14 @@ exports.handler = async (event) => {
     const staffIds = [...new Set((entries || []).map(e => e.staff_id))];
     const [{ data: profiles }, rateCard] = await Promise.all([
       staffIds.length ? supabaseAdmin.from('profiles').select('id, full_name, rate_tier_id').in('id', staffIds) : Promise.resolve({ data: [] }),
-      rateCardFor(supabaseAdmin, projectId),  // every $/hr below is at the job's charge rate level (item 46)
+      rateCardFor(supabaseAdmin, projectId),  // every $/hr below is at the job's surcharge level (item 46); an agreement is its own line (item 48)
     ]);
     const tierById = Object.fromEntries((tiers || []).map(t => [t.id, t]));
     const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
     const sellRateByProfile = {};
     (profiles || []).forEach(p => {
       const tier = tierById[p.rate_tier_id];
-      sellRateByProfile[p.id] = tier ? rateAt(tier.sell_rate, rateCard.factor) : 0;
+      sellRateByProfile[p.id] = tier ? rateAt(tier.sell_rate, rateCard.labourFactor) : 0;
     });
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
     const billedEntries = new Set((invItems || []).flatMap(i => i.time_entry_ids || []));
@@ -182,8 +182,9 @@ exports.handler = async (event) => {
         materialSell: sum('materialSell'),
         invoicedAmount: sum('invoicedAmount'),
         centres: centreRows,
-        rateTiers: (tiers || []).map(t => ({ id: t.id, name: t.name, sellRate: rateAt(t.sell_rate, rateCard.factor) })),
-        rateCard: { name: rateCard.name, percent: rateCard.percent },
+        rateTiers: (tiers || []).map(t => ({ id: t.id, name: t.name, sellRate: rateAt(t.sell_rate, rateCard.labourFactor) })),
+        // percentOff: the commercial agreement's reduction, which create-invoice.js adds as its own line
+        rateCard: { name: rateCard.name, percent: rateCard.percent, percentOff: rateCard.percentOff },
         rules: RULES,
       }),
     };

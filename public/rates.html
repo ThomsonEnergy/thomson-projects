@@ -14,7 +14,8 @@
 <style>
   /* The Schedule of Rates on its own: the same A4 page as in an estimate (quote.html), with no
      estimate parts. Public, so it can be linked; generate-client-document-pdf.js prints it
-     (?print=1) when it is added to a job from the Documents page. */
+     (?print=1) when it is added to a job from the Documents page, and with ?agreement=<client>
+     &token=<agreement token> it prints a client's commercial agreement letter (item 48) in front. */
   @page { size: A4; margin: 0; }
 
   body { background: #e6e9ef; }
@@ -97,7 +98,7 @@
        (circuit-background.js) when this function already exists. -->
   <script>window.addCircuitBackground = function () {};</script>
   <script src="/js/supabase-client.js?v=123"></script>
-  <script src="/js/schedule-of-rates.js?v=4"></script>
+  <script src="/js/schedule-of-rates.js?v=5"></script>
   <script>
     const printMode = new URLSearchParams(window.location.search).get('print') === '1';
     if (printMode) document.documentElement.classList.add('as-paper');
@@ -116,11 +117,17 @@
     async function load() {
       const esc = escapeHtml;
       const content = document.getElementById('content');
-      const [{ data, error }, { data: settings }] = await Promise.all([
-        supabaseClient.rpc('get_schedule_of_rates', { p_project_id: new URLSearchParams(location.search).get('project') || null, p_token: new URLSearchParams(location.search).get('token') || null }),  // a job's Company docs PDF prints at the job's level (item 46)
+      const params = new URLSearchParams(location.search);
+      const agreementClient = params.get('agreement');
+      const [{ data: loaded, error }, { data: settings }] = await Promise.all([
+        agreementClient
+          ? supabaseClient.rpc('get_commercial_agreement', { p_client_id: agreementClient, p_token: params.get('token') || null })  // the client's agreement letter (item 48)
+          : supabaseClient.rpc('get_schedule_of_rates', { p_project_id: params.get('project') || null, p_token: params.get('token') || null }),  // a job's Company docs PDF prints its agreement box (items 46 and 48)
         supabaseClient.rpc('get_public_company_settings'),
       ]);
-      if (error || !data) { content.innerHTML = `<div class="error-box" style="margin:24px;">The Schedule of Rates could not be loaded. Please try again or contact us.</div>`; return; }
+      if (error || !loaded) { content.innerHTML = `<div class="error-box" style="margin:24px;">The ${agreementClient ? 'agreement' : 'Schedule of Rates'} could not be loaded. Please try again or contact us.</div>`; return; }
+      // the letter's data carries the schedule too; the schedule alone has no letter
+      const data = agreementClient ? { ...loaded, agreement: { name: loaded.agreement_name, percent_off: loaded.percent_off }, rate_card_name: null } : loaded;
 
       const s = settings || {};
       s.logo_url = await smallLogoUrl(s.logo_url);
@@ -139,8 +146,32 @@
         : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
 
       const head = `<div class="pg-head"><div>${siteLink ? `<a href="${esc(siteLink)}">${logoImg}</a>` : logoImg}</div>${contactHtml}</div>`;
-      const [first, second] = scheduleOfRatesParts(data.rates, data.reviewed_on, data.rate_card_name);
+      const [first, second] = scheduleOfRatesParts(data.rates, data.reviewed_on, data.rate_card_name, data.agreement);
+      // The agreement letter (item 48): the wording from Settings with [Client], [Percent] and [Date]
+      // filled in, a paragraph per blank line, then the Schedule of Rates it refers to.
+      let letterHtml = '';
+      if (agreementClient) {
+        document.getElementById('brand-mark').textContent = 'COMMERCIAL AGREEMENT';
+        document.title = 'Commercial agreement - Thomson Energy';
+        const dated = loaded.sent_at ? new Date(loaded.sent_at) : new Date();
+        const dateLine = dated.toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney' });
+        const filled = String(loaded.terms || '').replace(/\[Client\]/g, loaded.client_name || 'you').replace(/\[Percent\]/g, String(loaded.percent_off)).replace(/\[Date\]/g, dateLine);
+        const paragraphs = filled.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+        letterHtml = `
+          <section class="pg">
+            ${SLABS.replace(/id="s([def])"/g, 'id="u$1"').replace(/url\(#s([def])\)/g, 'url(#u$1)')}
+            ${head}
+            <div class="pg-body sor">
+              <h1 class="pg-title">Commercial<br>agreement</h1>
+              <p><b>${esc(loaded.client_name || '')}</b>${loaded.client_address ? `<br>${esc(loaded.client_address)}` : ''}<br>${esc(dateLine)}</p>
+              <div class="sor-h" style="margin-top:18px;">Efficiency rate: ${esc(loaded.percent_off)}% off labour on do and charge work</div>
+              ${paragraphs.map(p => `<p>${esc(p)}</p>`).join('')}
+              <p class="note-line">Thomson Energy Australia. The Schedule of Rates this agreement refers to follows.</p>
+            </div>
+          </section>`;
+      }
       content.innerHTML = `
+        ${letterHtml}
         <section class="pg">
           ${SLABS}
           ${head}

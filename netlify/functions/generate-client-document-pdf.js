@@ -2,6 +2,7 @@ const { getAdminClient } = require('./_shared/require-admin');
 const { selfBaseUrl } = require('./_shared/site-url');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { requireInternal } = require('./_shared/require-internal');
+const { requirePricingRole } = require('./_shared/require-pricing-role');
 
 // Renders the actual client-facing quote.html / invoice.html page (via headless Chromium) into a
 // real PDF. Both pages are laid out as A4 sheets with their own letterhead, so the PDF is the page
@@ -278,7 +279,7 @@ async function handle(event) {
     // Adding the Schedule of Rates to a job (Documents page) files a document on the job, so it
     // needs a logged-in staff member even on an internal call. The other types only refresh a
     // document's own PDF.
-    if (doc_type === 'schedule_of_rates' && !actor) {
+    if ((doc_type === 'schedule_of_rates' || doc_type === 'commercial_agreement') && !actor) {
       actor = await requireActiveUser(event);
       if (!actor) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Please log in again' }) };
     }
@@ -390,6 +391,27 @@ async function handle(event) {
         project_id: project.id, folder: 'Company docs', file_path: path, file_name: `Schedule of Rates (${day}).pdf`, mime_type: 'application/pdf', uploaded_by: actor.user.id,
       });
       if (docErr) throw docErr;
+    } else if (doc_type === 'commercial_agreement') {
+      // record_id is the client (item 48): the agreement letter and the Schedule of Rates at Standard,
+      // printed from the public page rates.html?agreement=... (the client's agreement_token proves it),
+      // kept as the client's current agreement PDF for the email from the Clients page. Pricing roles.
+      const pricing = await requirePricingRole(event);
+      if (!pricing) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Only Admin, Finance or Sales can send an agreement.' }) };
+      const { data: client, error } = await supabaseAdmin.from('clients').select('id, agreement_token, rate_cards(percent)').eq('id', record_id).single();
+      if (error || !client) throw new Error(error?.message || 'Client not found');
+      if (!(Number(client.rate_cards?.percent) < 100)) throw new Error('This client has no commercial agreement. Pick one on the client and save first.');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/rates.html?print=1&agreement=${client.id}&token=${encodeURIComponent(client.agreement_token)}`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      path = `client-documents/agreements/${client.id}/${Date.now()}-Commercial_Agreement.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf' });
+      if (upErr) throw upErr;
+      const { error: cliErr } = await supabaseAdmin.from('clients').update({ agreement_document_path: path }).eq('id', client.id);
+      if (cliErr) throw cliErr;
     } else {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }

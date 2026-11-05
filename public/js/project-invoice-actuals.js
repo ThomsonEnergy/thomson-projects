@@ -8,7 +8,9 @@
 //            "Flat" is one row per person at the base rate. Every row can be edited,
 //            "+ Add labour" adds a row by rate tier (travel, someone who did not clock on),
 //            and a "Less" line under the rows takes an amount or a percent off, lawyer
-//            style. Each row becomes a labour line on the invoice (invoice_line_items, kind
+//            style. A job under a commercial agreement (item 48) shows one more line, the
+//            agreement's percent off the labour rows (after Less), which create-invoice.js
+//            works out and adds itself; the $/hr above it stay the full Schedule of Rates. Each row becomes a labour line on the invoice (invoice_line_items, kind
 //            labour) naming the shifts it billed, so the next invoice offers only what is left.
 //   Materials  "Itemised" (the default): one row per PO line received to the job or Stock
 //            draw not yet billed (job_material_usage), at cost plus the cost centre's markup,
@@ -146,7 +148,11 @@ async function openInvoiceActualCostsPanel(project) {
     const off = c.less.unit === '%' ? r2(rowsTotal(c) * v / 100) : r2(v);
     return -Math.min(off, rowsTotal(c));
   };
-  const labourTotal = (c) => r2(rowsTotal(c) + lessAmount(c));
+  // The commercial agreement's own line (item 48): its percent off the labour after the Less line, the
+  // same figure create-invoice.js adds (the panel never sends it).
+  const percentOff = Number(actuals.rateCard?.percentOff) || 0;
+  const agreementAmount = (c) => (percentOff > 0 ? -r2((rowsTotal(c) + lessAmount(c)) * percentOff / 100) : 0);
+  const labourTotal = (c) => r2(rowsTotal(c) + lessAmount(c) + agreementAmount(c));
   const billedMaterials = (c) => c.materialRows.filter(m => m.billable);
   const materialTotal = (c) => (materialMode === 'bulk'
     ? r2(Number(c.material) || 0)
@@ -186,7 +192,9 @@ async function openInvoiceActualCostsPanel(project) {
   const centresEl = overlay.querySelector('#ia-centres');
   const modeWrap = overlay.querySelector('#ia-mode-wrap');
   const rateNote = overlay.querySelector('#ia-rate-note');
-  const levelNote = actuals.rateCard && Number(actuals.rateCard.percent) !== 100 ? ` Charge rates: ${actuals.rateCard.name} (${actuals.rateCard.percent}% of the Billable Rates).` : '';
+  const levelNote = percentOff > 0
+    ? ` Commercial agreement: ${actuals.rateCard.name}, ${percentOff}% off labour, added as its own line under the full rates.`
+    : (actuals.rateCard && Number(actuals.rateCard.percent) > 100 ? ` Charge rates: ${actuals.rateCard.name} (${actuals.rateCard.percent}% of the Schedule of Rates).` : '');
   const setRateNote = () => {
     rateNote.textContent = levelNote + (rateMode === 'schedule'
       ? `${rules.standardHours || 'Standard hours'}; outside them ${rules.bands.after_hours?.multiplier || 1.5}x, Saturday ${rules.bands.saturday?.multiplier || 1.5}x, Sunday ${rules.bands.sunday?.multiplier || 2}x, public holiday ${rules.bands.public_holiday?.multiplier || 2.5}x; minimum ${rules.minimumHours} hours per person per day. Switching rebuilds the clocked rows.`
@@ -213,6 +221,7 @@ async function openInvoiceActualCostsPanel(project) {
       box.querySelector('.ia-centre-total').textContent = money(centreTotal(c));
       const set = (sel, text) => { const el = box.querySelector(sel); if (el) el.textContent = text; };
       set('.ia-less-amount', lessAmount(c) ? money(lessAmount(c)) : '');
+      set('.ia-agreement-amount', agreementAmount(c) ? money(agreementAmount(c)) : '');
       set('.ia-labour-total', money(labourTotal(c)));
       set('.ia-material-total', money(materialTotal(c)));
     });
@@ -285,6 +294,7 @@ async function openInvoiceActualCostsPanel(project) {
                   <td class="num ia-less-amount" style="white-space:nowrap;"></td>
                   <td></td>
                 </tr>
+                ${percentOff > 0 ? `<tr><td colspan="${labourCols - 2}">Commercial agreement (${escapeHtml(actuals.rateCard.name)}): ${percentOff}% off labour</td><td class="num ia-agreement-amount" style="white-space:nowrap;"></td><td></td></tr>` : ''}
                 <tr><td colspan="${labourCols - 2}" style="text-align:right; font-weight:600;">Labour total</td><td class="num ia-labour-total" style="font-weight:600; white-space:nowrap;"></td><td></td></tr>
               </tbody>
             </table>
