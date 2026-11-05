@@ -48,7 +48,6 @@
       // pricing roles only (the function refuses Staff): then the tiles say so instead of showing $0
       const { data: summaryRows, error: sumErr } = await supabaseClient.rpc('get_supplier_financial_summary', { p_supplier_id: supplierId });
       const summary = sumErr ? null : (summaryRows?.[0] || { invoiced_not_paid: 0, approved_for_payment: 0, not_approved: 0, overdue: 0 });
-      const sm = (v) => (summary ? money(v) : 'n/a');
 
       const { data: bills } = await supabaseClient
         .from('supplier_bills')
@@ -77,6 +76,7 @@
 
     function render(supplier, summary, bills, flaggedItems, pos, myRole) {
       const canPay = isFinanceRole(myRole);
+      const sm = (v) => (summary ? money(v) : 'n/a'); // the tiles say n/a when the function refused (Staff)
       const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
       const terms = supplier.credit_terms_type === 'cod' ? 'COD' : `${supplier.credit_terms_days} ${CREDIT_TERMS_LABELS[supplier.credit_terms_type]}`;
       if (typeof setPageTitle === 'function') setPageTitle(supplier.name || 'Supplier');
