@@ -1098,3 +1098,28 @@ Found on PO2000 (J7002, Tradezone). Order M03125 was invoiced twice: M61732 ($3,
 
 Touches: `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/_shared/bill-check.js`, `public/js/supabase-client.js` (`billLineState`), production data for PO2000 and bill M61732. Overlaps item 49 (same files, waiting on yes). Kind: bug fix into `main`; migration no; money yes (PO line cost, a duplicate bill).
 
+## 51. PO from a scanned invoice, paid on the spot, lines movable after close (owner's yes 5 Nov 2026)
+
+Building in: `feat/po-from-scan`.
+
+Owner (5 Nov 2026): paying upfront is normal (card at the counter, a hardware store with no account), so paid must not wait for approval; the PO maker should be able to scan the invoice to fill the PO, say it is paid, and still move lines to stock or another job after the PO is closed or paid.
+
+- **Scan the invoice on every Create PO panel** (job page, Purchase Orders, Stock, vehicle page; any role). Tally reads it (`js/po-scan.js`, loaded on demand, `extract-supplier-invoice`): supplier matched the A11 way or created as "New, check details", lines with quantity supplied, cost and part number, **Lines known now** set. Save makes the PO and saves the bill against it in one step (`supplier_bill_save_review`, `po_mode` new, with the panel's job, stage, vehicle, tools kind, notes and paid fields), lines linked, no red.
+- **Paid read off the scan.** The reader returns `paid_status` (paid / unpaid / unknown) and `payment_method` (a PAID stamp, "amount due $0.00", "paid by card", a receipt). Paid: the PO is saved as paid with that method, the bill approved and marked paid with the invoice date and number. Otherwise the person ticks **Paid already** (card, cash, bank transfer) on the panel, or later under More on the PO page. Any role.
+- **A bill saved against a paid PO is paid** (reviewed, one tap, emailed, automatic): approved and marked paid with the PO's date, method and reference, "from PO 2015" in the log, never in Pay bills due. `purchase_orders.paid_method`, `paid_on`, `paid_reference`, `paid_by`; `supplier_bills.paid_method`.
+- **Paid any time** (supplier page, Bill checks): Admin and Finance can mark any unpaid bill paid, approved or not, with date, method and reference (`supplier_bills_approve_and_mark_paid`).
+- **Move after close.** `po_move_line` works on a closed or paid PO for received lines (to another job with stage, the Warehouse or a vehicle), landing straight away; the PO stays closed, the bill untouched; refused as before when the job already invoiced the line or the stock is gone.
+
+Done means:
+1. staff@staging.test, job page, Create PO, Scan the invoice with a test receipt marked paid: supplier, lines and Lines known now filled in; Save makes the PO with a "Paid by card" chip and a bill that reads Paid.
+2. Same with a receipt not marked paid: no chip; tick Paid already, cash, save; the bill reads Paid, cash.
+3. Email a bill for a PO ticked paid: it saves as Paid and is not in Pay bills due.
+4. finance@staging.test, supplier page, Paid on an unapproved bill: it reads Paid with the date.
+5. On a closed PO, Move a received line to another job: it is costed there, both logs say so, the PO stays closed.
+
+Touches: `public/js/supabase-client.js` (paid tick and chip, scan button hook, line menu), `public/js/po-scan.js` (new), `public/purchase-order.html`, `public/project.html`, `public/purchase-orders.html`, `public/stock.html`, `public/vehicle-stock.html`, `public/supplier-detail.html`, `public/supplier-checks.html`, `netlify/functions/extract-supplier-invoice.js`, `netlify/functions/_shared/supplier-invoice-ai.js`, `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/supplier-bill-inbox.js`, `netlify/functions/run-supplier-payments.js`, `netlify/functions/supplier-checks.js`, one migration, `docs/PROJECT_SPEC.md`. Overlaps item 49 (build 49 after this, same chat). Kind: feature into `staging`; migration yes; money yes.
+
+## 52. Supplier bills and payments pushed to Xero (idea 5 Nov 2026, after item 51)
+
+Owner asked whether bills reach Xero and whether to link payments in the app or in Xero. Today nothing about supplier bills reaches Xero (only client invoices, credit notes, timesheets and pay rates). Push from the app and let Xero confirm: when a bill is approved in TEops, push it as a Xero Bill (supplier contact by ABN, created when missing; date, number, lines coded to the purchases account, GST); when it is marked paid, push the payment against that Bill (bank account for transfers and Airwallex, the card or cash account for counter purchases). The bank feed line then shows a suggested match and Jade taps OK (the Xero API cannot press that final OK). Needs first: the purchases and card account codes in `docs/BUSINESS_FACTS.md` (only sales codes today), a run on the Xero demo company. Same ground as item 1 and the spec's Tier 4.
+
