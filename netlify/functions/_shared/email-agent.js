@@ -144,6 +144,12 @@ function ruleFor(rules, from) {
   return rules.find((r) => r.sender.toLowerCase() === addr) || rules.find((r) => r.sender.toLowerCase() === domain || r.sender.toLowerCase() === '@' + domain);
 }
 
+// How the prompts describe an inbox, and its label list (the sort, the label pass, email-matters.js).
+const inboxWho = (mailbox, ctx) => (mailbox.kind === 'shared'
+  ? 'the shared sales@thomsonenergy.com.au inbox (enquiries, quotes, clients, builders, suppliers)'
+  : `the work inbox of ${ctx.ownerName} (${mailbox.address})`);
+const labelList = (labels, withStatus) => labels.map((l) => `- ${l.name}${l.description ? `: ${l.description}` : ''}${withStatus && l.status === 'done' ? ' (finished matter)' : ''}`).join('\n') || '(none yet)';
+
 // Sorts, labels and job-tags a batch of conversations. Returns the ones that went to Priority.
 async function triageBatch(admin, apiKey, mailbox, threads, ctx, usage) {
   const msgs = await messagesFor(admin, threads.map((t) => t.id));
@@ -167,15 +173,13 @@ async function triageBatch(admin, apiKey, mailbox, threads, ctx, usage) {
     if (!results[t.id] || results[t.id].keepAi || maybeInvoice) forAi.push({ t, list, lastIn, ourLast: last.direction === 'outbound' });
   }
 
-  const who = mailbox.kind === 'shared'
-    ? 'the shared sales@thomsonenergy.com.au inbox (enquiries, quotes, clients, builders, suppliers)'
-    : `the work inbox of ${ctx.ownerName} (${mailbox.address})`;
+  const who = inboxWho(mailbox, ctx);
   // the same thread text goes to the sort and to the label pass, so both see the same words
   for (const f of forAi) f.text = threadText(f.t, f.list);
 
   if (forAi.length) {
     const jobLines = ctx.jobs.map((j) => [jobRef(j), j.name, j.client_name, j.client_address].filter(Boolean).join(' | ')).join('\n');
-    const labelNames = ctx.labels.map((l) => `- ${l.name}${l.description ? `: ${l.description}` : ''}`).join('\n') || '(none yet)';
+    const labelNames = labelList(ctx.labels);
     const items = forAi.map(({ t, list, ourLast, text }) => {
       const files = list.slice(-4).flatMap((m) => (m.attachments || []).filter((a) => !a.inline).map((a) => a.name));
       return `<thread id="${t.id}">\nLast message is from ${ourLast ? 'us' : 'them'}.\n${text}${files.length ? `\nAttached: ${files.join(', ')}` : ''}\n</thread>`;
@@ -228,10 +232,15 @@ ${jobLines}`,
   // with no job (item 56), when there is a label to pick or the mailbox may make one.
   const labelChecked = new Set();
   if (forAi.length && (ctx.labels.length || mailbox.auto_labels)) {
-    const { data: links } = await admin.from('email_job_links').select('thread_id').in('thread_id', forAi.map((f) => f.t.id));
-    const withJob = new Set((links || []).map((l) => l.thread_id));
+    // conversations only where Postie may make labels (a mailbox with it off keeps the old rule),
+    // and not ones tagged to a job or already under a label
+    const ids = forAi.map((f) => f.t.id);
+    const [{ data: links }, { data: labelled }] = mailbox.auto_labels
+      ? await Promise.all([admin.from('email_job_links').select('thread_id').in('thread_id', ids), admin.from('email_thread_labels').select('thread_id').in('thread_id', ids)])
+      : [{ data: [] }, { data: [] }];
+    const skip = new Set([...(links || []), ...(labelled || [])].map((l) => l.thread_id));
     const candidates = forAi.map(({ t, list, text }) => {
-      const conversation = isConversation(list) && !withJob.has(t.id) && results[t.id]?.job_confidence !== 'sure' && results[t.id]?.section !== 'updates';
+      const conversation = !!mailbox.auto_labels && isConversation(list) && !skip.has(t.id) && results[t.id]?.job_confidence !== 'sure' && results[t.id]?.section !== 'updates';
       return (conversation || results[t.id]?.maybe_label || mentionsLabel(ctx.labels, text)) ? { id: t.id, text, conversation } : null;
     }).filter(Boolean);
     candidates.forEach((c) => labelChecked.add(c.id));
@@ -365,12 +374,12 @@ const LABEL_SCHEMA = {
 // with label "" when none fits. verified is the code's own check that the evidence is in
 // the text; the caller applies a label only when sure and verified.
 async function chooseLabels(apiKey, { who, labels, items }, usage = { input_tokens: 0, output_tokens: 0 }) {
-  const labelLines = labels.map((l) => `- ${l.name}${l.description ? `: ${l.description}` : ''}${l.status === 'done' ? ' (finished matter)' : ''}`).join('\n') || '(none yet)';
+  const labelLines = labelList(labels, true);
   const system = LABEL_PROMPT.replace('{{who}}', () => who).replace('{{labels}}', () => labelLines);
   const content = items.map((i) => `<thread id="${i.id}"${i.conversation ? ' conversation="yes"' : ''}>\n${i.text}\n</thread>`).join('\n\n');
   const data = await claude(apiKey, {
     model: LABEL_MODEL,
-    max_tokens: 2500,
+    max_tokens: Math.max(2500, items.length * 250), // a new label with its evidence and about line is about 150
     output_config: { effort: 'low', format: { type: 'json_schema', schema: LABEL_SCHEMA } },
     system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: system }],
     messages: [{ role: 'user', content }],
@@ -457,6 +466,26 @@ const SWEEP_SCHEMA = {
   additionalProperties: false,
 };
 
+// A label Postie made sweeps only mail from the people already under it (their domain, or the
+// address itself for a webmail account or a colleague): that is the trail, and it keeps a sweep to a few calls
+// when the older-conversations pass makes many labels at once (item 56). A label with nothing
+// under it yet, and every label a person made, sweeps the whole 60 days as before.
+// our own domain and webmail are matched by the whole address, never the domain
+const WEBMAIL = new Set(['thomsonenergy.com.au', 'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'live.com.au', 'icloud.com', 'me.com', 'yahoo.com', 'yahoo.com.au', 'bigpond.com', 'bigpond.net.au', 'optusnet.com.au']);
+function senderKey(from) {
+  const a = addrOf(from || '').toLowerCase();
+  const d = a.split('@')[1] || '';
+  return !d ? null : (WEBMAIL.has(d) ? a : d);
+}
+async function sameSenders(admin, label, rows) {
+  const { data: under } = await admin.from('email_thread_labels').select('thread_id').eq('label_id', label.id);
+  const ids = (under || []).map((u) => u.thread_id);
+  if (!ids.length) return rows;
+  const { data: mail } = await admin.from('emails').select('from_address').in('thread_id', ids).eq('direction', 'inbound');
+  const keys = new Set((mail || []).map((m) => senderKey(m.from_address)).filter(Boolean));
+  return keys.size ? rows.filter((r) => keys.has(senderKey(r.from_address))) : rows;
+}
+
 // Label sweeps: for every label asking for one (new, or its description changed), reads the
 // inbox's last 60 days that do not carry it yet, 25 conversations at a time, and files the
 // ones that clearly belong. Carries on next run if time runs out (what is done is excluded
@@ -469,7 +498,7 @@ async function sweepLabels(admin, apiKey, mailbox, ctx, usage, deadline) {
     const requestedAt = label.sweep_requested_at;
     const { data: rows, error } = await admin.rpc('email_label_sweep_candidates', { p_label_id: label.id, p_days: SWEEP_DAYS, p_limit: 1500 });
     if (error) throw error;
-    const list = rows || [];
+    const list = label.by_ai ? await sameSenders(admin, label, rows || []) : (rows || []);
     let added = 0, stopped = false;
     for (let i = 0; i < list.length; i += SWEEP_BATCH) {
       if (Date.now() > deadline) { stopped = true; break; }
@@ -614,13 +643,14 @@ async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads 
       }
     }
   }
+  // label sweeps after the sorting, with whatever time is left (a person's new label is not
+  // held up by the older-conversations pass below; a label that pass makes is swept next run)
+  let sweep = { swept: 0, found: 0, pending: false };
+  try { sweep = await sweepLabels(admin, apiKey, mailbox, ctx, usage, startedAt + budgetMs); } catch (err) { console.error(`label sweep for ${mailbox.address} failed:`, err.message); }
   // older conversations with no job get their labels (item 56); here, not at the top:
   // email-matters.js uses this file's label pass
   let matters = { grouped: 0, filed: 0, read: 0, more: false };
   try { matters = await require('./email-matters').fileMatters(admin, apiKey, mailbox, ctx, usage, startedAt + budgetMs); } catch (err) { console.error(`older conversations for ${mailbox.address} failed:`, err.message); }
-  // label sweeps after the sorting, with whatever time is left (a label just made is swept too)
-  let sweep = { swept: 0, found: 0, pending: false };
-  try { sweep = await sweepLabels(admin, apiKey, mailbox, ctx, usage, startedAt + budgetMs); } catch (err) { console.error(`label sweep for ${mailbox.address} failed:`, err.message); }
   return {
     sorted, drafted, priority: priorityCount, invoicesPassed: ctx.invoicesPassed || 0, routingReplies: ctx.routingReplies || 0,
     labelsMade: ctx.labelsMade || 0, labelsSwept: sweep.swept, labelsFound: sweep.found, pending: sweep.pending || matters.more,
@@ -630,5 +660,5 @@ async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads 
 
 module.exports = {
   runEmailAgent, chooseLabels, evidenceFound, mentionsLabel, isConversation, applyLabelPick, fileUnder, makeAgentLabel,
-  messagesFor, threadText, findLabel, claude, textOf, addUsage, TRIAGE_MODEL, DRAFT_MODEL, LABEL_MODEL,
+  messagesFor, threadText, findLabel, inboxWho, labelList, claude, textOf, addUsage, TRIAGE_MODEL, DRAFT_MODEL, LABEL_MODEL,
 };
