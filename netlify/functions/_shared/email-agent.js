@@ -243,10 +243,11 @@ ${jobLines}`,
       const conversation = !!mailbox.auto_labels && isConversation(list) && !skip.has(t.id) && results[t.id]?.job_confidence !== 'sure' && results[t.id]?.section !== 'updates';
       return (conversation || results[t.id]?.maybe_label || mentionsLabel(ctx.labels, text)) ? { id: t.id, text, conversation } : null;
     }).filter(Boolean);
-    candidates.forEach((c) => labelChecked.add(c.id));
+
     if (candidates.length) {
       const picks = await chooseLabels(apiKey, { who, labels: ctx.labels, items: candidates }, usage);
       for (const [id, pick] of Object.entries(picks)) {
+        labelChecked.add(id); // answered: marked '' below unless a suggestion is waiting
         if (!results[id]) results[id] = { section: 'other', section_by: 'ai', reason: '' };
         results[id].pick = pick;
       }
@@ -466,7 +467,7 @@ const SWEEP_SCHEMA = {
   additionalProperties: false,
 };
 
-// A label Postie made sweeps only mail from the people already under it (their domain, or the
+// A label Postie made sweeps only mail from the people already under it, never job threads (their domain, or the
 // address itself for a webmail account or a colleague): that is the trail, and it keeps a sweep to a few calls
 // when the older-conversations pass makes many labels at once (item 56). A label with nothing
 // under it yet, and every label a person made, sweeps the whole 60 days as before.
@@ -480,10 +481,21 @@ function senderKey(from) {
 async function sameSenders(admin, label, rows) {
   const { data: under } = await admin.from('email_thread_labels').select('thread_id').eq('label_id', label.id);
   const ids = (under || []).map((u) => u.thread_id);
-  if (!ids.length) return rows;
-  const { data: mail } = await admin.from('emails').select('from_address').in('thread_id', ids).eq('direction', 'inbound');
-  const keys = new Set((mail || []).map((m) => senderKey(m.from_address)).filter(Boolean));
-  return keys.size ? rows.filter((r) => keys.has(senderKey(r.from_address))) : rows;
+  let list = rows;
+  if (ids.length) {
+    const { data: mail, error } = await admin.from('emails').select('from_address').in('thread_id', ids).eq('direction', 'inbound');
+    if (error) throw error;
+    const keys = new Set((mail || []).map((m) => senderKey(m.from_address)).filter(Boolean));
+    if (keys.size) list = rows.filter((r) => keys.has(senderKey(r.from_address)));
+  }
+  // and never a thread tagged to a job (job emails are tagged, not labelled)
+  const jobIds = new Set();
+  for (let i = 0; i < list.length; i += 200) {
+    const { data: jobs, error } = await admin.from('email_job_links').select('thread_id').in('thread_id', list.slice(i, i + 200).map((r) => r.thread_id));
+    if (error) throw error;
+    (jobs || []).forEach((j) => jobIds.add(j.thread_id));
+  }
+  return list.filter((r) => !jobIds.has(r.thread_id));
 }
 
 // Label sweeps: for every label asking for one (new, or its description changed), reads the

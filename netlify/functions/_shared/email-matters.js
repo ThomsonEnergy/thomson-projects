@@ -52,17 +52,18 @@ const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').tr
 
 // threads among ids that are tagged to a job or already under a label
 async function taken(admin, ids) {
-  const [{ data: labelled }, { data: jobs }] = await Promise.all([
+  const [labelled, jobs] = await Promise.all([
     admin.from('email_thread_labels').select('thread_id').in('thread_id', ids),
     admin.from('email_job_links').select('thread_id').in('thread_id', ids),
   ]);
-  return new Set([...(labelled || []), ...(jobs || [])].map((r) => r.thread_id));
+  if (labelled.error || jobs.error) throw labelled.error || jobs.error; // never file a job thread by mistake
+  return new Set([...labelled.data, ...jobs.data].map((r) => r.thread_id));
 }
 
 async function groupOldSuggestions(admin, apiKey, mailbox, ctx, usage) {
   if (Date.now() > Date.parse(GROUP_UNTIL)) return 0;
   const { data: threads } = await admin.from('email_threads').select('id, gmail_thread_id, suggested_label')
-    .eq('mailbox_id', mailbox.id).not('suggested_label', 'is', null).neq('suggested_label', '').lt('triaged_at', GROUP_BEFORE).limit(500);
+    .eq('mailbox_id', mailbox.id).not('suggested_label', 'is', null).neq('suggested_label', '').lt('triaged_at', GROUP_BEFORE).limit(200);
   if (!threads || !threads.length) return 0;
   const skip = await taken(admin, threads.map((t) => t.id));
   const open = threads.filter((t) => !skip.has(t.id));
@@ -91,9 +92,12 @@ async function groupOldSuggestions(admin, apiKey, mailbox, ctx, usage) {
   // filed: done (''). The rest (in no group, a job thread, a label that could not be made) go
   // back to null for the older pass, so this one-off never reads them again.
   const ids = threads.map((t) => t.id);
-  if (filed.size) await admin.from('email_threads').update({ suggested_label: '' }).in('id', [...filed]);
   const rest = ids.filter((id) => !filed.has(id));
-  if (rest.length) await admin.from('email_threads').update({ suggested_label: null }).in('id', rest);
+  for (const [list, value] of [[[...filed], ''], [rest, null]]) {
+    if (!list.length) continue;
+    const { error } = await admin.from('email_threads').update({ suggested_label: value }).in('id', list);
+    if (error) throw error;
+  }
   return filed.size;
 }
 
@@ -112,15 +116,21 @@ async function fileOldConversations(admin, apiKey, mailbox, ctx, usage, deadline
       .filter((t) => t.section !== 'updates' && !skip.has(t.id) && isConversation(msgs[t.id]))
       .map((t) => ({ id: t.id, text: threadText(t, msgs[t.id]), conversation: true }));
     const picks = items.length ? await chooseLabels(apiKey, { who: inboxWho(mailbox, ctx), labels: ctx.labels, items }, usage) : {};
-    // an answer that came back empty (cut off, or an API hiccup): leave the batch for next run
-    if (items.length && !Object.keys(picks).length) { more = true; break; }
+    const asked = new Set(items.map((i) => i.id));
+    let done = 0;
     for (const t of threads) {
       const pick = picks[t.id];
+      if (asked.has(t.id) && !pick) continue; // left out of the answer: stays null, read again later
       const suggested = pick ? await applyLabelPick(admin, mailbox, ctx, t, pick) : null;
       if (pick && !suggested && (pick.label || pick.new_label) && pick.sure && pick.verified) filed += 1;
-      await admin.from('email_threads').update({ suggested_label: suggested || '' }).eq('id', t.id);
+      const { error } = await admin.from('email_threads').update({ suggested_label: suggested || '' }).eq('id', t.id);
+      if (error) throw error;
+      done += 1;
     }
-    read += threads.length;
+    read += done;
+    // carry on (and ask for another run) only while batches move; a batch the model keeps
+    // failing to answer is tried once per normal Postie run, never in a chain
+    if (!done) { more = false; break; }
     if (!more) break;
   }
   return { filed, read, more };
