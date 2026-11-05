@@ -20,7 +20,7 @@ const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { internalHeaders } = require('./require-internal');
 const { extractSupplierInvoiceWithUsage } = require('./supplier-invoice-ai');
-const { checkBillAndSiblings, normNum, isFreight } = require('./bill-check');
+const { checkBillAndSiblings, normNum, isFreight, isNoCharge } = require('./bill-check');
 
 const INVOICE_ADDRESS = 'invoice@thomsonenergy.com.au';
 const BILL_LABEL = 'Supplier Bills';
@@ -534,11 +534,13 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   const lines = [];
   for (const l of (ex.line_items || []).filter(l => l.description)) {
     const unitCost = Number(l.unit_cost) || 0;
-    const quantity = Number(l.quantity) || 1;
+    const quantity = l.quantity == null || l.quantity === '' ? 1 : (Number(l.quantity) || 0); // 0 supplied stays 0
+    const noCharge = isNoCharge({ quantity, unit_cost: unitCost }); // nothing charged: not an extra, never added to a PO
     const partNumber = String(l.part_number || '').trim() || null;
     let poLine = matchPoLine(poLines, { part_number: partNumber, description: l.description }, billedQty)?.line || null;
     let flag = null, resolution = null;
     if (po && isFreight(l.description)) { poLine = null; flag = 'Freight / delivery charge'; }
+    else if (noCharge) { /* a $0 or 0-supplied line: shows as No charge, nothing to accept or add */ }
     else if (po && !poLine && poOpen) {
       const { data: added, error: addErr } = await supabaseAdmin.from('purchase_order_line_items')
         .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId }).select('id, material_id').single();
@@ -547,7 +549,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     }
     else if (po && !poLine) flag = 'Not on the linked PO';
     else if (poLine && unitCost > Number(poLine.unit_cost) * 1.01) flag = `Charged ${money(unitCost)}, PO expected ${money(poLine.unit_cost)}`;
-    if (poLine) billedQty[poLine.id] = (billedQty[poLine.id] || 0) + quantity;
+    if (poLine && !noCharge) billedQty[poLine.id] = (billedQty[poLine.id] || 0) + quantity;
     let materialId = poLine?.material_id || null;
     if (!materialId && partNumber && !isFreight(l.description)) {
       // a Stock item scanned on site carries its part number or barcode: the bill finds it by that

@@ -32,7 +32,7 @@ async function extractSupplierInvoiceWithUsage({ fileBase64, mediaType }) {
 - line_items: an array of every line item, each with:
   - description: the item/material description as written
   - part_number: the supplier's product code, part number or catalogue number for the line, exactly as printed (often its own column, such as "Code", "Item", "Part No" or "Product"), null if the line has none
-  - quantity: numeric quantity (default to 1 if not shown)
+  - quantity: the quantity supplied on THIS invoice, as a number. When the line shows separate ordered, supplied (shipped, delivered) and back-ordered figures, use the supplied one: an item listed with 0 supplied (already delivered and invoiced earlier, or still on back order) is quantity 0, not the ordered quantity. Default to 1 only when no quantity is shown at all
   - unit_cost: the cost per unit, ex-GST if both are shown, as a plain number (no currency symbols)
 - subtotal: the subtotal before GST, as a plain number
 - gst: the GST amount, as a plain number
