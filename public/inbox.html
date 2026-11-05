@@ -594,7 +594,7 @@
         emailJobFilesReady().catch(() => null), // Save to job on the attachments (item 53)
       ]);
       if (!thread) { detailEl.innerHTML = '<p class="subtitle">That conversation is not available.</p>'; return; }
-      const draft = (drafts || [])[0] || null;
+      let draft = (drafts || [])[0] || null; // let: a Draft reply that lands while the person types is adopted (item 55)
       const lastMsg = (emails || []).slice(-1)[0];
       const lastOut = lastMsg?.direction === 'outbound';
       const sec = thread.section || 'other';
@@ -637,7 +637,7 @@
             <button type="button" id="reply-send-btn">Send reply</button>
             <button type="button" class="secondary" id="reply-save-btn">Save draft</button>
             ${draft ? '<button type="button" class="secondary" id="reply-discard-btn">Discard draft</button>' : ''}
-            ${!draft && (emails || []).some(e => e.direction === 'inbound') ? `<button type="button" class="secondary" id="reply-ai-btn">Draft reply</button>` : ''}
+            ${!draft && S.draftingThread !== threadId && (emails || []).some(e => e.direction === 'inbound') ? `<button type="button" class="secondary" id="reply-ai-btn">Draft reply</button>` : ''}
           </div>
           <div id="reply-msg"></div>
         </div>`;
@@ -698,33 +698,42 @@
       // for anything else it drafts on request, in the background, and the box fills when ready
       const aiBtn = document.getElementById('reply-ai-btn');
       if (aiBtn) aiBtn.addEventListener('click', async () => {
-        const msg = document.getElementById('reply-msg');
-        if (document.getElementById('reply-body').value.trim() && !confirm('Replace what you have typed with a draft from ' + S.assistant + '?')) return;
-        const box = document.getElementById('reply-body');
-        const typed = () => box.value + '|' + replyPicker.files().length + '|' + (replyPicker.refs ? replyPicker.refs().length : 0); // what the person has in the box now
+        const msg = () => document.getElementById('reply-msg');
+        // what is in the reply box now (looked up each time: the card may be drawn again meanwhile)
+        const typed = () => {
+          const box = document.getElementById('reply-body'), p = S.replyPicker;
+          return (box ? box.value : '') + '|' + (p ? p.files().length + (p.refs ? p.refs().length : 0) : 0);
+        };
         const atClick = typed();
+        if (atClick !== '|0' && !confirm('Replace what you have typed or attached with a draft from ' + S.assistant + '?')) return;
+        S.draftingThread = threadId;
         aiBtn.disabled = true;
         aiBtn.textContent = 'Drafting...';
-        msg.innerHTML = `<p class="subtitle" style="font-size:12px;">${escapeHtml(S.assistant)} is writing a draft. It takes about a minute and fills in here.</p>`;
+        msg().innerHTML = `<p class="subtitle" style="font-size:12px;">${escapeHtml(S.assistant)} is writing a draft. It takes about a minute and fills in here.</p>`;
         try {
           await act('draft_reply', { thread_id: threadId });
           for (let i = 0; i < 30; i++) {
             await new Promise(r => setTimeout(r, 3000));
             if (S.activeThreadId !== threadId) return; // moved on: the draft waits in Drafts
-            const { data } = await supabaseClient.from('email_drafts').select('id').eq('thread_id', threadId).eq('status', 'draft').limit(1);
+            const { data } = await supabaseClient.from('email_drafts').select('*').eq('thread_id', threadId).eq('status', 'draft').order('updated_at', { ascending: false }).limit(1);
             if (!data || !data.length) continue;
-            // typed or attached something meanwhile: never wipe it, offer the draft instead
+            S.draftingThread = null;
             if (typed() === atClick) { reload(true); return; }
-            msg.innerHTML = `<p class="subtitle" style="font-size:12px;">The draft is ready. <a href="#" id="reply-ai-use">Use it</a> (replaces what you have typed), or find it in Drafts.</p>`;
+            // typed or attached something meanwhile: never wipe it. Save and Send now update and
+            // close this draft, so it is never left open beside the reply.
+            draft = data[0];
+            msg().innerHTML = `<p class="subtitle" style="font-size:12px;">The draft is ready. <a href="#" id="reply-ai-use">Use it</a> (replaces what you have typed), or Save draft to keep yours in its place.</p>`;
             document.getElementById('reply-ai-use').addEventListener('click', (e) => { e.preventDefault(); reload(true); });
-            aiBtn.remove();
+            document.getElementById('reply-ai-btn')?.remove();
             return;
           }
           throw new Error(`${S.assistant} did not finish a draft. Try again, or write it yourself.`);
         } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-          aiBtn.disabled = false;
-          aiBtn.textContent = 'Draft reply';
+          S.draftingThread = null;
+          if (S.activeThreadId !== threadId || !msg()) return;
+          msg().innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          const b = document.getElementById('reply-ai-btn');
+          if (b) { b.disabled = false; b.textContent = 'Draft reply'; }
         }
       });
       const discard = document.getElementById('reply-discard-btn');
