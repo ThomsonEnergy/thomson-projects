@@ -13,6 +13,7 @@
 //   accept_job / dismiss_job       { thread_id }        the agent's suggested job
 //   assign           { thread_id, user_id | null }      who is handling it ("I've got this", assign, unassign)
 //   set_auto_labels  { mailbox_id, on }                 let the agent make labels itself (sales@: Admin, Finance, Sales)
+//   draft_reply      { thread_id }        Postie drafts this conversation in the background (draft-reply-background.js)
 //   save_draft       { draft_id?, mailbox_id, thread_id?, to, cc, subject, body }
 //   discard_draft    { draft_id }
 //   cleanup_scan     { mailbox_id }                    start (or start again) the clean up scan
@@ -25,6 +26,9 @@
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { startMailboxWork } = require('./_shared/gmail-sync');
+const { selfBaseUrl } = require('./_shared/site-url');
+const { getIntegrationKey } = require('./_shared/get-integration-key');
+const { internalHeaders } = require('./_shared/require-internal');
 const {
   mailboxById, canUseMailbox, canMirror, threadForUser, archiveInGmail, markReadInGmail, labelInGmail,
   renameGmailLabel, deleteGmailLabel, saveGmailDraft, deleteGmailDraft,
@@ -178,6 +182,21 @@ exports.handler = async (event) => {
         await applyLabel(t, label, true);
         await admin.from('email_threads').update({ suggested_label: null }).eq('id', t.thread.id);
         return json(200, { ok: true, label });
+      }
+      case 'draft_reply': {
+        // Draft reply in the Inbox (item 55): Postie drafts this one in the background
+        const t = await ownThread(body.thread_id);
+        const { count } = await admin.from('email_drafts').select('id', { count: 'exact', head: true }).eq('thread_id', t.thread.id).eq('status', 'draft');
+        if (count) throw new Refused('There is already a draft on this conversation.');
+        const { count: fromThem } = await admin.from('emails').select('id', { count: 'exact', head: true }).eq('thread_id', t.thread.id).eq('direction', 'inbound');
+        if (!fromThem) throw new Refused('Nothing to reply to: every email here is from us.');
+        await getIntegrationKey('anthropic').catch(() => { throw new Refused('Drafting needs the AI key in Settings > API Keys.'); });
+        const res = await fetch(`${selfBaseUrl()}/.netlify/functions/draft-reply-background`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...internalHeaders() },
+          body: JSON.stringify({ thread_id: t.thread.id, user_id: userId }), timeout: 8000,
+        });
+        if (!res.ok && res.status !== 202) throw new Error(`Could not start the draft (${res.status}).`);
+        return json(200, { ok: true });
       }
       case 'dismiss_label': {
         const t = await ownThread(body.thread_id);

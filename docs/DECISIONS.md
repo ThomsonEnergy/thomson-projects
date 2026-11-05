@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 6 Nov 2026
 
+- Built: item 55, Postie drafts by itself only when the email asks for an answer; Draft reply on the Inbox reply box drafts any conversation on request (background, fills the box in about a minute). PR into `staging` (`feat/draft-on-request`), no migration. Detail: `docs/IDEAS_BACKLOG.md` item 55, `docs/PROJECT_SPEC.md` A18.
 - Live: item 53 went straight to `main` on the owner's say (PR #298, no migration): Save to job on email attachments and Add from job on emails sent from a job. Real Gmail save and send were not tested on staging first (this session could not reach it). Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.
 
 ## 5 Nov 2026
