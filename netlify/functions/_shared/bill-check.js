@@ -2,7 +2,7 @@
 //
 // Issues a bill can have (supplier_bills.check_issues, each { kind, text, ... }):
 //   no_po              the bill is not linked to a PO
-//   not_on_po          a line that is not on the linked PO (until Accept adds it, or Deny)
+//   not_on_po          a line that is not on the linked PO (until Accept adds it, or Deny); a line charging nothing (0 supplied or $0) is never one
 //   freight            a freight / delivery / handling line (always shown, never on a PO)
 //   price_higher       a line charged more than the PO price (over 1%, until accepted)
 //   denied             a line a person denied: the bill waits until it is sorted with the supplier
@@ -26,6 +26,10 @@ const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Au
 const isCalendarDate = (s) => { const d = new Date(String(s || '') + 'T00:00:00Z'); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s; };
 // same rule as _is_freight() in the database
 const isFreight = (s) => /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(String(s || ''));
+// A line that charges nothing (0 supplied on this invoice, or $0): shown as No charge, never an extra
+// to accept, never added to a PO. The bill's own total check still catches a price the reader missed.
+// Same rule as isNoCharge() in supabase-client.js.
+const isNoCharge = (l) => !(Number(l.quantity) > 0) || !(Number(l.unit_cost) > 0);
 
 async function checkBill(admin, billId) {
   const { data: bill } = await admin.from('supplier_bills').select('*').eq('id', billId).maybeSingle();
@@ -62,7 +66,7 @@ async function checkBill(admin, billId) {
 
     (lines || []).forEach(l => {
       if (l.resolution === 'denied') { issues.push({ kind: 'denied', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) denied${l.resolution_note ? ': ' + l.resolution_note : ''}, waiting on the supplier` }); return; }
-      if (l.resolution === 'accepted' || l.resolution === 'added') return;
+      if (l.resolution === 'accepted' || l.resolution === 'added' || isNoCharge(l)) return;
       if (!l.po_line_item_id) {
         if (isFreight(l.description)) issues.push({ kind: 'freight', line_id: l.id, text: `Freight / delivery: "${l.description}" ${money((Number(l.unit_cost) || 0) * (Number(l.quantity) || 1))}` });
         else issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` });
@@ -133,4 +137,4 @@ async function checkBillAndSiblings(admin, billId) {
   return r;
 }
 
-module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isCalendarDate, isFreight };
+module.exports = { checkBill, checkBillAndSiblings, normNum, sydneyToday, isCalendarDate, isFreight, isNoCharge };

@@ -6463,10 +6463,14 @@ function billStatusChip(b) {
   return '<span class="badge draft">Approved at close</span>';
 }
 
+// A bill line that charges nothing (0 supplied on this invoice, or $0). Same rule as isNoCharge() in bill-check.js.
+function isNoCharge(l) { return !(Number(l.quantity) > 0) || !(Number(l.unit_cost) > 0); }
+
 function billLineState(l) {
   if (l.resolution === 'denied') return { red: true, label: 'Denied' + (l.resolution_note ? ': ' + l.resolution_note : '') };
   if (l.resolution === 'added') return { red: false, label: 'Added to PO' };
-  if (l.resolution === 'accepted') return { red: false, label: 'Accepted' };
+  if (l.resolution === 'accepted') return { red: false, label: 'Accepted' + (l.resolution_note ? ': ' + l.resolution_note : '') };
+  if (isNoCharge(l)) return { red: false, label: 'No charge' };
   if (l.flag_reason) return { red: true, label: l.flag_reason };
   if (l.po_line_item_id) return { red: false, label: 'On the PO' };
   return { red: true, label: 'Not on the PO' };
