@@ -203,11 +203,12 @@ exports.handler = async (event) => {
       return newInvoiced >= (Number(c.quoted_amount) || 0) - 0.01;
     });
 
-    const { data: projectRow } = await supabaseAdmin.from('projects').select('client_id, proposal_template').eq('id', projectId).single();
+    const { data: projectRow } = await supabaseAdmin.from('projects').select('client_id').eq('id', projectId).single();
 
     let claimLabel;
-    if (projectRow?.proposal_template === 'direct_job' && projectTotal <= 0) {
-      // No quote to claim against: name the invoice after the cost centres
+    if (projectTotal <= 0) {
+      // No quote to claim against (a no-quote job, or a job brought across from ServiceM8 at $0):
+      // name the invoice after the cost centres
       // it covers (e.g. "Disconnect" or "Disconnect + Reconnect"), which is
       // also what the Xero reference reads ("Job 7000 - Disconnect").
       claimLabel = claimRows
