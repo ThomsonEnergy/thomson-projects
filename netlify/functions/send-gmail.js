@@ -29,17 +29,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // site-photos is a public bucket that also holds other things (markups, proposal pictures): only
 // paths that are a job's site photo (a project_photos row) are sent. Every row's url was made by
-// getPublicUrl, so the same call gives the exact url to look for, all photos in one query (narrowed
-// to the jobs in the paths, <job id>/..., so it uses the project_id index).
+// getPublicUrl, so the same call gives the exact url to look for, all photos in one query. Not
+// narrowed by the job in the path: a merged job's photos keep their old folder (merge_jobs).
 async function checkJobPhotos(supabaseAdmin, paths) {
   if (!paths.length) return;
   const urlOf = {};
   for (const p of paths) {
     try { urlOf[p] = supabaseAdmin.storage.from('site-photos').getPublicUrl(p).data.publicUrl; } catch (e) { throw new Error('One of the attachments is not valid.'); }
   }
-  const jobIds = [...new Set(paths.map(p => p.split('/')[0]))];
-  if (!jobIds.every(id => UUID.test(id))) throw new Error('One of the attachments is not valid.');
-  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('project_id', jobIds).in('url', Object.values(urlOf));
+  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('url', Object.values(urlOf));
   if (error) throw new Error('Could not check the photos: ' + error.message);
   const found = new Set((data || []).map(r => r.url));
   const missing = paths.find(p => !found.has(urlOf[p]));

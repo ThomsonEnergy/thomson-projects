@@ -6275,7 +6275,7 @@
           </div></div>`;
       }).join('');
       el.querySelectorAll('.job-email-atts').forEach(box => mountJobEmailAttachments(box,
-        (byThread[box.dataset.t] || []).flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(att => ({ emailId: m.id, att }))),
+        (byThread[box.dataset.t] || []).flatMap(m => (m.attachments || []).map(att => ({ emailId: m.id, att }))),
         { project, ctx, onSaved: (kind) => (kind === 'photo' ? loadSitePhotos(project.id) : loadDocuments(project.id)) }));
       el.querySelectorAll('.job-email-reply').forEach(btn => btn.addEventListener('click', () => {
         const l = sorted.find(x => x.id === btn.dataset.link); const list = byThread[l.thread_id] || [];

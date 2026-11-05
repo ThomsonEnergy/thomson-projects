@@ -520,6 +520,7 @@
       const { data: links } = await supabaseClient.from('email_job_links')
         .select('id, kind, note, by_ai, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
       // the jobs feed Save to job on the attachments and Add from job in the reply box (item 53)
+      if (S.activeThreadId !== threadId) return; // another conversation was opened meanwhile
       S.threadJobs = (links || []).filter(l => l.projects).map(l => ({ id: l.projects.id, label: projectRef(l.projects) }));
       if (typeof emailSaveJobRefresh === 'function') emailSaveJobRefresh(document.getElementById('thread-messages'), S.threadJobs);
       if (S.replyPicker) S.replyPicker.setJobs(S.threadJobs);

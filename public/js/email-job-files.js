@@ -34,7 +34,7 @@ function emailSaveAllBtnHtml(items) {
 
 function emailSaveJobRefresh(root, jobs) {
   if (!root) return;
-  root.querySelectorAll('.email-save-job, .email-save-all').forEach(b => { b.style.display = (jobs || []).length ? '' : 'none'; });
+  root.querySelectorAll('.email-save-job, .email-save-all, .email-save-label').forEach(b => { b.style.display = (jobs || []).length ? '' : 'none'; });
 }
 
 function wireEmailSaveJob(root, items, opts) {

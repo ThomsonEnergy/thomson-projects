@@ -97,7 +97,8 @@ async function emailOpenAttachment(emailId, att, ctx) {
 // The job Emails tab: one row of chips per conversation, tap to open. With js/email-job-files.js
 // loaded, Save to job beside each received file and Save all when there are several.
 // items: [{ emailId, att }]; onSaved(kind) after a save ('photo' or 'document').
-function mountJobEmailAttachments(el, items, { project, ctx, onSaved }) {
+function mountJobEmailAttachments(el, all, { project, ctx, onSaved }) {
+  const items = all.filter(x => !(x.att.inline && x.att.cid) || emailIsBodyPhoto(x.att));
   if (!el || !items.length) return;
   const canSave = typeof wireEmailSaveJob === 'function';
   el.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;';
@@ -110,6 +111,10 @@ function mountJobEmailAttachments(el, items, { project, ctx, onSaved }) {
   }));
   if (canSave) wireEmailSaveJob(el, items, { jobs: () => [{ id: project.id, label: projectRef(project) }], onSaved });
 }
+
+// A picture sent inside the email body (iPhone and Outlook do this with photos), big enough not to
+// be a logo or signature: it can be saved to the job like an attachment.
+const emailIsBodyPhoto = (a) => /^image\//i.test(a.mime || '') && (a.size || 0) >= 20000;
 
 // ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }   (received mail, from Gmail)
 // ctx.fetchStored(attachment)          -> { name, mime, data(base64) }   (mail we sent, from storage)
@@ -169,8 +174,10 @@ async function mountEmailBody(el, email, ctx) {
   const photos = (ctx && (ctx.fetchAttachment || ctx.fetchStored) ? files.filter(isPhoto) : []).slice(0, 12);
   const chips = files.filter(a => !photos.includes(a));
   const canSave = !!(ctx && ctx.jobs && typeof wireEmailSaveJob === 'function');
-  const items = files.map(a => ({ emailId: email.id, att: a }));
-  const saveBtn = (a) => (canSave ? emailSaveJobBtnsHtml(items, files.indexOf(a)) : '');
+  const bodyPhotos = canSave ? attachments.filter(a => !files.includes(a) && emailIsBodyPhoto(a)) : [];
+  const savable = [...files, ...bodyPhotos];
+  const items = savable.map(a => ({ emailId: email.id, att: a }));
+  const saveBtn = (a) => (canSave ? emailSaveJobBtnsHtml(items, savable.indexOf(a)) : '');
   if (photos.length) {
     const grid = document.createElement('div');
     grid.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;';
@@ -209,7 +216,13 @@ async function mountEmailBody(el, email, ctx) {
       btn.disabled = false; btn.innerHTML = original;
     }));
   }
-  if (canSave && files.some(emailAttSavable)) {
+  if (bodyPhotos.length) {
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px;';
+    row.innerHTML = '<span class="subtitle email-save-label" style="margin:0;">Pictures in the email:</span>' + bodyPhotos.map(a => `<span style="display:inline-flex; gap:4px; align-items:center;">${escapeHtml(a.name)} ${saveBtn(a)}</span>`).join('');
+    el.appendChild(row);
+  }
+  if (canSave && savable.some(emailAttSavable)) {
     const all = emailSaveAllBtnHtml(items);
     if (all) { const row = document.createElement('div'); row.style.marginTop = '8px'; row.innerHTML = all; el.appendChild(row); }
     wireEmailSaveJob(el, items, { jobs: ctx.jobs });
