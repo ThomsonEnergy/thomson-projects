@@ -4426,12 +4426,11 @@
       // A quote still being built runs in steps (item 27): Pre-quote info, Site visit, Pricing,
       // Scope of works, Send. Its own tab, open by default.
       const isStepQuote = !project.job_number && !isFrozenQuote && pricingVisible && !editMode;
-      // No quote behind this job: made with "+ New job (no quote)", or a job that never came from a
-      // quote and has nothing quoted (a ServiceM8 job brought across as "Quoted" at $0, J7063 and
-      // J7069, 5 Nov 2026). Every quote/estimate/% figure is meaningless for it, so it is invoiced off
-      // whatever's actually accrued (openInvoiceActualCostsPanel), not a % of a quote that never existed.
-      const isQuoteFree = project.proposal_template === 'direct_job'
-        || (!!project.job_number && !project.source_quote_id && quoted <= 0);
+      // Do and charge: made with "+ New job (no quote)", or switched to it with the Job type box on the
+      // Summary (js/job-type.js, a job that did not come from a quote). Every quote/estimate/% figure
+      // is meaningless for it, so it is invoiced off whatever's actually accrued
+      // (openInvoiceActualCostsPanel), not a % of a quote that never existed.
+      const isQuoteFree = project.proposal_template === 'direct_job';
 
       setJobTitle(project);
       const content = document.getElementById('content');
@@ -4668,6 +4667,7 @@
 
               <div class="card">
                 <h2>Needs attention</h2>
+                <div id="job-type-area" style="margin:6px 0;"></div>
                 <div id="job-merge-area" style="margin:6px 0;"></div>
                 <div id="summary-rate-card" style="margin:6px 0;"></div>
                 <div id="summary-ccew-line"></div>
@@ -5106,7 +5106,7 @@
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
               </div>
 
-              ${project.proposal_template !== 'time_and_materials' && !isQuoteFree && !isStepQuote ? `
+              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
               <div class="card">
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
@@ -5419,6 +5419,7 @@
 
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
       loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
+      loadJsOnce('/js/job-type.js?v=1', () => typeof renderJobType === 'function').then(() => renderJobType(project, 'job-type-area')).catch(err => console.error('job type:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
