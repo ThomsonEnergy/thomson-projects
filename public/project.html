@@ -4426,12 +4426,12 @@
       // A quote still being built runs in steps (item 27): Pre-quote info, Site visit, Pricing,
       // Scope of works, Send. Its own tab, open by default.
       const isStepQuote = !project.job_number && !isFrozenQuote && pricingVisible && !editMode;
-      // Skipped the quote/estimate step entirely (dashboard.html's
-      // "+ New job (no quote)") - quoted_amount is 0 on its one cost
-      // centre, so every quote/estimate/% figure above is meaningless for
-      // this job. Invoiced off whatever's actually accrued instead (see
-      // openInvoiceActualCostsPanel), not a % of a quote that never existed.
-      const isQuoteFree = project.proposal_template === 'direct_job';
+      // No quote behind this job: made with "+ New job (no quote)", or a job that never came from a
+      // quote and has nothing quoted (a ServiceM8 job brought across as "Quoted" at $0, J7063 and
+      // J7069, 5 Nov 2026). Every quote/estimate/% figure is meaningless for it, so it is invoiced off
+      // whatever's actually accrued (openInvoiceActualCostsPanel), not a % of a quote that never existed.
+      const isQuoteFree = project.proposal_template === 'direct_job'
+        || (!!project.job_number && !project.source_quote_id && quoted <= 0);
 
       setJobTitle(project);
       const content = document.getElementById('content');
@@ -5106,7 +5106,7 @@
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
               </div>
 
-              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
+              ${project.proposal_template !== 'time_and_materials' && !isQuoteFree && !isStepQuote ? `
               <div class="card">
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>

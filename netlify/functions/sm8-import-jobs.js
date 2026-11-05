@@ -161,7 +161,8 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       // new_build: the general quoted electrical job, invoiced as a share
       // of its quoted value ("Invoice project"). direct_job: invoiced from
       // actual time and materials.
-      proposal_template: jobType === 'quoted' ? 'new_build' : 'direct_job',
+      // a "Quoted" job with no value has nothing to claim against: it is invoiced from actual costs
+      proposal_template: jobType === 'quoted' && quoted > 0 ? 'new_build' : 'direct_job',
       // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
       pipeline_stage: isQuote ? (sentAt ? 'quote_sent' : 'draft_quote') : 'ready_to_book',
       status: isQuote ? (sentAt ? 'sent' : 'draft') : 'in_progress',
