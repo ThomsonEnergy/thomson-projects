@@ -198,10 +198,15 @@ function openJobFilePicker({ jobs, chosen, onDone }) {
     if (on) picked.set(key, r); else picked.delete(key);
     count();
   };
+  let renderId = 0;
   const render = async () => {
+    const mine = ++renderId; // a job picked again before the last list came back: only the newest shows
     const body = q('#jf-body');
     body.innerHTML = '<p class="subtitle">Loading the job\'s documents and photos...</p>';
-    try { current = await emailJobFiles(q('#jf-job') ? q('#jf-job').value : jobs[0].id); } catch (err) { body.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
+    let got;
+    try { got = await emailJobFiles(q('#jf-job') ? q('#jf-job').value : jobs[0].id); } catch (err) { if (mine === renderId) body.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
+    if (mine !== renderId) return;
+    current = got;
     const folders = [...new Set(current.files.map(f => f.folder))];
     const days = [...new Set(current.pics.map(p => p.day))];
     body.innerHTML = `

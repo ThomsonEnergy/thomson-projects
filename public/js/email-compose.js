@@ -209,7 +209,8 @@ function openEmailComposer(opts) {
       const data = await emailSendNow({
         to, cc: overlay.querySelector('#ec-cc').value.trim() || undefined, subject, bodyText,
         replyToThreadId: opts.replyToThreadId || undefined,
-        attachments: [...chosen.map(o => ({ bucket: o.bucket, path: o.path, name: o.name })), ...uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name }))],
+        // the same file ticked twice (the quote PDF box and again from the job) goes once
+        attachments: [...chosen, ...uploaded].filter((o, i, all) => all.findIndex(x => x.bucket === o.bucket && x.path === o.path) === i).map(o => ({ bucket: o.bucket, path: o.path, name: o.name })),
         tagProjectId: opts.projectId || undefined, tagKind: opts.tagKind || 'client',
         mailboxId: opts.mailbox && !opts.replyToThreadId ? opts.mailbox.id : undefined, draftId: draftId || undefined,
       });

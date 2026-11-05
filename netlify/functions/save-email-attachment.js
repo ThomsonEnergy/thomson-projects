@@ -23,6 +23,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const safeName = (s) => String(s || 'file').replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 100);
 const extOf = (name) => { const m = String(name || '').match(/\.([a-z0-9]{1,6})$/i); return m ? m[1].toLowerCase() : ''; };
+// a picture pasted into an email often has no file name (gmail-sync calls it inline-<cid>)
+const EXT_BY_MIME = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' };
 
 // The picture at 1920 px at most: put up for a moment under a temporary name, read back through
 // the image tools, then removed. The original comes back if the image tools cannot do it.
@@ -70,7 +72,8 @@ exports.handler = async (event) => {
     let buf = await downloadAttachment(email.gmail_message_id, partId, seen.mailbox);
     if (buf.length > MAX_BYTES) return json(413, { ok: false, error: 'That file is over 25 MB.' });
 
-    const original = String(listed.name || 'file');
+    let original = String(listed.name || 'file');
+    if (!extOf(original) && EXT_BY_MIME[mime]) original = `${original}.${EXT_BY_MIME[mime]}`;
     const caption = String(label || '').trim().slice(0, 200);
     let bucket, path, table, row;
     if (to === 'photos') {
@@ -80,11 +83,11 @@ exports.handler = async (event) => {
     } else {
       // the label is the file name; keep the original extension so it still opens
       const ext = extOf(original);
-      let fileName = caption || original;
+      let fileName = (caption || original).slice(0, 140);
       if (ext && extOf(fileName) !== ext) fileName = `${fileName}.${ext}`;
       bucket = 'project-documents'; table = 'project_documents';
       path = `documents/${projectId}/${Date.now()}-${safeName(fileName)}`;
-      row = { project_id: projectId, folder: String(folder || '').trim().slice(0, 60) || 'Emails', file_path: path, file_name: fileName.slice(0, 150), mime_type: mime, uploaded_by: user.id };
+      row = { project_id: projectId, folder: String(folder || '').trim().slice(0, 60) || 'Emails', file_path: path, file_name: fileName, mime_type: mime, uploaded_by: user.id };
     }
     if (to === 'photos' && buf.length > SQUASH_OVER && mime !== 'image/gif') buf = await squashPhoto(admin, buf, mime, projectId);
     // uploaded as the person, so the file is theirs to delete later like any upload of their own

@@ -174,7 +174,7 @@ async function mountEmailBody(el, email, ctx) {
   const photos = (ctx && (ctx.fetchAttachment || ctx.fetchStored) ? files.filter(isPhoto) : []).slice(0, 12);
   const chips = files.filter(a => !photos.includes(a));
   const canSave = !!(ctx && ctx.jobs && typeof wireEmailSaveJob === 'function');
-  const bodyPhotos = canSave ? attachments.filter(a => !files.includes(a) && emailIsBodyPhoto(a)) : [];
+  const bodyPhotos = canSave ? attachments.filter(a => !files.includes(a) && emailIsBodyPhoto(a) && emailAttSavable(a)) : [];
   const savable = [...files, ...bodyPhotos];
   const items = savable.map(a => ({ emailId: email.id, att: a }));
   const saveBtn = (a) => (canSave ? emailSaveJobBtnsHtml(items, savable.indexOf(a)) : '');
