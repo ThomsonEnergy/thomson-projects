@@ -6,7 +6,9 @@
 // added straight onto this invoice under that cost centre -
 // [{ kind: 'material' | 'prebuild' | 'labour', materialId?, prebuildId?, quantity, unitPrice?, description?,
 //    staffId?, rateTierId?, timeEntryIds? }].
-// Priced by _shared/invoice-items.js and added on top of the claim's
+// Priced by _shared/invoice-items.js (a job under a commercial agreement, item 48, gets one more
+// labour line per claim, the agreement's percent off that claim's labour, and the invoice records
+// what it was made from in invoices.commercial_agreement) and added on top of the claim's
 // labour/material amounts; each is recorded in invoice_line_items, and a
 // Stock material is taken out of the warehouse and costed to the job
 // (job_material_usage), same as any other draw from Stock. A shift already
@@ -26,7 +28,7 @@
 const crypto = require('crypto');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { computeDueDate } = require('./_shared/compute-due-date');
-const { priceInvoiceItems, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
+const { priceInvoiceItems, commercialAgreementRow, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
 const { rateCardFor } = require('./_shared/rate-cards');
 
 exports.handler = async (event) => {
@@ -55,10 +57,19 @@ exports.handler = async (event) => {
 
     // Items are priced here (server side, from Stock / the prebuild library)
     // and added on top of whatever labour / materials the claim carries.
-    const rateCard = await rateCardFor(supabaseAdmin, projectId);  // labour tiers at the job's charge rate level (item 46)
+    // Labour tiers at the job's surcharge level (item 46); a commercial agreement (item 48) is not in
+    // the $/hr: it is one minus line per claim on the labour lines, worked out here, never sent by the panel.
+    const rateCard = await rateCardFor(supabaseAdmin, projectId);
+    let agreementTotal = 0;
     const pricedClaims = await Promise.all(claims.map(async (c) => {
       const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
-      const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45, rateCard.factor);
+      const priced = await priceInvoiceItems(supabaseAdmin, c.items, centre?.markup_percent ?? 45, rateCard.labourFactor);
+      const agreement = commercialAgreementRow(priced.labour, rateCard, priced.rows.length);
+      if (agreement) {
+        priced.rows.push(agreement);
+        priced.labour = r2(priced.labour + agreement.labour_amount);
+        agreementTotal = r2(agreementTotal - agreement.labour_amount);
+      }
       return { c, priced };
     }));
     // Labour lines (item 41) name the clocked shifts they bill: each must be on this job
@@ -204,6 +215,14 @@ exports.handler = async (event) => {
     });
 
     const { data: projectRow } = await supabaseAdmin.from('projects').select('client_id, proposal_template').eq('id', projectId).single();
+    // What the agreement line was made from, for the note under the invoice's totals (item 48).
+    let commercialAgreement = null;
+    if (agreementTotal > 0) {
+      const { data: agreementClient } = projectRow?.client_id
+        ? await supabaseAdmin.from('clients').select('agreement_sent_at').eq('id', projectRow.client_id).maybeSingle()
+        : { data: null };
+      commercialAgreement = { name: rateCard.name, percent_off: rateCard.percentOff, amount: agreementTotal, sent_at: agreementClient?.agreement_sent_at || null };
+    }
 
     let claimLabel;
     if (projectRow?.proposal_template === 'direct_job' && projectTotal <= 0) {
@@ -264,6 +283,7 @@ exports.handler = async (event) => {
         due_date: dueDate,
         created_by: user.id,
         bill_to_client_id: billToClientId || null,
+        commercial_agreement: commercialAgreement,
       })
       .select('id')
       .single();

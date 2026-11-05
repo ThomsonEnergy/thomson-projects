@@ -39,7 +39,8 @@ function prebuildUnitPrice(prebuild, markupPercent) {
 //              typed rate wins (Schedule of Rates multipliers come typed from the
 //              panel). The "Less" line is quantity 1 at a negative rate; the claim as
 //              a whole still cannot go negative (create-invoice.js checks).
-// rateFactor: the job's charge rate level (_shared/rate-cards.js), applied to a tier's $/hr.
+// rateFactor: the job's surcharge level (rateCardFor().labourFactor, _shared/rate-cards.js) applied to a
+// tier's $/hr; a commercial agreement is never in the $/hr, it is its own line (commercialAgreementRow).
 async function priceInvoiceItems(supabaseAdmin, items, markupPercent, rateFactor = 1) {
   const list = (items || []).filter(i => i && Number(i.quantity) > 0);
   if (!list.length) return { rows: [], labour: 0, material: 0 };
@@ -158,4 +159,20 @@ async function adjustWarehouseStockAdmin(supabaseAdmin, materialId, quantityDelt
   if (error) throw error;
 }
 
-module.exports = { priceInvoiceItems, prebuildUnitPrice, adjustWarehouseStockAdmin, r2 };
+// The commercial agreement's minus line for one claim (item 48): the agreement's percent off the
+// claim's labour lines (after any "Less" line), as a labour line of quantity 1 at a negative rate, so
+// it prints as its own amount on the invoice and goes to Xero inside the claim's labour total like the
+// Less line does. Null when the job has no agreement or the claim has no labour.
+function commercialAgreementRow(labourTotal, rateCard, sortOrder) {
+  const pct = Number(rateCard?.percentOff) || 0;
+  if (!(pct > 0) || !(labourTotal > 0)) return null;
+  const amount = r2(labourTotal * pct / 100);
+  return {
+    kind: 'labour', material_id: null, prebuild_id: null, staff_id: null, rate_tier_id: null, time_entry_ids: null,
+    description: `Commercial agreement (${rateCard.name}): ${pct}% off labour`.slice(0, 300), quantity: 1,
+    unit_cost: 0, unit_price: -amount, labour_amount: -amount, material_amount: 0, sort_order: sortOrder,
+  };
+}
+
+module.exports = {
+  commercialAgreementRow, priceInvoiceItems, prebuildUnitPrice, adjustWarehouseStockAdmin, r2 };

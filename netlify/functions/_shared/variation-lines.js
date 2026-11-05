@@ -64,7 +64,7 @@ async function loadVariationLines(supabaseAdmin, projectId, { ids = null } = {})
     supabaseAdmin.from('billable_rate_tiers').select('id, sell_rate'),
     materialIds.length ? supabaseAdmin.from('materials').select('id, name, cost_price').in('id', materialIds) : Promise.resolve({ data: [] }),
     prebuildIds.length ? supabaseAdmin.from('prebuilds').select('id, name, prebuild_components(*)').in('id', prebuildIds) : Promise.resolve({ data: [] }),
-    rateCardFor(supabaseAdmin, projectId),  // the job's charge rate level (item 46)
+    rateCardFor(supabaseAdmin, projectId),  // the job's charge rate level (item 46): a variation is a stage of a quoted job, so an agreement stays inside its price like the quote's
   ]);
 
   const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));

@@ -1,8 +1,10 @@
 // Thomson Energy's Schedule of Rates: the one copy of its wording, shared by the estimate page
 // (quote.html, estimates only) and the standalone document (rates.html, Documents page).
-// rates: [{ name, sell_rate }] from billable_rate_tiers (at the job's charge rate level, item 46);
-// reviewedOn: company_settings.rates_reviewed_on; levelName: the level when it is not Standard
-// ("Commercial"), printed under the labour rates. Needs escapeHtml and money from supabase-client.js.
+// rates: [{ name, sell_rate }] from billable_rate_tiers (Standard, or scaled by a surcharge level, item 46);
+// reviewedOn: company_settings.rates_reviewed_on; levelName: a surcharge level's name ("Commercial"),
+// printed under the labour rates; agreement: { name, percent_off } when the client has a commercial
+// agreement (item 48), a box under the rates saying the reduction is its own line on each invoice.
+// Needs escapeHtml and money from supabase-client.js.
 
 function ratesAsAtText(reviewedOn) {
   const d = reviewedOn ? new Date(reviewedOn + 'T00:00:00') : new Date();
@@ -11,7 +13,7 @@ function ratesAsAtText(reviewedOn) {
 
 // Two halves, so the standalone document can put each on its own A4 sheet (the estimate page cuts
 // its own sheets and uses the whole thing).
-function scheduleOfRatesParts(rates, reviewedOn, levelName) {
+function scheduleOfRatesParts(rates, reviewedOn, levelName, agreement) {
   const esc = escapeHtml;
   return [`
     <div class="sor-h">1. Application</div>
@@ -22,6 +24,7 @@ function scheduleOfRatesParts(rates, reviewedOn, levelName) {
       <tbody>${(rates || []).map(r => `<tr><td>${esc(r.name)}</td><td class="num">${money(r.sell_rate)}</td><td class="num">${money(Math.round(Number(r.sell_rate) * 1.1 * 100) / 100)}</td></tr>`).join('')}</tbody>
     </table>
     ${levelName ? `<p><b>${esc(levelName)} rates.</b> The labour rates above are this client's agreed level.</p>` : ''}
+    ${agreement && Number(agreement.percent_off) > 0 ? `<p><b>Commercial agreement.</b> Under the commercial agreement between us, labour on do and charge work is invoiced at the rates above less ${esc(agreement.percent_off)}%, shown as its own line on each invoice and subject to the agreement's conditions.</p>` : ''}
     <div class="sor-h">3. Standard hours</div>
     <p><b>Standard hours:</b> Monday to Friday, 6:30am to 4:00pm.<br><b>Minimum charge:</b> 2 hours per attendance per technician.</p>
     <p>Personnel classification is determined solely by Thomson Energy based on licensing, experience, competency, and responsibility required for the task.</p>`, `
@@ -51,6 +54,6 @@ function scheduleOfRatesParts(rates, reviewedOn, levelName) {
     <p class="note-line">This document is current as at ${esc(ratesAsAtText(reviewedOn))}.</p>`];
 }
 
-function scheduleOfRatesHtml(rates, reviewedOn, levelName) {
-  return scheduleOfRatesParts(rates, reviewedOn, levelName).join('');
+function scheduleOfRatesHtml(rates, reviewedOn, levelName, agreement) {
+  return scheduleOfRatesParts(rates, reviewedOn, levelName, agreement).join('');
 }

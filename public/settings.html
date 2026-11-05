@@ -486,19 +486,19 @@
             <div id="rate-tiers-msg"></div>
           </div>
           <div class="card">
-            <h2>Charge rate levels</h2>
-            <p class="subtitle" style="margin-bottom:10px;">A client, quote or job is charged at a level: a percent of the rate tiers above. Standard (100%) is the default. Add Commercial 115%, Mates rates 85% and so on, then pick the level on a client (Clients page) or on a job (Summary). Changing a level does not reprice lines already saved.</p>
+            <h2>Commercial agreements</h2>
+            <p class="subtitle" style="margin-bottom:10px;">An efficiency agreement with a builder who uses us a lot: a percent off the rate tiers above, given in writing from the Clients page and withdrawn there when they stop being efficient. Standard rates is the default. Pick the agreement on a client (Clients page) or on a job (Summary). Changing one does not reprice lines already saved.</p>
             <div id="rate-cards-list"><p class="subtitle">Loading...</p></div>
             <div style="margin-top:14px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
               <div>
-                <label style="margin-top:0">New level</label>
-                <input id="new-rate-card-name" placeholder="e.g. Commercial" />
+                <label style="margin-top:0">New agreement</label>
+                <input id="new-rate-card-name" placeholder="e.g. ABC Homes" />
               </div>
               <div>
-                <label style="margin-top:0">% of Billable Rates</label>
-                <input id="new-rate-card-percent" type="number" step="1" min="1" max="500" placeholder="115" style="width:120px;" />
+                <label style="margin-top:0">% off the Schedule of Rates</label>
+                <input id="new-rate-card-percent" type="number" step="0.5" min="-400" max="99" placeholder="10" style="width:120px;" />
               </div>
-              <button id="add-rate-card-btn">Add level</button>
+              <button id="add-rate-card-btn">Add agreement</button>
             </div>
             <div id="rate-cards-msg"></div>
           </div>
@@ -835,7 +835,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=123"></script>
-  <script src="/js/settings-rate-cards.js?v=1"></script>
+  <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
