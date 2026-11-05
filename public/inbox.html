@@ -140,8 +140,8 @@
 
   <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/theme.js?v=2"></script>
-  <script src="/js/email-view.js?v=3"></script>
-  <script src="/js/email-compose.js?v=9"></script>
+  <script src="/js/email-view.js?v=4"></script>
+  <script src="/js/email-compose.js?v=10"></script>
   <script>
     // Sales inbox (sales@, shared) and My inbox (the logged-in person's own Gmail, private).
     // The email agent sorts conversations into Priority (needs a reply), Other and
@@ -519,6 +519,11 @@
       if (!el) return;
       const { data: links } = await supabaseClient.from('email_job_links')
         .select('id, kind, note, by_ai, projects(id, name, job_number, quote_number)').eq('thread_id', threadId);
+      // the jobs feed Save to job on the attachments and Add from job in the reply box (item 53)
+      if (S.activeThreadId !== threadId) return; // another conversation was opened meanwhile
+      S.threadJobs = (links || []).filter(l => l.projects).map(l => ({ id: l.projects.id, label: projectRef(l.projects) }));
+      if (typeof emailSaveJobRefresh === 'function') emailSaveJobRefresh(document.getElementById('thread-messages'), S.threadJobs);
+      if (S.replyPicker) S.replyPicker.setJobs(S.threadJobs);
       el.innerHTML = (links || []).map(l => `<span style="font-size:12px; padding:3px 10px; border:1px ${l.by_ai ? 'dashed' : 'solid'} var(--accent); border-radius:20px; display:inline-flex; gap:6px; align-items:center;">
           <a href="/project.html?id=${l.projects.id}&tab=emails" class="link-quiet" title="${escapeHtml(l.note || '')}">${escapeHtml(projectRef(l.projects))} &middot; ${EMAIL_KINDS[l.kind] || 'Other'}${l.by_ai ? ' &middot; tagged by ' + escapeHtml(S.assistant) : ''}</a>
           <a href="#" data-untag="${l.id}" title="Remove this tag">&times;</a></span>`).join('')
@@ -586,6 +591,7 @@
         supabaseClient.from('email_threads').select('*, clients(name), projects:suggested_project_id(id, name, job_number, quote_number)').eq('id', threadId).single(),
         supabaseClient.from('emails').select('*').eq('thread_id', threadId).order('sent_at', { ascending: true }),
         supabaseClient.from('email_drafts').select('*').eq('thread_id', threadId).eq('status', 'draft').order('updated_at', { ascending: false }).limit(1),
+        emailJobFilesReady().catch(() => null), // Save to job on the attachments (item 53)
       ]);
       if (!thread) { detailEl.innerHTML = '<p class="subtitle">That conversation is not available.</p>'; return; }
       const draft = (drafts || [])[0] || null;
@@ -635,10 +641,11 @@
           <div id="reply-msg"></div>
         </div>`;
 
-      const replyPicker = emailLocalFilePicker(document.getElementById('reply-attach'));
+      S.threadJobs = [];
+      const replyPicker = S.replyPicker = emailLocalFilePicker(document.getElementById('reply-attach'));
       loadThreadTags(threadId);
       loadThreadLabels(thread);
-      (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment }));
+      (emails || []).forEach(m => mountEmailBody(detailEl.querySelector(`.email-body[data-email-id="${m.id}"]`), m, { fetchAttachment: fetchEmailAttachment, fetchStored: fetchStoredAttachment, jobs: () => S.threadJobs }));
 
       // the Messages icon rows for this thread are read now (bell is never involved)
       supabaseClient.from('notifications').update({ read_at: new Date().toISOString() })
@@ -699,12 +706,15 @@
         if (!bodyText) { msg.innerHTML = '<div class="error-box">Enter a reply first.</div>'; return; }
         if (/\[[^\]]{1,40}\]/.test(bodyText) && !confirm('The reply still has a [gap] in square brackets. Send anyway?')) return;
         if (!replyTo) { msg.innerHTML = '<div class="error-box">Couldn\'t work out who to reply to.</div>'; return; }
+        const refs = replyPicker.refs();
+        const limit = replyPicker.limitError();
+        if (limit) { msg.innerHTML = `<div class="error-box">${escapeHtml(limit)}</div>`; return; }
         btn.disabled = true;
         btn.textContent = replyPicker.files().length ? 'Uploading...' : 'Sending...';
         try {
           const uploaded = await emailUploadFiles(replyPicker.files());
           btn.textContent = 'Sending...';
-          await emailSendNow({ to: replyTo, subject, bodyText, replyToThreadId: threadId, draftId: draft ? draft.id : undefined, attachments: uploaded.map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
+          await emailSendNow({ to: replyTo, subject, bodyText, replyToThreadId: threadId, draftId: draft ? draft.id : undefined, attachments: [...uploaded, ...refs].map(u => ({ bucket: u.bucket, path: u.path, name: u.name })) });
           reload(true);
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;

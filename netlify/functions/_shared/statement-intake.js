@@ -18,12 +18,12 @@
 // The same run also checks any bill not checked yet against its PO (_shared/bill-check.js).
 
 const { getAdminClient } = require('./require-admin');
-const { gmailRequest } = require('./google-client');
+const { gmailRequest, downloadAttachment } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { internalHeaders } = require('./require-internal');
 const fetch = require('node-fetch');
-const { matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
+const { matchSupplier } = require('./supplier-bill-intake');
 const { extractStatement } = require('./statement-ai');
 const { checkBill } = require('./bill-check');
 
