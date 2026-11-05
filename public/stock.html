@@ -59,7 +59,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=124"></script>
+  <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];
@@ -402,17 +402,20 @@
     document.getElementById('create-stock-po-btn').addEventListener('click', openCreateStockPoPanel);
 
     async function openCreateStockPoPanel() {
+      await loadPoScan(); // the paid tick and the scan button (js/po-scan.js, item 51)
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order for Stock</h2>
+          ${poScanButtonHtml('csp')}
           <label style="margin-top:0">Supplier</label>
           ${supplierPickerHtml({ search: 'csp-supplier-search', results: 'csp-supplier-results', selected: 'csp-supplier-selected', newSection: 'csp-supplier-new-section', newEmail: 'csp-supplier-new-email', newPhone: 'csp-supplier-new-phone' })}
           <label style="margin-top:14px;">Lines</label>
           <div id="csp-items-container"></div>
           <button type="button" class="secondary btn-sm" id="csp-add-line-btn">+ Add item</button>
+          ${poPaidChoiceHtml('csp')}
           <details class="po-fold" style="margin-top:14px;">
             <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, invoice</span></summary>
             ${poTypeChoiceHtml('csp')}
@@ -430,6 +433,8 @@
       // reading the invoice is for Admin, Finance and Sales only, so nobody else is offered it (F9)
       const cspUploadBtn = overlay.querySelector('#csp-upload-invoice-btn');
       if (cspUploadBtn) wireUploadInvoiceButton(cspUploadBtn, overlay.querySelector('#csp-msg'));
+      wirePoPaidChoice(overlay, 'csp');
+      wirePoScan(overlay, { prefix: 'csp', containerId: 'csp-items-container', materials: allMaterials, picker: resolveSupplier });
 
       buildMaterialSearchRow(allMaterials, 'csp-items-container');
       overlay.querySelector('#csp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(allMaterials, 'csp-items-container'));
@@ -450,9 +455,19 @@
 
           const { data: { user } } = await supabaseClient.auth.getUser();
 
+          if (overlay._poScan) {
+            // scanned receipt: the bill and the PO from it in one server step (js/po-scan.js, item 51)
+            const { po: scannedPo } = await poScanSave(overlay, { prefix: 'csp', supplierId, lines: readMaterialLineRows('csp-items-container'), po: { project_id: null, description: 'Stock purchase order' } });
+            overlay.remove();
+            loadStockPOs();
+            showPoCreatedPanel(scannedPo, supplierName, { onDone: loadStockPOs });
+            return;
+          }
+
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: null, supplier_id: supplierId, supplier_name: supplierName,
             po_type: readPoTypeChoice(overlay, 'csp'), locked: false, status: 'ordered', amount: 0,
+            ...readPoPaidChoice(overlay, 'csp', user.id),
             description: 'Stock purchase order',
           }).select('id, po_number, supplier_id, project_id').single();
           if (poErr) throw poErr;

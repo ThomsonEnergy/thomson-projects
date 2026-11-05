@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=124"></script>
+  <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
@@ -9045,6 +9045,7 @@
     }
 
     async function openCreatePoPanel(projectId, centres) {
+      await loadPoScan(); // the paid tick and the scan button (js/po-scan.js, item 51)
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
       const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
       const vehicles = await stockVehicles();
@@ -9054,6 +9055,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:560px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order</h2>
+          ${poScanButtonHtml('cp')}
           <label style="margin-top:0">Where from</label>
           <select id="cp-source">${poSourceOptionsHtml(vehicles)}</select>
           <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Warehouse or vehicle stock makes a stock PO: the gear comes off that count and onto this job straight away.</p>
@@ -9064,6 +9066,7 @@
           <p class="subtitle" style="font-size:12px; margin:0 0 6px;">Anyone can add more lines as the job goes. Close the PO once it's all in: that approves its bills.</p>
           <div id="cp-fixed-items-container"></div>
           <button type="button" class="secondary btn-sm" id="cp-add-line-btn">+ Add line</button>
+          ${poPaidChoiceHtml('cp')}
 
           <details class="po-fold" id="cp-more" style="margin-top:14px;">
             <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">stage, open PO, notes, budget, document</span></summary>
@@ -9091,6 +9094,8 @@
 
       const resolveSupplier = wireSupplierPicker(overlay, suppliers, { search: 'cp-supplier-search', results: 'cp-supplier-results', selected: 'cp-supplier-selected', newSection: 'cp-supplier-new-section', newEmail: 'cp-supplier-new-email', newPhone: 'cp-supplier-new-phone' });
       wireUploadInvoiceButton(overlay.querySelector('#cp-upload-invoice-btn'), overlay.querySelector('#cp-msg'));
+      wirePoPaidChoice(overlay, 'cp');
+      wirePoScan(overlay, { prefix: 'cp', containerId: 'cp-fixed-items-container', materials: materials || [], picker: resolveSupplier });
 
       buildMaterialSearchRow(materials || [], 'cp-fixed-items-container');
       overlay.querySelector('#cp-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'cp-fixed-items-container'));
@@ -9134,6 +9139,21 @@
             file_name = fileInput.files[0].name;
           }
 
+          if (overlay._poScan) {
+            // scanned receipt: the bill and the PO from it in one server step (js/po-scan.js, item 51)
+            const { po: scannedPo } = await poScanSave(overlay, { prefix: 'cp', supplierId, lines: readMaterialLineRows('cp-fixed-items-container'), po: {
+              project_id: projectId, cost_centre_id: overlay.querySelector('#cp-stage').value || null,
+              description: overlay.querySelector('#cp-description').value.trim() || null, budget_cap: budgetCap,
+              ...readPoNotesFields(overlay, 'cp'), show_prices: overlay.querySelector('#cp-show-prices').checked, file_path, file_name,
+            } });
+            await logActivity('project', projectId, 'po_created', `PO ${scannedPo.po_number || ''} created for ${supplierName} from a scanned invoice`);
+            await createPoFollowUpTask(projectId, scannedPo.po_number, supplierName);
+            overlay.remove();
+            loadPurchaseOrders(projectId, centres);
+            showPoCreatedPanel(scannedPo, supplierName, { onDone: () => loadPurchaseOrders(projectId, centres) });
+            return;
+          }
+
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: projectId,
             cost_centre_id: overlay.querySelector('#cp-stage').value || null,
@@ -9145,6 +9165,7 @@
             budget_cap: budgetCap,
             ...readPoNotesFields(overlay, 'cp'),
             show_prices: overlay.querySelector('#cp-show-prices').checked,
+            ...readPoPaidChoice(overlay, 'cp', user.id),
             status: 'ordered',
             amount: 0,
             file_path, file_name,
