@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 5 Nov 2026
 
+- Planned, waiting on yes: backlog item 53, Save to job on email attachments (into Site Photos with a caption or Documents with a folder, server copy from Gmail, no 4 MB cap) and Add from job (the job's documents and site photos) on every email sent from a job. No migration. Detail: `docs/IDEAS_BACKLOG.md` item 53.
 - Built: item 51 on `feat/po-from-scan` (PR into `staging`): Scan the invoice or receipt on every Create PO panel (any role), Paid already on the PO (card, cash) with every bill on it marked paid, Paid any time for Admin and Finance, received lines movable after the PO is closed. Migration 20261129000000. Detail: `docs/PROJECT_SPEC.md` A10, `docs/IDEAS_BACKLOG.md` item 51.
 - Owner's yes: item 51 (PO from a scanned invoice, paid on the spot by any role, a bill on a paid PO is paid, Paid any time for Finance, lines movable after close), building in `feat/po-from-scan`. Item 52 noted (supplier bills and payments to Xero, after 51). Detail: `docs/IDEAS_BACKLOG.md`.
 - Owner's yes and built: item 50. The bill reader takes the quantity supplied on this invoice, not the ordered figure; a line charging nothing shows No charge and is never an extra to accept or add to a PO. Production repair (PO2000's six $0 lines off, bill M74144 lines set to 0 supplied, the unlinked duplicate of bill M61732 removed) waits on one Allow tap, the database tool stops on `delete`. Detail: `docs/IDEAS_BACKLOG.md` item 50.
