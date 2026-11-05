@@ -22,12 +22,12 @@
 // Only material cost prices change (quotes and POs read cost_price). Never deletes anything.
 
 const { getAdminClient } = require('./require-admin');
-const { gmailRequest } = require('./google-client');
+const { gmailRequest, downloadAttachment } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { internalHeaders } = require('./require-internal');
 const fetch = require('node-fetch');
-const { fuzzyMatchScore, matchSupplier, downloadAttachment } = require('./supplier-bill-intake');
+const { fuzzyMatchScore, matchSupplier } = require('./supplier-bill-intake');
 const ai = require('./price-list-ai');
 
 const USED_RECENTLY_DAYS = 180;

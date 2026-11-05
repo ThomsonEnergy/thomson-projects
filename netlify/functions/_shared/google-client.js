@@ -134,4 +134,27 @@ async function gmailUploadSend(rfc822, threadId, mailbox = null) {
   return json;
 }
 
-module.exports = { getGoogleAccessToken, exchangeRefreshToken, gmailRequest, gmailUploadSend, GMAIL_MAILBOX };
+// The part of a Gmail message with this partId (an attachment or inline picture), or null.
+function findPart(payload, partId) {
+  if (!payload) return null;
+  if ((payload.partId || null) === partId && (payload.body?.attachmentId || payload.body?.data)) return payload;
+  for (const p of payload.parts || []) {
+    const hit = findPart(p, partId);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// One attachment of an email as a Buffer. mailbox: the conversation's own mailbox (a My inbox);
+// left out, it is sales@. Used by the bill, price list and statement readers and the inbox.
+async function downloadAttachment(gmailMessageId, partId, mailbox = null) {
+  const msg = await gmailRequest(`messages/${gmailMessageId}?format=full`, {}, mailbox);
+  const part = findPart(msg.payload, String(partId));
+  if (!part) throw new Error('That attachment is no longer in Gmail.');
+  let b64url = part.body.data;
+  if (!b64url) b64url = (await gmailRequest(`messages/${gmailMessageId}/attachments/${part.body.attachmentId}`, {}, mailbox)).data;
+  if (!b64url) throw new Error('Gmail returned an empty file.');
+  return Buffer.from(b64url, 'base64url');
+}
+
+module.exports = { getGoogleAccessToken, exchangeRefreshToken, gmailRequest, gmailUploadSend, downloadAttachment, GMAIL_MAILBOX };
