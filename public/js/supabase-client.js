@@ -6717,7 +6717,8 @@ function poNextStep(po, bills, { emailed, role } = {}) {
 // Received lines show where they went. Everything else for a line sits under its "..." button.
 // Words that usually mean a tool, so an unlinked PO line gets a "Looks like a tool, mark it?" hint
 // (never set by itself: tools go to the Tools register, a different place to receive to) (item 53).
-const PO_TOOL_WORDS = /\b(drill|drills|driver|impact|grinder|saw|saws|multimeter|clamp meter|tester|testers|crimper|crimpers|crimping tool|stripper|strippers|ladder|ladders|torch|laser|vacuum|blower|heat gun|rotary hammer|charger|milwaukee|dewalt|makita|bosch|festool|hilti|fluke|knipex|klein|kincrome|sidchrome|megger)\b/i;
+// The same list as looks_tool in the database's _stock_kind_guess; js/stock-kinds.js uses this one.
+const STOCK_TOOL_WORDS = /\b(drill|drills|driver|impact|grinder|saw|saws|multimeter|clamp meter|tester|testers|crimper|crimpers|crimping tool|stripper|strippers|ladder|ladders|torch|laser|vacuum|blower|heat gun|rotary hammer|charger|milwaukee|dewalt|makita|bosch|festool|hilti|fluke|knipex|klein|kincrome|sidchrome|megger)\b/i;
 function renderPoTickLines(po, canEdit) {
   const items = po.purchase_order_line_items || [];
   if (!items.length) return '<p class="subtitle" id="po-lines-empty">No lines yet.</p>';
@@ -6731,7 +6732,7 @@ function renderPoTickLines(po, canEdit) {
     else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
     const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
     const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>`
-      : (!li.received && !li.material_id && !po.stock_source && PO_TOOL_WORDS.test(li.description || '')) ? ` <span class="badge draft" style="color:var(--amber);" title="Use the ... on the line and pick This is a tool, so it lands in the Tools register">Looks like a tool, mark it?</span>` : '';
+      : (!li.received && !li.material_id && !po.stock_source && STOCK_TOOL_WORDS.test(li.description || '')) ? ` <span class="badge draft" style="color:var(--amber);" title="Use the ... on the line and pick This is a tool, so it lands in the Tools register">Looks like a tool, mark it?</span>` : '';
     return `<div class="po-line${li.received ? ' is-received' : ''}" data-line-id="${escapeHtml(li.id)}">
       <label class="po-line-tick">${tickable ? `<input type="checkbox" class="po-line-cb" data-line-id="${escapeHtml(li.id)}" aria-label="Arrived: ${escapeHtml(li.description)}" />` : `<span class="po-line-mark">${li.received ? '&#10003;' : ''}</span>`}</label>
       <div class="po-line-body">

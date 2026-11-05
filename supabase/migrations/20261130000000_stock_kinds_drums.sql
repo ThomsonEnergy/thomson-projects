@@ -38,7 +38,7 @@ alter table public.purchase_order_line_items add column if not exists material_u
 -- coil, roll, reel or a length (100m); consumable when a pack size is written (bag of 100, 50pk) or it
 -- is a known small fitting; else part. looks_tool is a hint only: tools live in the Tools register.
 create or replace function public._stock_kind_guess(p_name text, p_category text default null)
-returns jsonb language plpgsql immutable as $$
+returns jsonb language plpgsql immutable set search_path = public as $$
 declare
   t text := lower(coalesce(p_name, '') || ' ' || coalesce(p_category, ''));
   v_kind text := 'part';
@@ -143,11 +143,12 @@ returns boolean language sql stable set search_path = public as $$
 $$;
 revoke all on function public._is_drum_item(uuid) from public, anon, authenticated;
 
-create or replace function public._drum_label(p_material uuid, p_left numeric)
-returns text language sql stable set search_path = public as $$
-  select format('%s (%sm)', (select name from materials where id = p_material), _po_qty(p_left));
+-- metres per unit on a PO line: the drum size for cable, 1 for anything else
+create or replace function public._material_pack(p_material uuid)
+returns numeric language sql stable set search_path = public as $$
+  select case when _is_drum_item(p_material) then (select pack_qty from materials where id = p_material) else 1 end;
 $$;
-revoke all on function public._drum_label(uuid, numeric) from public, anon, authenticated;
+revoke all on function public._material_pack(uuid) from public, anon, authenticated;
 
 -- Keeps a cable item's drums adding up to its count at one place. Called at the end of _stock_adjust,
 -- so a count change that does not know which drum (a stocktake typed as one number, a variation) still
@@ -310,13 +311,16 @@ $$;
 revoke all on function public.stock_transfer_unit(uuid, text, uuid) from public, anon;
 grant execute on function public.stock_transfer_unit(uuid, text, uuid) to authenticated;
 
--- Change an item's kind (Stock edit panel, pricing roles). Becoming cable turns every count into drums;
--- no longer cable drops the drums (the counts stay).
-create or replace function public.material_set_kind(p_material_id uuid, p_kind text, p_pack_qty numeric default null, p_pack_label text default null)
+-- Change an item's kind (Stock edit panel, pricing roles). Becoming cable: the counts so far were
+-- drums and the prices per drum, so each count becomes count x drum size metres (then drums), and
+-- cost and sell are divided by the drum size (p_convert false keeps the numbers as they are, for an
+-- item whose count was already metres). Leaving cable: the reverse, and the drums go.
+create or replace function public.material_set_kind(p_material_id uuid, p_kind text, p_pack_qty numeric default null, p_pack_label text default null, p_convert boolean default true)
 returns void language plpgsql security definer set search_path = public as $$
 declare
   m materials;
   r record;
+  v_pack numeric;
 begin
   if not is_pricing_role() then raise exception 'Only Admin, Finance or Sales can change what kind of item it is.'; end if;
   if p_kind not in ('part', 'cable', 'consumable') then raise exception 'Part, cable or consumable?'; end if;
@@ -328,24 +332,38 @@ begin
     pack_unit = case when p_kind = 'cable' then 'm' else null end,
     pack_label = case when p_kind = 'consumable' then coalesce(nullif(trim(coalesce(p_pack_label, '')), ''), pack_label) else null end
     where id = m.id;
+  v_pack := coalesce(p_pack_qty, m.pack_qty);
   if p_kind = 'cable' then
-    if m.kind = 'cable' and m.pack_qty is distinct from coalesce(p_pack_qty, m.pack_qty) then
-      update material_units set pack_qty = coalesce(p_pack_qty, m.pack_qty) where material_id = m.id;
+    if m.kind = 'cable' and m.pack_qty is distinct from v_pack then
+      update material_units set pack_qty = v_pack where material_id = m.id;
+    end if;
+    if m.kind is distinct from 'cable' and coalesce(p_convert, true) then
+      -- drums and per-drum prices become metres and per-metre prices
+      update material_stock_by_location set quantity = round(quantity * v_pack, 2), updated_at = now() where material_id = m.id and quantity <> 0;
+      update materials set cost_price = round(cost_price / v_pack, 4), sell_price = round(sell_price / v_pack, 4), minimum_quantity = round(minimum_quantity * v_pack, 2) where id = m.id;
     end if;
     for r in select location_type, vehicle_id from material_stock_by_location where material_id = m.id and quantity > 0 loop
       perform _material_units_reconcile(m.id, r.location_type, r.vehicle_id);
     end loop;
-    if m.kind is distinct from 'cable' then perform _po_log('material', m.id, 'updated', format('Now counted by the drum (%sm): the count is in metres and shown drum by drum', _po_qty(coalesce(p_pack_qty, m.pack_qty)))); end if;
+    if m.kind is distinct from 'cable' then
+      perform _po_log('material', m.id, 'updated', format('Now counted by the drum (%sm): the count is in metres and shown drum by drum%s', _po_qty(v_pack),
+        case when coalesce(p_convert, true) then format(' (counts x %s, cost $%s -> $%s per metre)', _po_qty(v_pack), to_char(m.cost_price, 'FM999G999G990D00'), to_char(round(m.cost_price / v_pack, 4), 'FM999G999G990D0000')) else '' end));
+    end if;
   else
     if m.kind = 'cable' then
       delete from material_units where material_id = m.id;
-      perform _po_log('material', m.id, 'updated', format('No longer counted by the drum: now %s', case when p_kind = 'consumable' then 'a consumable' else 'a part' end));
+      if coalesce(p_convert, true) and coalesce(m.pack_qty, 0) > 0 then
+        update material_stock_by_location set quantity = round(quantity / m.pack_qty, 2), updated_at = now() where material_id = m.id and quantity <> 0;
+        update materials set cost_price = round(cost_price * m.pack_qty, 4), sell_price = round(sell_price * m.pack_qty, 4), minimum_quantity = round(minimum_quantity / m.pack_qty, 2) where id = m.id;
+      end if;
+      perform _po_log('material', m.id, 'updated', format('No longer counted by the drum: now %s%s', case when p_kind = 'consumable' then 'a consumable' else 'a part' end,
+        case when coalesce(p_convert, true) then format(' (metres / %s, cost per drum)', _po_qty(m.pack_qty)) else '' end));
     end if;
   end if;
 end;
 $$;
-revoke all on function public.material_set_kind(uuid, text, numeric, text) from public, anon;
-grant execute on function public.material_set_kind(uuid, text, numeric, text) to authenticated;
+revoke all on function public.material_set_kind(uuid, text, numeric, text, boolean) from public, anon;
+grant execute on function public.material_set_kind(uuid, text, numeric, text, boolean) to authenticated;
 
 -- ---------------------------------------------------------------------------------------------------
 -- 4. Receiving: unlinked lines get counted, cable lands as drums
@@ -420,7 +438,8 @@ begin
     if po.stock_source is not null then
       perform _stock_adjust(li.material_id, po.stock_source, po.stock_source_vehicle_id, -li.quantity);
     elsif po.vehicle_id is not null and po.supplier_id is null then
-      perform _stock_adjust(li.material_id, 'warehouse', null, -li.quantity);
+      -- an old-style van PO from the Warehouse: a cable line is drums, the count is metres
+      perform _stock_adjust(li.material_id, 'warehouse', null, -li.quantity * _material_pack(li.material_id));
     end if;
   end if;
 
@@ -503,8 +522,9 @@ begin
     end if;
   elsif li.destination_type in ('warehouse', 'vehicle') then
     if po.stock_source is null and _is_drum_item(li.material_id) then
+      -- the drums this line made, untouched: floor(qty) full ones plus the part drum of the remainder
       select * into m from materials where id = li.material_id;
-      v_need := ceil(p_qty)::integer;
+      v_need := floor(p_qty)::integer;
       for u in select id from material_units
           where po_line_item_id = li.id and location_type = li.destination_type
             and (li.destination_type = 'warehouse' or vehicle_id = li.destination_vehicle_id)
@@ -514,9 +534,17 @@ begin
         delete from material_units where id = u.id;
         v_need := v_need - 1;
       end loop;
+      if v_need = 0 and p_qty - floor(p_qty) > 0.005 then
+        delete from material_units where id = (select id from material_units
+          where po_line_item_id = li.id and location_type = li.destination_type
+            and (li.destination_type = 'warehouse' or vehicle_id = li.destination_vehicle_id)
+            and abs(qty_left - round((p_qty - floor(p_qty)) * m.pack_qty, 2)) < 0.005
+          order by created_at desc limit 1);
+        if not found then v_need := 1; end if;
+      end if;
       if v_need > 0 then
-        raise exception 'Only % full drum(s) of % from this line are still at %. Fix the drums on the Stock page first.',
-          ceil(p_qty)::integer - v_need, m.name, _po_place_label(li.destination_type, null, li.destination_vehicle_id);
+        raise exception 'Some of the % from this line has been used at %, so it cannot be un-received as it is. Fix the drums on the Stock page first.',
+          m.name, _po_place_label(li.destination_type, null, li.destination_vehicle_id);
       end if;
       perform _stock_adjust(li.material_id, li.destination_type, li.destination_vehicle_id, -p_qty * m.pack_qty, true);
     else
@@ -677,10 +705,11 @@ begin
           and location_type = p_source and (p_source = 'warehouse' or vehicle_id = p_vehicle_id);
         if not found then raise exception 'That drum of % is no longer at %. Pick again.', m.name, v_place; end if;
       else
-        -- a full drum if there is one, else the fullest
+        -- "a full drum": a full one the app knows, else the one the person is holding is added
         select * into u from material_units where material_id = m.id
           and location_type = p_source and (p_source = 'warehouse' or vehicle_id = p_vehicle_id)
-          order by (qty_left >= pack_qty - 0.005) desc, qty_left desc, created_at limit 1;
+          and qty_left >= pack_qty - 0.005
+          order by created_at limit 1;
         if not found then
           -- the app has no drum here but the person is holding one
           insert into material_units (material_id, location_type, vehicle_id, qty_left, pack_qty, created_by)
@@ -749,6 +778,7 @@ declare
   li purchase_order_line_items;
   po purchase_orders;
   m materials;
+  u material_units;
   v_from text;
   v_text text;
   v_note text := nullif(trim(coalesce(p_note, '')), '');
@@ -778,16 +808,21 @@ begin
   if po.stock_source is not null then
     if _is_drum_item(li.material_id) then
       select * into m from materials where id = li.material_id;
-      if li.material_unit_id is not null and exists (select 1 from material_units where id = li.material_unit_id) then
-        update material_units set qty_left = round(qty_left + li.quantity, 2), updated_at = now() where id = li.material_unit_id;
+      select * into u from material_units where id = li.material_unit_id;
+      if found then
+        -- back onto the drum it came off, wherever that drum is now
+        update material_units set qty_left = round(qty_left + li.quantity, 2), updated_at = now() where id = u.id;
+        perform _stock_adjust(li.material_id, u.location_type, u.vehicle_id, li.quantity);
       else
         insert into material_units (material_id, location_type, vehicle_id, qty_left, pack_qty, label, created_by)
         values (m.id, po.stock_source, po.stock_source_vehicle_id, round(li.quantity, 2), m.pack_qty, 'Back from ' || _po_job_ref(li.destination_job_id), auth.uid());
+        perform _stock_adjust(li.material_id, po.stock_source, po.stock_source_vehicle_id, li.quantity);
       end if;
+    else
+      perform _stock_adjust(li.material_id, po.stock_source, po.stock_source_vehicle_id, li.quantity);
     end if;
-    perform _stock_adjust(li.material_id, po.stock_source, po.stock_source_vehicle_id, li.quantity);
   elsif po.vehicle_id is not null and po.supplier_id is null then
-    perform _stock_adjust(li.material_id, 'warehouse', null, li.quantity);
+    perform _stock_adjust(li.material_id, 'warehouse', null, li.quantity * _material_pack(li.material_id));
   end if;
 
   update purchase_order_line_items set
@@ -910,12 +945,20 @@ begin
 
   if v_qty > 0 then
     if _is_drum_item(m.id) then
-      -- one drum with that many metres on it
-      insert into material_units (material_id, location_type, vehicle_id, qty_left, pack_qty, created_by)
-      values (m.id, v_loc, case when v_loc = 'vehicle' then v_vehicle end, round(v_qty, 2), m.pack_qty, auth.uid())
-      returning id into v_unit;
-      perform _stock_adjust(m.id, v_loc, v_vehicle, v_qty);
-      if v_existed then perform _po_log('material', m.id, 'scanned', format('Scanned on site: a drum of %sm added at %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle))); end if;
+      -- the drum the app already knows at that place with that much on it, else one drum with that many metres
+      if v_existed then
+        select id into v_unit from material_units where material_id = m.id and location_type = v_loc and (v_loc = 'warehouse' or vehicle_id = v_vehicle)
+          and abs(qty_left - v_qty) < 0.5 order by created_at limit 1;
+      end if;
+      if v_unit is not null then
+        perform _po_log('material', m.id, 'scanned', format('Scanned on site: the drum with %sm at %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle)));
+      else
+        insert into material_units (material_id, location_type, vehicle_id, qty_left, pack_qty, created_by)
+        values (m.id, v_loc, case when v_loc = 'vehicle' then v_vehicle end, round(v_qty, 2), m.pack_qty, auth.uid())
+        returning id into v_unit;
+        perform _stock_adjust(m.id, v_loc, v_vehicle, v_qty);
+        if v_existed then perform _po_log('material', m.id, 'scanned', format('Scanned on site: a drum of %sm added at %s', _po_qty(v_qty), _po_place_label(v_loc, null, v_vehicle))); end if;
+      end if;
     elsif v_existed and v_set then
       select coalesce(sum(quantity), 0) into v_have from material_stock_by_location
         where material_id = m.id and location_type = v_loc and (v_loc = 'warehouse' or vehicle_id = v_vehicle);
@@ -1088,25 +1131,24 @@ declare
   g jsonb;
   v_kind text;
 begin
-  for r in select id, name, category, is_consumable, pack_qty from materials where kind is null loop
+  -- Existing items keep their counts and prices as they are: a consumable stays one, everything else is a
+  -- part. An item that looks like cable is only pointed out (log line, and a "Looks like cable" chip on the
+  -- Stock page) because its count and price so far were per drum: Edit, What kind of item = Cable converts them.
+  for r in select id, name, category, is_consumable from materials where kind is null loop
     if r.is_consumable then
       update materials set kind = 'consumable' where id = r.id;
     else
       g := _stock_kind_guess(r.name, r.category);
       v_kind := g->>'kind';
-      update materials set kind = v_kind,
-        pack_qty = case when v_kind = 'cable' then coalesce(r.pack_qty, (g->>'pack_qty')::numeric, 100) end
+      update materials set kind = case when v_kind = 'consumable' then 'consumable' else 'part' end,
+        pack_label = case when v_kind = 'consumable' then coalesce(pack_label, g->>'pack_label') else pack_label end
         where id = r.id;
       if v_kind = 'cable' then
-        perform _po_log('material', r.id, 'updated', format('Marked as cable by the stock kinds update (drum of %sm): the count is in metres, check the drums', _po_qty(coalesce(r.pack_qty, (g->>'pack_qty')::numeric, 100))));
+        perform _po_log('material', r.id, 'updated', 'Looks like cable: open Edit on the Stock page and set What kind of item to Cable so it is counted by the drum (the count and price so far are per drum and are converted)');
       elsif v_kind = 'consumable' then
         perform _po_log('material', r.id, 'updated', 'Marked as a consumable by the stock kinds update: counted by the pack, not asked about at clock-out');
       end if;
     end if;
-  end loop;
-  for r in select l.material_id, l.location_type, l.vehicle_id from material_stock_by_location l join materials m on m.id = l.material_id
-      where m.kind = 'cable' and l.quantity > 0 loop
-    perform _material_units_reconcile(r.material_id, r.location_type, r.vehicle_id);
   end loop;
 end $$;
 alter table public.materials alter column kind set not null;

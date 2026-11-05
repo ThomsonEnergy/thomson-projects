@@ -8,7 +8,7 @@
 // chip before anything is saved. Drums are written only through the database steps
 // material_unit_set, material_unit_add and stock_transfer_unit.
 const STOCK_KIND_LABELS = { part: 'Part', cable: 'Cable: by the drum', consumable: 'Consumable: by the pack' };
-const STOCK_TOOL_WORDS = /\b(drill|drills|driver|impact|grinder|saw|saws|multimeter|clamp meter|tester|testers|crimper|crimpers|crimping tool|stripper|strippers|ladder|ladders|torch|laser|vacuum|blower|heat gun|rotary hammer|charger|milwaukee|dewalt|makita|bosch|festool|hilti|fluke|knipex|klein|kincrome|sidchrome|megger)\b/i;
+// STOCK_TOOL_WORDS (the tool hint) lives in supabase-client.js, which is always loaded first.
 
 // Same rules as the database's _stock_kind_guess: { kind, packQty, packLabel, looksTool }.
 function stockKindGuess(name, category) {
@@ -36,6 +36,7 @@ function stockIsDrumItem(m) { return !!m && m.kind === 'cable' && Number(m.pack_
 // The chip on a row: "Cable: drum of 100m", "Consumable: bag of 100".
 function stockKindChip(m) {
   if (!m) return '';
+  if (m.kind === 'part' && stockKindGuess(m.name, m.category).kind === 'cable') return `<span class="badge draft" style="color:var(--amber);" title="Edit, What kind of item = Cable: counted by the drum from then on (the count and price so far are per drum and are converted)">Looks like cable, set it up?</span>`;
   if (m.kind === 'cable') return `<span class="badge draft" title="Counted by the drum: the count is metres, each drum shown with what is left on it">Cable: drum of ${escapeHtml(poQty(m.pack_qty || 100))}m</span>`;
   if (m.kind === 'consumable') return `<span class="badge draft" title="Counted by the pack, never asked about at clock-out">Consumable${m.pack_label ? ': ' + escapeHtml(m.pack_label) : ''}</span>`;
   return '';
@@ -49,7 +50,7 @@ function stockKindFieldsHtml(prefix, m) {
     <div id="${prefix}-pack-cable" style="${kind === 'cable' ? '' : 'display:none;'}">
       <label>Metres on a full drum</label>
       <input id="${prefix}-pack-qty" type="number" inputmode="decimal" step="1" min="1" value="${escapeHtml(m?.pack_qty || 100)}" />
-      <p class="subtitle" style="font-size:12px; margin:2px 0 0;">The count is metres. A PO line is one drum; a bill priced per drum is kept per metre.</p>
+      <p class="subtitle" style="font-size:12px; margin:2px 0 0;">The count is metres. A PO line is one drum; a bill priced per drum is kept per metre.${m?.id && m.kind !== 'cable' ? ' Switching an existing item: its count so far is read as drums and its cost as per drum, both converted on Save.' : ''}</p>
     </div>
     <div id="${prefix}-pack-consumable" style="${kind === 'consumable' ? '' : 'display:none;'}">
       <label>Pack</label>
