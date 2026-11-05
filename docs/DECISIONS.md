@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 6 Nov 2026
+
+- Live: item 53 went straight to `main` on the owner's say (PR #298, no migration): Save to job on email attachments and Add from job on emails sent from a job. Real Gmail save and send were not tested on staging first (this session could not reach it). Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.
+
 ## 5 Nov 2026
 
 - Built: item 53 on `feat/email-job-files` (PR #293 into `staging`): Save to job on email attachments (Site Photos with a caption, or Documents in a folder, copied from Gmail on the server) and Add from job (the job's documents and site photos) on every email sent from a job and on Inbox replies to tagged conversations. No migration. Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.

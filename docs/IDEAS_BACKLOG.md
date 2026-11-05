@@ -1128,7 +1128,7 @@ Touches: `public/js/supabase-client.js` (paid tick and chip, scan button hook, l
 Owner asked whether bills reach Xero and whether to link payments in the app or in Xero. Today nothing about supplier bills reaches Xero (only client invoices, credit notes, timesheets and pay rates). Push from the app and let Xero confirm: when a bill is approved in TEops, push it as a Xero Bill (supplier contact by ABN, created when missing; date, number, lines coded to the purchases account, GST); when it is marked paid, push the payment against that Bill (bank account for transfers and Airwallex, the card or cash account for counter purchases). The bank feed line then shows a suggested match and Jade taps OK (the Xero API cannot press that final OK). Needs first: the purchases and card account codes in `docs/BUSINESS_FACTS.md` (only sales codes today), a run on the Xero demo company. Same ground as item 1 and the spec's Tier 4.
 
 
-## 53. Email attachments onto the job, and job photos and documents on every email out (owner's yes 5 Nov 2026, built the same day on `feat/email-job-files`, PR #293 into `staging`, see PROJECT_SPEC.md A18)
+## 53. Email attachments onto the job, and job photos and documents on every email out (owner's yes 5 Nov 2026, built the same day on `feat/email-job-files`, PR #293 into `staging`, LIVE 6 Nov 2026 straight to `main` on the owner's say (PR #298), see PROJECT_SPEC.md A18)
 
 **Owner, 5 Nov 2026:** attachments on emails tagged to a job should be saveable into the job's Site Photos or Documents tab with a label, and anything emailed out from a job should be able to carry the job's documents or photos.
 
