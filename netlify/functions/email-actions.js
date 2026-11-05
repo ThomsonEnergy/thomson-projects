@@ -181,7 +181,8 @@ exports.handler = async (event) => {
       }
       case 'dismiss_label': {
         const t = await ownThread(body.thread_id);
-        await admin.from('email_threads').update({ suggested_label: null }).eq('id', t.thread.id);
+        // '' (not null): Postie's older-conversations pass leaves it alone (_shared/email-matters.js)
+        await admin.from('email_threads').update({ suggested_label: '' }).eq('id', t.thread.id);
         return json(200, { ok: true });
       }
       case 'accept_job': {

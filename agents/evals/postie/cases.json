@@ -1,7 +1,7 @@
 {
   "agent": "Postie (email agent, _shared/email-agent.js)",
   "written": "2026-10-27",
-  "about": "Filing under labels. On 27 Oct 2026 the sales@ mailbox had two labels: 'GCW dispute' (All emails regarding GC Wind Services) and 'New Solar Products'. Postie put 8 threads under GCW dispute; 4 did not belong. Cause: an email that looked legal or formal with no fitting label was given the nearest one instead of none. A sixth case checks the topic label still works. Each case lists the labels on offer and the answer Postie must give.",
+  "about": "Filing under labels. On 27 Oct 2026 the sales@ mailbox had two labels: 'GCW dispute' (All emails regarding GC Wind Services) and 'New Solar Products'. Postie put 8 threads under GCW dispute; 4 did not belong. Cause: an email that looked legal or formal with no fitting label was given the nearest one instead of none. A sixth case checks the topic label still works. Each case lists the labels on offer and the answer Postie must give. 5 Nov 2026 (item 56): every conversation (mail both ways, 2 or more emails) with no job gets a label, an existing one for the same party and matter or a new \"Who: what\" one; three conversation cases check that, and that a staff member's claim still gets none.",
   "labels": [
     {
       "name": "GCW dispute",
@@ -102,6 +102,56 @@
         "job": null
       },
       "why": "A topic label: a supplier presenting a product it sells, from a brand we use. The label's description matches, so it is applied."
+    },
+    {
+      "id": "conversation-supplier-account",
+      "input": {
+        "conversation": true,
+        "from": "Accounts <accounts@dpaenergy.com.au>",
+        "subject": "Account on hold",
+        "body_gist": "DPA Energy accounts: your trade account is on hold until the September statement is paid. We replied that it was paid on 2 October and sent the remittance."
+      },
+      "expect": {
+        "labels": [],
+        "new_label_prefix": "DPA Energy",
+        "section": "Priority",
+        "job": null
+      },
+      "why": "A back and forth with a supplier, no job: it gets a new label named after the other party, \"DPA Energy: ...\"."
+    },
+    {
+      "id": "conversation-existing-matter",
+      "input": {
+        "conversation": true,
+        "from": "Solicitor <office@lawfirm.com.au>",
+        "subject": "GC Wind Services Pty Ltd: settlement offer",
+        "body_gist": "Our client GC Wind Services Pty Ltd makes the attached offer. We replied asking for the figures."
+      },
+      "expect": {
+        "labels": [
+          "GCW dispute"
+        ],
+        "new_label": "",
+        "section": "Priority",
+        "job": null
+      },
+      "why": "A conversation about a matter that already has a label: the existing label, never a second name."
+    },
+    {
+      "id": "conversation-staff-claim",
+      "input": {
+        "conversation": true,
+        "from": "case manager at the workers compensation insurer",
+        "subject": "Mr [staff member] [claim number] - medical certificate",
+        "body_gist": "The insurer asks for the updated certificate; we replied that it is attached."
+      },
+      "expect": {
+        "labels": [],
+        "new_label": "",
+        "section": "Priority",
+        "job": null
+      },
+      "why": "A conversation, but a staff member's personal matter on the shared inbox: still no label."
     }
   ]
 }

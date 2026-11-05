@@ -191,6 +191,8 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox =
     patch.is_done = personal ? !labels.includes('INBOX') : false;
     patch.triaged_at = null;
   }
+  // our reply can turn a one-off into a conversation: the older-conversations pass reads it again (item 56)
+  if (direction === 'outbound' && thread.suggested_label === '') patch.suggested_label = null;
   await supabaseAdmin.from('email_threads').update(patch).eq('id', thread.id);
   return { bill: isBill, priceList: !personal && direction === 'inbound' && looksLikePriceListEmail(subject, attachments), inbound: direction === 'inbound' };
 }
