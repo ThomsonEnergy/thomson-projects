@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 5 Nov 2026
+
+- BUILT (owner, 4 Nov: "build and push to main now"): item 48, commercial agreements. Levels under 100% are now agreements: do and charge invoices bill full Schedule of Rates labour then one "Commercial agreement (name): 10% off labour" line per claim with a note under the totals; the letter (Settings wording, Clients page > Send) goes out as a PDF with the Schedule of Rates; Withdraw puts the client and their quotes and jobs back to Standard. Migration 20261128090000 tested on staging (functions checked by SQL; a `TEST Builder Claude` rate card may be left on staging, the cleanup delete stalled). Production migration and merge: see the PR. Detail: `docs/PROJECT_SPEC.md` D1a.
+
 ## 4 Nov 2026
 
 - Owner (item 48): the agreement is an efficiency rate, not a discount, worded so our Schedule of Rates does not look inflated, withdrawable when the client stops being efficient (late payment, disputes). Wording drafted as a conditional reduction (stands when the invoice is paid in full by the due date) rather than naming SOPA, which the Acts would void. Detail: `docs/IDEAS_BACKLOG.md` item 48.
