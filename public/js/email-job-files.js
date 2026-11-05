@@ -7,7 +7,7 @@
 //
 //   emailSaveJobBtnsHtml(items, i)          "Save to job" button for items[i] (empty if it cannot be saved)
 //   wireEmailSaveJob(root, items, opts)      wires those buttons and "Save all to job"; opts { jobs(), onSaved(kind) }
-//   emailSaveJobRefresh(root, jobs)          shows or hides the buttons once the conversation's jobs are known
+//   emailSaveJobRefresh(root, jobs)          shows or hides the buttons (and says "On the job") once the jobs are known
 //   openJobFilePicker({ jobs, chosen, onDone })  the Add from job panel; onDone(refs) with { bucket, path, name, size, key }
 // items: [{ emailId, att }] where att is one entry of emails.attachments.
 // The job Emails tab's chips are drawn by mountJobEmailAttachments (email-view.js), which adds these
@@ -19,12 +19,14 @@ const EMAIL_PHOTO_MIME = /^image\/(jpeg|jpg|png|webp|gif)$/i;
 
 // Only received files (from Gmail) can be saved; files we sent already live in our storage.
 const emailAttSavable = (att) => att && att.part_id !== undefined && att.part_id !== null && !att.storage;
-const emailAttSaved = (att) => Array.isArray(att && att.saved_to) && att.saved_to.length > 0;
+// Saved to one of these jobs (emails.attachments[].saved_to, written by save-email-attachment).
+const emailAttSaved = (att, jobIds) => ((att && att.saved_to) || []).some(s => jobIds.includes(s.project_id));
+const emailSaveJobText = (att, jobs) => (emailAttSaved(att, (jobs || []).map(j => j.id)) ? '&#10003; On the job' : 'Save to job');
 
 function emailSaveJobBtnsHtml(items, i) {
   const att = items[i] && items[i].att;
   if (!emailAttSavable(att)) return '';
-  return `<button type="button" class="secondary email-save-job" data-sj="${i}" style="font-size:12px; padding:4px 10px;" title="Put this on the job's Site Photos or Documents">${emailAttSaved(att) ? '&#10003; On the job' : 'Save to job'}</button>`;
+  return `<button type="button" class="secondary email-save-job" data-sj="${i}" style="font-size:12px; padding:4px 10px;" title="Put this on the job's Site Photos or Documents">Save to job</button>`;
 }
 
 function emailSaveAllBtnHtml(items) {
@@ -32,26 +34,28 @@ function emailSaveAllBtnHtml(items) {
     ? '<button type="button" class="secondary email-save-all" style="font-size:12px; padding:4px 10px;">Save all to job</button>' : '';
 }
 
+// root: one wired box, or a page area holding several (the Inbox thread).
 function emailSaveJobRefresh(root, jobs) {
   if (!root) return;
-  root.querySelectorAll('.email-save-job, .email-save-all, .email-save-label').forEach(b => { b.style.display = (jobs || []).length ? '' : 'none'; });
+  const boxes = [root, ...root.querySelectorAll('.email-sj-root')].filter(b => b.emailSjItems);
+  boxes.forEach(box => {
+    box.querySelectorAll('.email-save-job, .email-save-all, .email-save-label').forEach(b => { b.style.display = (jobs || []).length ? (b.dataset.display || '') : 'none'; });
+    box.querySelectorAll('.email-save-job').forEach(b => { b.innerHTML = emailSaveJobText(box.emailSjItems[Number(b.dataset.sj)].att, jobs); });
+  });
 }
 
 function wireEmailSaveJob(root, items, opts) {
+  root.classList.add('email-sj-root');
+  root.emailSjItems = items;
+  const after = (kind) => { emailSaveJobRefresh(root, opts.jobs()); if (opts.onSaved) opts.onSaved(kind); };
   root.querySelectorAll('.email-save-job').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      openSaveToJobPanel([items[Number(btn.dataset.sj)]], opts.jobs(), (kind) => {
-        btn.innerHTML = '&#10003; On the job';
-        if (opts.onSaved) opts.onSaved(kind);
-      });
+      openSaveToJobPanel([items[Number(btn.dataset.sj)]], opts.jobs(), after);
     });
   });
   root.querySelectorAll('.email-save-all').forEach(btn => {
-    btn.addEventListener('click', () => openSaveToJobPanel(items.filter(x => emailAttSavable(x.att)), opts.jobs(), (kind) => {
-      root.querySelectorAll('.email-save-job').forEach(b => { if (emailAttSaved(items[Number(b.dataset.sj)].att)) b.innerHTML = '&#10003; On the job'; });
-      if (opts.onSaved) opts.onSaved(kind);
-    }));
+    btn.addEventListener('click', () => openSaveToJobPanel(items.filter(x => emailAttSavable(x.att)), opts.jobs(), after));
   });
   emailSaveJobRefresh(root, opts.jobs());
 }
@@ -62,12 +66,11 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
   if (!jobs || !jobs.length) { alert('Tag this conversation to a job first.'); return; }
   const one = items.length === 1 ? items[0].att : null;
   const isPic = (a) => EMAIL_PHOTO_MIME.test(a.mime || '');
-  const already = items.filter(x => emailAttSaved(x.att)).length;
   const baseName = one ? String(one.name || 'file') : '';
   const overlay = openModal(`
     <h2 style="margin-top:0;">${one ? 'Save to job' : `Save ${items.length} attachments to the job`}</h2>
     <p class="subtitle" style="margin:0 0 8px; font-size:12px;">${one ? `${escapeHtml(baseName)}${one.size ? ' (' + emailSize(one.size) + ')' : ''}` : 'Pictures go on Site Photos, other files into Documents, each under its own file name.'}</p>
-    ${already ? `<div class="error-box" style="background:transparent; margin:0 0 8px;">${one ? 'This is already on the job. Saving again makes a second copy.' : `${already} of these ${already === 1 ? 'is' : 'are'} already on the job and will be skipped.`}</div>` : ''}
+    <div id="sj-already" class="error-box" style="background:transparent; margin:0 0 8px; display:none;"></div>
     ${jobs.length > 1 ? `<label style="margin-top:0;">Job</label><select id="sj-job">${jobs.map(j => `<option value="${j.id}">${escapeHtml(j.label || '')}</option>`).join('')}</select>` : `<p style="margin:0 0 4px;"><strong>${escapeHtml(jobs[0].label || 'This job')}</strong></p>`}
     ${one ? `<label>Put it on</label>
       <div style="display:flex; gap:16px; flex-wrap:wrap;">
@@ -93,18 +96,25 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
     folderSel.innerHTML = names.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('') + '<option value="__new">+ New folder</option>';
   };
   const showFolder = () => { q('#sj-folder-wrap').style.display = to() === 'photos' ? 'none' : ''; };
+  const notYet = () => items.filter(x => !emailAttSaved(x.att, [jobId()]));
+  const showAlready = () => {
+    const already = items.length - notYet().length, box = q('#sj-already');
+    box.style.display = already ? '' : 'none';
+    box.textContent = one ? 'This is already on the job. Saving again makes a second copy.' : `${already} of these ${already === 1 ? 'is' : 'are'} already on the job and will be skipped.`;
+  };
   folderSel.addEventListener('change', () => { q('#sj-new-folder').style.display = folderSel.value === '__new' ? '' : 'none'; });
   overlay.querySelectorAll('input[name="sj-to"]').forEach(r => r.addEventListener('change', showFolder));
-  if (q('#sj-job')) q('#sj-job').addEventListener('change', loadFolders);
+  if (q('#sj-job')) q('#sj-job').addEventListener('change', () => { loadFolders(); showAlready(); });
   q('#sj-cancel').addEventListener('click', () => overlay.remove());
   showFolder();
+  showAlready();
   loadFolders();
 
   q('#sj-save').addEventListener('click', async () => {
     const btn = q('#sj-save'), msg = q('#sj-msg');
     const folder = folderSel.value === '__new' ? q('#sj-new-folder').value.trim() : folderSel.value;
     if (to() !== 'photos' && !folder) { msg.innerHTML = '<div class="error-box">Name the new folder.</div>'; return; }
-    const todo = one ? items : items.filter(x => !emailAttSaved(x.att));
+    const todo = one ? items : notYet();
     if (!todo.length) { overlay.remove(); return; }
     btn.disabled = true;
     const kinds = new Set();
@@ -150,8 +160,7 @@ async function emailJobFiles(projectId) {
   const files = (docs || []).map(d => ({ key: 'project-documents:' + d.file_path, bucket: 'project-documents', path: d.file_path, name: d.file_name, folder: d.folder || 'General', size: 0 }));
   // sizes: list each folder the files sit in (best effort; the server checks the real total)
   const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
-  const lists = [...new Set(files.map(f => 'project-documents|' + dirOf(f.path)))].slice(0, 8);
-  if (pics.length) lists.push('site-photos|' + projectId);
+  const lists = [...new Set([...files, ...pics].map(f => f.bucket + '|' + dirOf(f.path)))].slice(0, 12);
   const sizes = {};
   await Promise.all(lists.map(async (k) => {
     const [bucket, dir] = k.split('|');

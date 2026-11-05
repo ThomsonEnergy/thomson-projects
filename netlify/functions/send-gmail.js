@@ -29,17 +29,27 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // site-photos is a public bucket that also holds other things (markups, proposal pictures): only
 // paths that are a job's site photo (a project_photos row) are sent. Every row's url was made by
-// getPublicUrl, so the same call gives the exact url to look for, all photos in one query. Not
-// narrowed by the job in the path: a merged job's photos keep their old folder (merge_jobs).
+// getPublicUrl, so the same call gives the exact url to look for. First among the jobs named in the
+// paths (<job id>/..., uses the project_id index); then any job, because a merged job's photos keep
+// their old folder (merge_jobs).
 async function checkJobPhotos(supabaseAdmin, paths) {
   if (!paths.length) return;
   const urlOf = {};
   for (const p of paths) {
     try { urlOf[p] = supabaseAdmin.storage.from('site-photos').getPublicUrl(p).data.publicUrl; } catch (e) { throw new Error('One of the attachments is not valid.'); }
   }
-  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('url', Object.values(urlOf));
-  if (error) throw new Error('Could not check the photos: ' + error.message);
-  const found = new Set((data || []).map(r => r.url));
+  const found = new Set();
+  const look = async (urls, jobIds) => {
+    let query = supabaseAdmin.from('project_photos').select('url').in('url', urls);
+    if (jobIds) query = query.in('project_id', jobIds);
+    const { data, error } = await query;
+    if (error) throw new Error('Could not check the photos: ' + error.message);
+    (data || []).forEach(r => found.add(r.url));
+  };
+  const jobIds = [...new Set(paths.map(p => p.split('/')[0]))].filter(id => UUID.test(id));
+  if (jobIds.length) await look(Object.values(urlOf), jobIds);
+  const rest = paths.filter(p => !found.has(urlOf[p]));
+  if (rest.length) await look(rest.map(p => urlOf[p]), null);
   const missing = paths.find(p => !found.has(urlOf[p]));
   if (missing) throw new Error(`A photo (${missing.split('/').pop()}) is not on a job any more. Take it off and add it again.`);
 }
@@ -51,14 +61,14 @@ async function loadAttachments(supabaseAdmin, list) {
     if (!a || !ALLOWED_BUCKETS.includes(a.bucket) || typeof a.path !== 'string' || !a.path || a.path.includes('..')) throw new Error('One of the attachments is not valid.');
   }
   await checkJobPhotos(supabaseAdmin, list.filter(a => a.bucket === 'site-photos').map(a => a.path));
-  const files = await Promise.all(list.map(async (a) => {
+  // one at a time, stopping as soon as the total is over (no point holding big files we cannot send)
+  const out = []; let total = 0;
+  for (const a of list) {
     const { data, error } = await supabaseAdmin.storage.from(a.bucket).download(a.path);
     if (error || !data) throw new Error(`Could not read the attachment "${a.name || a.path}": ${error ? error.message : 'not found'}`);
-    return { a, data, content: Buffer.from(await data.arrayBuffer()) };
-  }));
-  if (files.reduce((n, f) => n + f.content.length, 0) > MAX_TOTAL_BYTES) throw new Error('The attachments add up to more than 20 MB. Send them in more than one email.');
-  const out = [];
-  for (const { a, data, content } of files) {
+    const content = Buffer.from(await data.arrayBuffer());
+    total += content.length;
+    if (total > MAX_TOTAL_BYTES) throw new Error('The attachments add up to more than 20 MB. Send them in more than one email.');
     const name = String(a.name || a.path.split('/').pop() || 'file').replace(/[\r\n\\/]/g, '_').slice(0, 150);
     const ext = (name.split('.').pop() || '').toLowerCase();
     out.push({ filename: name, mime: MIME_BY_EXT[ext] || data.type || 'application/octet-stream', content, storage: { bucket: a.bucket, path: a.path } });

@@ -114,7 +114,7 @@ function mountJobEmailAttachments(el, all, { project, ctx, onSaved }) {
 
 // A picture sent inside the email body (iPhone and Outlook do this with photos), big enough not to
 // be a logo or signature: it can be saved to the job like an attachment.
-const emailIsBodyPhoto = (a) => /^image\//i.test(a.mime || '') && (a.size || 0) >= 20000;
+const emailIsBodyPhoto = (a) => /^image\//i.test(a.mime || '') && (a.size || 0) >= 150000;
 
 // ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }   (received mail, from Gmail)
 // ctx.fetchStored(attachment)          -> { name, mime, data(base64) }   (mail we sent, from storage)
@@ -218,8 +218,10 @@ async function mountEmailBody(el, email, ctx) {
   }
   if (bodyPhotos.length) {
     const row = document.createElement('div');
+    row.className = 'email-save-label';
+    row.dataset.display = 'flex';
     row.style.cssText = 'margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px;';
-    row.innerHTML = '<span class="subtitle email-save-label" style="margin:0;">Pictures in the email:</span>' + bodyPhotos.map(a => `<span style="display:inline-flex; gap:4px; align-items:center;">${escapeHtml(a.name)} ${saveBtn(a)}</span>`).join('');
+    row.innerHTML = '<span class="subtitle" style="margin:0;">Pictures in the email:</span>' + bodyPhotos.map(a => `<span style="display:inline-flex; gap:4px; align-items:center;">${escapeHtml(a.name)} ${saveBtn(a)}</span>`).join('');
     el.appendChild(row);
   }
   if (canSave && savable.some(emailAttSavable)) {

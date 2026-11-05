@@ -24,15 +24,21 @@ const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const safeName = (s) => String(s || 'file').replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 100);
 const extOf = (name) => { const m = String(name || '').match(/\.([a-z0-9]{1,6})$/i); return m ? m[1].toLowerCase() : ''; };
 
-// The picture at 1920 px at most, or the original if the image tools cannot do it (it is still saved).
-async function squashPhoto(admin, path, mime) {
+// The picture at 1920 px at most: put up for a moment under a temporary name, read back through
+// the image tools, then removed. The original comes back if the image tools cannot do it.
+async function squashPhoto(admin, buf, mime, projectId) {
+  const tmp = `${projectId}/tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const { data, error } = await admin.storage.from('site-photos').download(path, { transform: { width: 1920, height: 1920, resize: 'contain', quality: 82, format: 'origin' } });
-    if (error || !data) return;
-    const smaller = Buffer.from(await data.arrayBuffer());
-    if (smaller.length) await admin.storage.from('site-photos').upload(path, smaller, { contentType: mime, upsert: true });
+    const { error: upErr } = await admin.storage.from('site-photos').upload(tmp, buf, { contentType: mime });
+    if (upErr) return buf;
+    const { data, error } = await admin.storage.from('site-photos').download(tmp, { transform: { width: 1920, height: 1920, resize: 'contain', quality: 82, format: 'origin' } });
+    const smaller = !error && data ? Buffer.from(await data.arrayBuffer()) : null;
+    return smaller && smaller.length && smaller.length < buf.length ? smaller : buf;
   } catch (err) {
-    console.error('save-email-attachment: could not squash', path, err.message);
+    console.error('save-email-attachment: could not squash', err.message);
+    return buf;
+  } finally {
+    await admin.storage.from('site-photos').remove([tmp]).catch(() => {});
   }
 }
 
@@ -61,7 +67,7 @@ exports.handler = async (event) => {
     const mime = String(listed.mime || 'application/octet-stream').toLowerCase();
     if (to === 'photos' && !PHOTO_MIMES.includes(mime)) return json(400, { ok: false, error: 'Only pictures (JPG, PNG, WebP, GIF) go on Site Photos. Save this one to Documents.' });
 
-    const buf = await downloadAttachment(email.gmail_message_id, partId, seen.mailbox);
+    let buf = await downloadAttachment(email.gmail_message_id, partId, seen.mailbox);
     if (buf.length > MAX_BYTES) return json(413, { ok: false, error: 'That file is over 25 MB.' });
 
     const original = String(listed.name || 'file');
@@ -80,9 +86,10 @@ exports.handler = async (event) => {
       path = `documents/${projectId}/${Date.now()}-${safeName(fileName)}`;
       row = { project_id: projectId, folder: String(folder || '').trim().slice(0, 60) || 'Emails', file_path: path, file_name: fileName.slice(0, 150), mime_type: mime, uploaded_by: user.id };
     }
-    const { error: upErr } = await admin.storage.from(bucket).upload(path, buf, { contentType: mime });
+    if (to === 'photos' && buf.length > SQUASH_OVER && mime !== 'image/gif') buf = await squashPhoto(admin, buf, mime, projectId);
+    // uploaded as the person, so the file is theirs to delete later like any upload of their own
+    const { error: upErr } = await asUser.storage.from(bucket).upload(path, buf, { contentType: mime });
     if (upErr) throw upErr;
-    if (to === 'photos' && buf.length > SQUASH_OVER && mime !== 'image/gif') await squashPhoto(admin, path, mime);
     const { data: made, error } = await asUser.from(table).insert(row).select('id').single();
     if (error) { await admin.storage.from(bucket).remove([path]); return json(403, { ok: false, error: error.message }); }
     const saved = { kind: to === 'photos' ? 'photo' : 'document', id: made.id };
@@ -93,7 +100,8 @@ exports.handler = async (event) => {
     const entry = list.find(a => String(a.part_id) === String(partId));
     if (entry) {
       entry.saved_to = [...(entry.saved_to || []), { project_id: projectId, ...saved, at: new Date().toISOString(), by: user.id }];
-      await admin.from('emails').update({ attachments: list }).eq('id', email.id);
+      const { error: markErr } = await admin.from('emails').update({ attachments: list }).eq('id', email.id);
+      if (markErr) console.error('save-email-attachment: saved, but could not mark the email', email.id, markErr.message);
     }
     return json(200, { ok: true, ...saved });
   } catch (err) {

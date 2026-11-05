@@ -30,6 +30,7 @@ exports.handler = async (event) => {
     if (buf.length > MAX_BYTES) return json(413, { ok: false, error: 'This file is too big to open here. Open the email in Gmail to get it.' });
     return json(200, { ok: true, name: listed.name, mime: listed.mime || 'application/octet-stream', data: buf.toString('base64') });
   } catch (err) {
+    if (/no longer in Gmail|empty file/.test(err.message)) return json(404, { ok: false, error: err.message });
     console.error('get-email-attachment failed:', err.message);
     return json(500, { ok: false, error: err.message });
   }
