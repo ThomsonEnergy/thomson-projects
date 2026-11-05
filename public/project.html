@@ -108,6 +108,14 @@
         document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;
         return null;
       }
+      // a job merged into another (item 47): its J number and old links open the merged job
+      if (project.merged_into_project_id) {
+        const next = new URLSearchParams(location.search);  // keep the tab and anything else the link asked for
+        next.set('id', project.merged_into_project_id);
+        next.set('merged_from', project.id);
+        location.replace(`/project.html?${next.toString()}`);
+        return null;
+      }
       paintJobHeaderEarly(project);
 
       const isJob = !!project.job_number;
@@ -4418,12 +4426,12 @@
       // A quote still being built runs in steps (item 27): Pre-quote info, Site visit, Pricing,
       // Scope of works, Send. Its own tab, open by default.
       const isStepQuote = !project.job_number && !isFrozenQuote && pricingVisible && !editMode;
-      // Skipped the quote/estimate step entirely (dashboard.html's
-      // "+ New job (no quote)") - quoted_amount is 0 on its one cost
-      // centre, so every quote/estimate/% figure above is meaningless for
-      // this job. Invoiced off whatever's actually accrued instead (see
-      // openInvoiceActualCostsPanel), not a % of a quote that never existed.
-      const isQuoteFree = project.proposal_template === 'direct_job';
+      // No quote behind this job: made with "+ New job (no quote)", or a job that never came from a
+      // quote and has nothing quoted (a ServiceM8 job brought across as "Quoted" at $0, J7063 and
+      // J7069, 5 Nov 2026). Every quote/estimate/% figure is meaningless for it, so it is invoiced off
+      // whatever's actually accrued (openInvoiceActualCostsPanel), not a % of a quote that never existed.
+      const isQuoteFree = project.proposal_template === 'direct_job'
+        || (!!project.job_number && !project.source_quote_id && quoted <= 0);
 
       setJobTitle(project);
       const content = document.getElementById('content');
@@ -4660,6 +4668,7 @@
 
               <div class="card">
                 <h2>Needs attention</h2>
+                <div id="job-merge-area" style="margin:6px 0;"></div>
                 <div id="summary-rate-card" style="margin:6px 0;"></div>
                 <div id="summary-ccew-line"></div>
                 <div id="summary-po-line">${project.job_number ? `<p class="subtitle">Loading purchase orders...</p>` : `<p class="subtitle">Purchase orders start once this quote is approved and becomes a job.</p>`}</div>
@@ -5097,7 +5106,7 @@
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
               </div>
 
-              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
+              ${project.proposal_template !== 'time_and_materials' && !isQuoteFree && !isStepQuote ? `
               <div class="card">
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
@@ -5409,6 +5418,7 @@
       }
 
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
+      loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
