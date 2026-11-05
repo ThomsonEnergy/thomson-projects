@@ -94,6 +94,23 @@ async function emailOpenAttachment(emailId, att, ctx) {
   } catch (err) { alert(err.message); }
 }
 
+// The job Emails tab: one row of chips per conversation, tap to open. With js/email-job-files.js
+// loaded, Save to job beside each received file and Save all when there are several.
+// items: [{ emailId, att }]; onSaved(kind) after a save ('photo' or 'document').
+function mountJobEmailAttachments(el, items, { project, ctx, onSaved }) {
+  if (!el || !items.length) return;
+  const canSave = typeof wireEmailSaveJob === 'function';
+  el.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;';
+  el.innerHTML = items.map((x, i) => `<span style="display:inline-flex; gap:4px;"><button type="button" class="secondary job-email-att" data-i="${i}" style="font-size:12px; padding:4px 10px;">&#128206; ${escapeHtml(x.att.name)}</button>${canSave ? emailSaveJobBtnsHtml(items, i) : ''}</span>`).join('') + (canSave ? emailSaveAllBtnHtml(items) : '');
+  el.querySelectorAll('.job-email-att').forEach(btn => btn.addEventListener('click', async () => {
+    const x = items[Number(btn.dataset.i)];
+    const original = btn.innerHTML; btn.disabled = true; btn.textContent = 'Opening...';
+    await emailOpenAttachment(x.emailId, x.att, ctx);
+    btn.disabled = false; btn.innerHTML = original;
+  }));
+  if (canSave) wireEmailSaveJob(el, items, { jobs: () => [{ id: project.id, label: projectRef(project) }], onSaved });
+}
+
 // ctx.fetchAttachment(emailId, partId) -> { name, mime, data(base64) }   (received mail, from Gmail)
 // ctx.fetchStored(attachment)          -> { name, mime, data(base64) }   (mail we sent, from storage)
 // ctx.jobs()                           -> [{ id, label }] the conversation's jobs (optional: Save to job)
@@ -195,6 +212,6 @@ async function mountEmailBody(el, email, ctx) {
   if (canSave && files.some(emailAttSavable)) {
     const all = emailSaveAllBtnHtml(items);
     if (all) { const row = document.createElement('div'); row.style.marginTop = '8px'; row.innerHTML = all; el.appendChild(row); }
-    wireEmailSaveJob(el, items, { jobs: ctx.jobs, onSaved: ctx.onSavedToJob });
+    wireEmailSaveJob(el, items, { jobs: ctx.jobs });
   }
 }

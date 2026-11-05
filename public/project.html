@@ -6274,7 +6274,7 @@
             <button type="button" class="secondary job-email-untag" data-link="${l.id}" style="font-size:12px; padding:5px 10px;">Remove from job</button>
           </div></div>`;
       }).join('');
-      if (typeof mountJobEmailAttachments === 'function') el.querySelectorAll('.job-email-atts').forEach(box => mountJobEmailAttachments(box,
+      el.querySelectorAll('.job-email-atts').forEach(box => mountJobEmailAttachments(box,
         (byThread[box.dataset.t] || []).flatMap(m => (m.attachments || []).filter(a => !(a.inline && a.cid)).map(att => ({ emailId: m.id, att }))),
         { project, ctx, onSaved: (kind) => (kind === 'photo' ? loadSitePhotos(project.id) : loadDocuments(project.id)) }));
       el.querySelectorAll('.job-email-reply').forEach(btn => btn.addEventListener('click', () => {

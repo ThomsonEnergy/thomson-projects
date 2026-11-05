@@ -1,5 +1,5 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { downloadAttachment } = require('./_shared/supplier-bill-intake');
+const { downloadAttachment } = require('./_shared/google-client');
 const { threadForUser } = require('./_shared/mailboxes');
 
 // POST { email_id, part_id } - returns one attachment (or inline image) of an email in

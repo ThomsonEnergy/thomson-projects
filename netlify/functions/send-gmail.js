@@ -29,14 +29,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // site-photos is a public bucket that also holds other things (markups, proposal pictures): only
 // paths that are a job's site photo (a project_photos row) are sent. Every row's url was made by
-// getPublicUrl, so the same call gives the exact url to look for, all photos in one query.
+// getPublicUrl, so the same call gives the exact url to look for, all photos in one query (narrowed
+// to the jobs in the paths, <job id>/..., so it uses the project_id index).
 async function checkJobPhotos(supabaseAdmin, paths) {
   if (!paths.length) return;
   const urlOf = {};
   for (const p of paths) {
     try { urlOf[p] = supabaseAdmin.storage.from('site-photos').getPublicUrl(p).data.publicUrl; } catch (e) { throw new Error('One of the attachments is not valid.'); }
   }
-  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('url', Object.values(urlOf));
+  const jobIds = [...new Set(paths.map(p => p.split('/')[0]))];
+  if (!jobIds.every(id => UUID.test(id))) throw new Error('One of the attachments is not valid.');
+  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('project_id', jobIds).in('url', Object.values(urlOf));
   if (error) throw new Error('Could not check the photos: ' + error.message);
   const found = new Set((data || []).map(r => r.url));
   const missing = paths.find(p => !found.has(urlOf[p]));
@@ -50,13 +53,14 @@ async function loadAttachments(supabaseAdmin, list) {
     if (!a || !ALLOWED_BUCKETS.includes(a.bucket) || typeof a.path !== 'string' || !a.path || a.path.includes('..')) throw new Error('One of the attachments is not valid.');
   }
   await checkJobPhotos(supabaseAdmin, list.filter(a => a.bucket === 'site-photos').map(a => a.path));
-  const out = []; let total = 0;
-  for (const a of list) {
+  const files = await Promise.all(list.map(async (a) => {
     const { data, error } = await supabaseAdmin.storage.from(a.bucket).download(a.path);
     if (error || !data) throw new Error(`Could not read the attachment "${a.name || a.path}": ${error ? error.message : 'not found'}`);
-    const content = Buffer.from(await data.arrayBuffer());
-    total += content.length;
-    if (total > MAX_TOTAL_BYTES) throw new Error('The attachments add up to more than 20 MB. Send them in more than one email.');
+    return { a, data, content: Buffer.from(await data.arrayBuffer()) };
+  }));
+  if (files.reduce((n, f) => n + f.content.length, 0) > MAX_TOTAL_BYTES) throw new Error('The attachments add up to more than 20 MB. Send them in more than one email.');
+  const out = [];
+  for (const { a, data, content } of files) {
     const name = String(a.name || a.path.split('/').pop() || 'file').replace(/[\r\n\\/]/g, '_').slice(0, 150);
     const ext = (name.split('.').pop() || '').toLowerCase();
     out.push({ filename: name, mime: MIME_BY_EXT[ext] || data.type || 'application/octet-stream', content, storage: { bucket: a.bucket, path: a.path } });

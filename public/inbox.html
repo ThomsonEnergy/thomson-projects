@@ -706,7 +706,7 @@
         if (/\[[^\]]{1,40}\]/.test(bodyText) && !confirm('The reply still has a [gap] in square brackets. Send anyway?')) return;
         if (!replyTo) { msg.innerHTML = '<div class="error-box">Couldn\'t work out who to reply to.</div>'; return; }
         const refs = replyPicker.refs();
-        const limit = emailAttachLimitError(replyPicker.files().length + refs.length, replyPicker.files().reduce((n, f) => n + f.size, 0) + refs.reduce((n, r) => n + (r.size || 0), 0));
+        const limit = replyPicker.limitError();
         if (limit) { msg.innerHTML = `<div class="error-box">${escapeHtml(limit)}</div>`; return; }
         btn.disabled = true;
         btn.textContent = replyPicker.files().length ? 'Uploading...' : 'Sending...';

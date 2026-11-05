@@ -15,7 +15,7 @@
 
 const fetch = require('node-fetch');
 const { getAdminClient } = require('./require-admin');
-const { gmailRequest } = require('./google-client');
+const { gmailRequest, downloadAttachment } = require('./google-client');
 const { sharedMailboxId } = require('./mailboxes');
 const { selfBaseUrl } = require('./site-url');
 const { internalHeaders } = require('./require-internal');
@@ -69,28 +69,6 @@ function billFiles(attachments) {
     if (isPdf) return true;
     return mime.startsWith('image/') && !a.inline && (a.size || 0) >= 20000;
   });
-}
-
-function findPart(payload, partId) {
-  if (!payload) return null;
-  if ((payload.partId || null) === partId && (payload.body?.attachmentId || payload.body?.data)) return payload;
-  for (const p of payload.parts || []) {
-    const hit = findPart(p, partId);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-// One attachment of an email as a Buffer. mailbox: the conversation's own mailbox (a My inbox);
-// left out, it is sales@.
-async function downloadAttachment(gmailMessageId, partId, mailbox = null) {
-  const msg = await gmailRequest(`messages/${gmailMessageId}?format=full`, {}, mailbox);
-  const part = findPart(msg.payload, String(partId));
-  if (!part) throw new Error('That attachment is no longer in Gmail.');
-  let b64url = part.body.data;
-  if (!b64url) b64url = (await gmailRequest(`messages/${gmailMessageId}/attachments/${part.body.attachmentId}`, {}, mailbox)).data;
-  if (!b64url) throw new Error('Gmail returned an empty file.');
-  return Buffer.from(b64url.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
 }
 
 // Starts process-supplier-bills-background.js. Awaited only until it is accepted (a function
@@ -709,5 +687,5 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
 
 module.exports = {
   INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing,
-  processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore, downloadAttachment,
+  processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore,
 };
