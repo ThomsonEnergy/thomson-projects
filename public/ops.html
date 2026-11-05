@@ -74,7 +74,7 @@
 
     <div class="card">
       <h2>What they did</h2>
-      <p class="subtitle" style="margin:-4px 0 8px;">Each worker's latest run in the last 7 days, and how often it failed. The email sync and Postie run every 5 minutes, so they show here only when they fail.</p>
+      <p class="subtitle" style="margin:-4px 0 8px;">Each worker's latest run in the last 7 days, and how often it failed. The email sync and Postie run many times an hour, so they show here only when they fail.</p>
       <div id="op-runs"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
@@ -85,11 +85,11 @@
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const when = (iso) => iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : 'never';
     let labels = {};
-    let showAllWorkers = false;
-    const QUIET_AGENTS = ['sync-gmail', 'mailbox-work']; // run every 5 minutes: shown only when they fail
+    const QUIET_AGENTS = ['sync-gmail', 'mailbox-work']; // run many times an hour: shown only when they fail
     const RUN_COLS = 'agent, status, summary, started_at, input_tokens, output_tokens';
     const FAIL_LIMIT = 500;
     const weekAgo = () => new Date(Date.now() - 7 * 86400000).toISOString();
+    const NOT_QUIET = `(ops-digest,${QUIET_AGENTS.join(',')})`;
 
     function workerState(b) {
       if (!b.last_ok_at) return b.last_error_at ? 'bad' : 'idle';
@@ -98,25 +98,29 @@
     }
 
     async function load() {
-      const [bills, tasks, beats, runs, digest, prices, checks, stIssues, lows, otherFails, quietFails, billReplies, stReplies] = await Promise.all([
-        supabaseClient.from('supplier_bill_inbox').select('status, match_confidence').in('status', ['to_check', 'failed']),
+      const since = weekAgo();
+      const res = await Promise.all([
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'to_check'),
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'to_check').eq('match_confidence', 'confident'),
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
         supabaseClient.from('agent_tasks').select('*').eq('status', 'open').order('created_at'),
         supabaseClient.from('agent_heartbeats').select('*').order('label'),
-        // What they did: the 5 minute email sync and Postie only when they failed (item 54)
-        supabaseClient.from('agent_runs').select(RUN_COLS).not('agent', 'in', `(ops-digest,${QUIET_AGENTS.join(',')})`).gte('started_at', weekAgo()).order('started_at', { ascending: false }).limit(300),
+        // What they did: the email sync and Postie only when they failed (item 54)
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'ok').not('agent', 'in', NOT_QUIET).gte('started_at', since).order('started_at', { ascending: false }).limit(300),
         supabaseClient.from('agent_runs').select('*').eq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(1),
         supabaseClient.from('price_changes').select('id', { count: 'exact', head: true }).eq('status', 'waiting'),
         supabaseClient.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems']),
         supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
         supabaseClient.from('stock_low_flags').select('id, location_type, materials(name)', { count: 'exact' }).is('cleared_at', null).order('created_at').limit(3),
-        // failures, the 5 minute workers apart so one failing all day cannot crowd out the rest
-        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').not('agent', 'in', `(ops-digest,${QUIET_AGENTS.join(',')})`).gte('started_at', weekAgo()).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
-        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').in('agent', QUIET_AGENTS).gte('started_at', weekAgo()).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
+        // failures, the frequent workers apart so one failing all day cannot crowd out the rest
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').not('agent', 'in', NOT_QUIET).gte('started_at', since).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').in('agent', QUIET_AGENTS).gte('started_at', since).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
         supabaseClient.from('supplier_bills').select('id', { count: 'exact', head: true }).eq('paid', false).eq('check_status', 'queried').not('query_reply_at', 'is', null),
         supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues').not('query_reply_at', 'is', null),
       ]);
-      const err = [bills, tasks, beats, runs, digest, prices, checks, stIssues, lows, otherFails, quietFails, billReplies, stReplies].find(r => r.error);
+      const err = res.find(r => r.error);
       if (err) { document.getElementById('op-needs').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
+      const [nCheckQ, nSureQ, nFailedQ, tasks, beats, runs, digest, prices, checks, stIssues, lows, otherFails, quietFails, billReplies, stReplies] = res;
       labels = Object.fromEntries((beats.data || []).map(b => [b.agent, b.label]));
 
       // Needs me
@@ -128,10 +132,7 @@
       // everything else is one line per kind with a count and a button (item 54)
       const line = (title, meta, href, button) => items.push(`<div class="op-item"><div class="op-head"><strong>${title}</strong></div>
           ${meta ? `<div class="op-meta">${meta}</div>` : ''}<div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="${href}">${button}</a></div></div>`);
-      const billRows = bills.data || [];
-      const nCheck = billRows.filter(b => b.status === 'to_check').length;
-      const nSure = billRows.filter(b => b.status === 'to_check' && b.match_confidence === 'confident').length;
-      const nFailed = billRows.filter(b => b.status === 'failed').length;
+      const nCheck = nCheckQ.count || 0, nSure = nSureQ.count || 0, nFailed = nFailedQ.count || 0;
       if (nCheck || nFailed) line(`Emailed bills: ${[nCheck ? nCheck + ' to check' : '', nFailed ? nFailed + ' could not be read' : ''].filter(Boolean).join(', ')}`,
         nSure ? `${nSure} ${nSure === 1 ? 'is a sure PO match' : 'are sure PO matches'}: "Line up the sure bills" above does those.` : '', '/supplier-bills.html', 'Open Emailed bills');
       const chk = checks.data || [];
@@ -178,30 +179,22 @@
       const nIdle = beatRows.filter(b => b.st === 'idle').length;
       const nOk = beatRows.length - broken.length - nIdle;
       const workersEl = document.getElementById('op-workers');
+      const open = workersEl.querySelector('details')?.open ? 'open' : ''; // stays open across the minute reload
       workersEl.innerHTML = !beatRows.length ? '<p class="subtitle">No worker has reported yet. They start reporting within a few minutes of going live.</p>'
         : (broken.length ? broken.map(workerHtml).join('') : `<p class="subtitle" style="margin:0;">${nIdle ? `${nOk} workers working, ${nIdle} not run yet.` : `All ${nOk} workers working.`}</p>`)
-          + `<div id="op-workers-all" ${showAllWorkers ? '' : 'hidden'}>${beatRows.filter(b => b.st !== 'bad').map(workerHtml).join('')}</div>`
-          + `<p style="margin:8px 0 0;"><a href="#" id="op-workers-toggle" style="font-size:13px;">${showAllWorkers ? 'Hide' : 'Show all'}</a></p>`;
-      document.getElementById('op-workers-toggle')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        showAllWorkers = !showAllWorkers;
-        document.getElementById('op-workers-all').hidden = !showAllWorkers;
-        e.target.textContent = showAllWorkers ? 'Hide' : 'Show all';
-      });
+          + `<details ${open} style="margin-top:8px;"><summary style="font-size:13px; cursor:pointer;">Show all</summary>${beatRows.filter(b => b.st !== 'bad').map(workerHtml).join('')}</details>`;
 
       // Runs
       // one line per worker: its latest run, and how often it failed in the last 7 days
-      const byAgent = {};
       const fails = [...(otherFails.data || []), ...(quietFails.data || [])];
       const capped = new Set([otherFails, quietFails].filter(q => (q.data || []).length >= FAIL_LIMIT).flatMap(q => q.data.map(r => r.agent)));
+      const byAgent = {};
       [...(runs.data || []), ...fails].forEach(r => {
         const a = byAgent[r.agent] || (byAgent[r.agent] = { latest: r, fails: 0, lastFail: null });
         if (r.started_at > a.latest.started_at) a.latest = r;
-      });
-      fails.forEach(r => { // newest first, so the first one seen is the last failure
-        const a = byAgent[r.agent];
+        if (r.status !== 'failed') return;
         a.fails += 1;
-        if (!a.lastFail) a.lastFail = r;
+        if (!a.lastFail || r.started_at > a.lastFail.started_at) a.lastFail = r;
       });
       const runRows = Object.values(byAgent).sort((x, y) => (y.latest.started_at > x.latest.started_at ? 1 : -1)).slice(0, 20);
       document.getElementById('op-runs').innerHTML = runRows.length ? runRows.map(({ latest: r, fails: n, lastFail: f }) => `<div class="op-item">
@@ -230,7 +223,7 @@
         else alert('The assistant is still loading. Try again in a second.');
       }));
       await load();
-      setInterval(load, 60000);
+      setInterval(() => { if (!document.hidden) load(); }, 60000);
     })();
   </script>
 </body>

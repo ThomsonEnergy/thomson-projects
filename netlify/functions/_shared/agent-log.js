@@ -32,6 +32,9 @@ const AGENTS = {
   'sync-energy-plans': { label: 'Retail plan list from Energy Made Easy (refreshed daily)', every: 15 },
 };
 
+// dedupe_key prefix of the "worker is not working" task (ops-digest.js leaves these out of its lists)
+const AGENT_DOWN_PREFIX = 'agent_down:';
+
 async function managerIds(admin) {
   const { data } = await admin.from('company_settings').select('ops_manager_user_ids').eq('id', 1).maybeSingle();
   return data?.ops_manager_user_ids || [];
@@ -50,7 +53,7 @@ async function beat(admin, agent, ok, error) {
   if (ok) row.last_ok_at = now; else { row.last_error_at = now; row.last_error = String(error || 'failed').slice(0, 500); }
   await admin.from('agent_heartbeats').upsert(row, { onConflict: 'agent' });
 
-  const dedupe = `agent_down:${agent}`;
+  const dedupe = `${AGENT_DOWN_PREFIX}${agent}`;
   if (ok) {
     await admin.from('agent_tasks').update({ status: 'done', resolved_at: now, body: `Working again since ${now.slice(0, 16).replace('T', ' ')} UTC.` })
       .eq('dedupe_key', dedupe).eq('status', 'open');
@@ -96,4 +99,4 @@ async function runAgent(agent, work) {
   return result.response || { statusCode: 200, body: JSON.stringify({ ok: true, summary: result.summary }) };
 }
 
-module.exports = { runAgent, notifyManagers, managerIds, AGENTS };
+module.exports = { runAgent, notifyManagers, managerIds, AGENTS, AGENT_DOWN_PREFIX };

@@ -12,7 +12,7 @@
 // (migration 20261120000000): this digest and the Ops page are where they show.
 
 const { getAdminClient } = require('./_shared/require-admin');
-const { runAgent, notifyManagers } = require('./_shared/agent-log');
+const { runAgent, notifyManagers, AGENT_DOWN_PREFIX } = require('./_shared/agent-log');
 const { missingStatements } = require('./_shared/statement-intake');
 
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + 's')}`;
@@ -28,9 +28,9 @@ async function buildDigest(admin) {
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
     admin.from('agent_tasks').select('title, dedupe_key, created_at').eq('status', 'open').order('created_at'),
-    admin.from('supplier_bill_inbox').select('status, created_at, processed_at').in('status', ['to_check', 'failed']),
+    admin.from('supplier_bill_inbox').select('status, created_at').in('status', ['to_check', 'failed']),
     admin.from('supplier_bill_inbox').select('resolved_by').eq('status', 'saved').gte('resolved_at', since),
-    admin.from('price_changes').select('status, kind, change_pct, resolved_by, created_at').or(`status.eq.waiting,resolved_at.gte.${since}`),
+    admin.from('price_changes').select('status, resolved_by, created_at').or(`status.eq.waiting,resolved_at.gte.${since}`),
     admin.from('supplier_bills').select('check_status, approved_for_payment, created_at, query_reply_at').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems', 'queried']),
     admin.from('supplier_statements').select('created_at, query_reply_at').eq('status', 'issues'),
     missingStatements(admin),
@@ -38,7 +38,7 @@ async function buildDigest(admin) {
   ]);
   const runs = runsRes.data || [], beats = beatsRes.data || [];
   // a worker-down task is already the "Not working" line, so it is not listed twice
-  const tasks = (tasksRes.data || []).filter(t => !String(t.dedupe_key || '').startsWith('agent_down:'));
+  const tasks = (tasksRes.data || []).filter(t => !String(t.dedupe_key || '').startsWith(AGENT_DOWN_PREFIX));
   const cutoff = Date.parse(since);
   const isNew = (iso) => !!iso && Date.parse(iso) >= cutoff;
   // an emailed bill is read up to an hour after it arrives, so its 24 hours run 2 hours behind:
@@ -58,18 +58,19 @@ async function buildDigest(admin) {
   const noReply = queried.filter(b => !b.query_reply_at); // waits on the supplier: listed, never "new", not in needCount
   const lows = lowRes.data || [];
 
-  // each kind: [one, many, rows still waiting, is this row new since yesterday].
+  // each kind: what is still waiting, and which of those rows are new since yesterday.
   // A bill is new by when it was saved (created_at), not checked_at, which every re-check moves.
+  const kind = (one, many, rows, fresh) => ({ one, many, all: rows.length, fresh: rows.filter(fresh).length });
   const kinds = [
-    ['emailed bill to check', 'emailed bills to check', bills.filter(b => b.status === 'to_check'), (b) => isNewEmail(b.created_at)],
-    ['bill that could not be read', 'bills that could not be read', bills.filter(b => b.status === 'failed'), (b) => isNewEmail(b.created_at)],
-    ['bill not matching the PO', 'bills not matching the PO', checks.filter(b => b.check_status === 'problems'), (b) => isNew(b.created_at)],
-    ['bill to approve for payment', 'bills to approve for payment', checks.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment), (b) => isNew(b.created_at)],
-    ['statement not reconciling', 'statements not reconciling', sts, (r) => isNew(r.created_at)],
-    ['supplier reply to a query', 'supplier replies to queries', replies, (r) => isNew(r.query_reply_at)],
-    ['price list change to check', 'price list changes to check', prices.filter(p => p.status === 'waiting'), (p) => isNew(p.created_at)],
-    ['stock item running low', 'stock items running low', lows, (r) => isNew(r.created_at)],
-  ].map(([one, many, rows, fresh]) => ({ one, many, all: rows.length, fresh: rows.filter(fresh).length }));
+    kind('emailed bill to check', 'emailed bills to check', bills.filter(b => b.status === 'to_check'), (b) => isNewEmail(b.created_at)),
+    kind('bill that could not be read', 'bills that could not be read', bills.filter(b => b.status === 'failed'), (b) => isNewEmail(b.created_at)),
+    kind('bill not matching the PO', 'bills not matching the PO', checks.filter(b => b.check_status === 'problems'), (b) => isNew(b.created_at)),
+    kind('bill to approve for payment', 'bills to approve for payment', checks.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment), (b) => isNew(b.created_at)),
+    kind('statement not reconciling', 'statements not reconciling', sts, (r) => isNew(r.created_at)),
+    kind('supplier reply to a query', 'supplier replies to queries', replies, (r) => isNew(r.query_reply_at)),
+    kind('price list change to check', 'price list changes to check', prices.filter(p => p.status === 'waiting'), (p) => isNew(p.created_at)),
+    kind('stock item running low', 'stock items running low', lows, (r) => isNew(r.created_at)),
+  ];
   const newTasks = tasks.filter(t => isNew(t.created_at));
   const newParts = [...kinds.filter(k => k.fresh).map(k => plural(k.fresh, k.one, k.many)), ...newTasks.map(t => t.title)];
   const waitParts = [...kinds.filter(k => k.all).map(k => plural(k.all, k.one, k.many)), ...tasks.map(t => t.title)];
