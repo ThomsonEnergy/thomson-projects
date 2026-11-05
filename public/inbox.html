@@ -637,6 +637,7 @@
             <button type="button" id="reply-send-btn">Send reply</button>
             <button type="button" class="secondary" id="reply-save-btn">Save draft</button>
             ${draft ? '<button type="button" class="secondary" id="reply-discard-btn">Discard draft</button>' : ''}
+            ${!draft && (emails || []).some(e => e.direction === 'inbound') ? `<button type="button" class="secondary" id="reply-ai-btn">Draft reply</button>` : ''}
           </div>
           <div id="reply-msg"></div>
         </div>`;
@@ -692,6 +693,30 @@
           msg.innerHTML = '<p class="subtitle" style="font-size:12px;">Draft saved' + (canMirror(mb()) ? ', also in Gmail.' : '.') + '</p>';
           await loadDrafts();
         } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
+      });
+      // Draft reply (item 55): Postie only drafts by itself when an email asks for an answer;
+      // for anything else it drafts on request, in the background, and the box fills when ready
+      const aiBtn = document.getElementById('reply-ai-btn');
+      if (aiBtn) aiBtn.addEventListener('click', async () => {
+        const msg = document.getElementById('reply-msg');
+        if (document.getElementById('reply-body').value.trim() && !confirm('Replace what you have typed with a draft from ' + S.assistant + '?')) return;
+        aiBtn.disabled = true;
+        aiBtn.textContent = 'Drafting...';
+        msg.innerHTML = `<p class="subtitle" style="font-size:12px;">${escapeHtml(S.assistant)} is writing a draft. It takes up to a minute and fills in here.</p>`;
+        try {
+          await act('draft_reply', { thread_id: threadId });
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 3000));
+            if (S.activeThreadId !== threadId) return; // moved on: the draft waits in Drafts
+            const { data } = await supabaseClient.from('email_drafts').select('id').eq('thread_id', threadId).eq('status', 'draft').limit(1);
+            if (data && data.length) { reload(true); return; }
+          }
+          throw new Error(`${S.assistant} did not finish a draft. Try again, or write it yourself.`);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+          aiBtn.disabled = false;
+          aiBtn.textContent = 'Draft reply';
+        }
       });
       const discard = document.getElementById('reply-discard-btn');
       if (discard) discard.addEventListener('click', async () => {

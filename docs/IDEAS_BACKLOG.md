@@ -36,7 +36,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 57 | Stock kinds: cable by the drum (drums tracked one by one), consumables and tools known from the name and the label, every receive counted, first price lands on $0 items | Built 5 Nov 2026, PR into `staging` (spec A12, A11b, A10), migration 20261130000000 | N | None |
 | 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | LIVE 4 Nov 2026 (spec A13e), migration 20261128080000 | N | None |
 | 54 | Ops manager page trimmed: no-attachment emails filed as not a bill, Needs me one line per kind, digest says what is new since yesterday, workers and runs collapsed | Planned 5 Nov 2026, waiting on yes | N | None |
-| 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Building in: `feat/draft-on-request` | N | None |
+| 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Built 5 Nov 2026, PR into `staging` (spec A18) | N | None |
 | 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Built 5 Nov 2026, PR into `staging` (spec A18) | N | Owner's yes to turn auto labels on for the 4 mailboxes |
 
 ## High lead time, start now
@@ -1168,7 +1168,7 @@ Done means: open Ops manager and Needs me is 5 lines or fewer plus any worker ta
 
 Touches: `public/ops.html`, `netlify/functions/ops-digest.js`, `netlify/functions/_shared/supplier-bill-intake.js` (the no-attachment branch only), `public/supplier-bills.html` (check the All view shows `not_a_bill` rows), docs. Overlaps: item 49 (waiting on yes), item 50 (merged, PR 286) and item 51 (`feat/po-from-scan`, PR into `staging`) touch `supplier-bill-intake.js`, different functions from the no-attachment branch; open PRs on 5 Nov: only PR 34 (old `feat/email-workers`), no clash. Kind: feature (into `staging`); migration no (`not_a_bill` already exists); money no, stock no, RLS no, payroll no. Size: medium (a morning). Test on staging: admin@staging.test, Ops manager page, Emailed bills > All, `/.netlify/functions/ops-digest?force=1` on the staging site; Gmail key on staging for the dispatch-notice test (or insert the inbox row by SQL). Best model: Opus 5.5, effort high, because it is a page and digest change with a known cause, no migration and no money.
 
-## 55. Postie drafts only when the email asks for an answer, and a Draft reply button for the rest (owner's yes 5 Nov 2026, Building in: `feat/draft-on-request`)
+## 55. Postie drafts only when the email asks for an answer, and a Draft reply button for the rest (owner's yes 5 Nov 2026, built the same day in `feat/draft-on-request`, PR into `staging`)
 
 Owner, 5 Nov 2026: do not draft a reply unless the email requests an answer; when a draft is wanted, click Draft reply. Today Postie drafts for every Priority conversation from the last 7 days (a person waiting on us), unless the model says a written reply makes no sense, so FYI mail, confirmations and "thanks, booked" notes all get a draft and a Drafts count.
 
@@ -1178,6 +1178,8 @@ Owner, 5 Nov 2026: do not draft a reply unless the email requests an answer; whe
 
 Done means: an FYI email to sales@ on staging lands in Priority or Other with no draft and the Drafts count does not move; an email asking "when can you come?" gets a draft by itself; opening the FYI email and pressing Draft reply fills the reply box within a few seconds; `npm run check` green.
 
+
+**As built (5 Nov 2026):** the on-request draft runs in a background function (`draft-reply-background.js`, started by `email-actions` `draft_reply` with the internal secret) because an Opus draft can pass the 10 second limit; the Inbox waits for the draft row (up to 90 seconds). The on-request draft uses the last email from them, any age, and always gives a draft. Postie's own drafts now also need the sort's `asks_for_answer`. The Postie eval set covers labels only; a drafting case set is still to write.
 Touches: `netlify/functions/_shared/email-agent.js` (triage schema and prompt, `draftReplies` takes a `force` for one thread), `netlify/functions/email-actions.js` (new `draft_reply` action, `requireActiveUser`, mailbox check), `public/inbox.html` (one button and its handler, `?v=` bump), `docs/PROJECT_SPEC.md` A18, `docs/AI_AGENTS_PLAN.md`. Overlaps: item 53 (waiting on yes) touches `inbox.html` (attachments) and `email-actions.js`; item 54 (waiting on yes) does not. If both 53 and 55 get a yes, build them one after the other in one chat. Kind: feature (into `staging`); migration no; money no, stock no, RLS no, payroll no. Size: small to medium (two hours). Test on staging: sales@staging.test, Inbox, the three clicks above; the AI key and the Gmail key on staging (drafts are saved in Gmail too). Best model: Opus 5.5, effort high, because it changes an agent's prompt and adds a server action, no migration.
 
 ## 56. A label for every conversation without a job: Postie makes them itself and links the trail (owner's yes 5 Nov 2026, built the same day in `feat/postie-labels`, PR into `staging`)
