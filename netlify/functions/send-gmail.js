@@ -2,7 +2,7 @@
 // Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId? }
 //   mailboxId: send a new email from your own inbox (My inbox) instead of sales@
 //   draftId:   the draft this came from: marked sent, and removed from Gmail's drafts
-//   attachments: [{ bucket: 'email-attachments' | 'project-documents', path, name }]
+//   attachments: [{ bucket: 'email-attachments' | 'project-documents' | 'site-photos' (job photos only), path, name }]
 //                (files are uploaded to storage by the browser first - never sent through
 //                 here - and attached from there; up to 10 files, 20 MB in total)
 //   tagProjectId: also tag the conversation to that job (kind: materials_quote | client | supplier | other)
@@ -21,18 +21,49 @@ const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require(
 const { signatureForUser } = require('./_shared/build-email-signature');
 const { sendRecordedEmail } = require('./_shared/send-recorded-email');
 
-const ALLOWED_BUCKETS = ['email-attachments', 'project-documents'];
+const ALLOWED_BUCKETS = ['email-attachments', 'project-documents', 'site-photos'];
 const MAX_FILES = 10;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', dwg: 'application/acad', mp4: 'video/mp4' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// site-photos is a public bucket that also holds other things (markups, proposal pictures): only
+// paths that are a job's site photo (a project_photos row) are sent. Every row's url was made by
+// getPublicUrl, so the same call gives the exact url to look for. First among the jobs named in the
+// paths (<job id>/..., uses the project_id index); then any job, because a merged job's photos keep
+// their old folder (merge_jobs).
+async function checkJobPhotos(supabaseAdmin, paths) {
+  if (!paths.length) return;
+  const urlOf = {};
+  for (const p of paths) {
+    try { urlOf[p] = supabaseAdmin.storage.from('site-photos').getPublicUrl(p).data.publicUrl; } catch (e) { throw new Error('One of the attachments is not valid.'); }
+  }
+  const found = new Set();
+  const look = async (urls, jobIds) => {
+    let query = supabaseAdmin.from('project_photos').select('url').in('url', urls);
+    if (jobIds) query = query.in('project_id', jobIds);
+    const { data, error } = await query;
+    if (error) throw new Error('Could not check the photos: ' + error.message);
+    (data || []).forEach(r => found.add(r.url));
+  };
+  const jobIds = [...new Set(paths.map(p => p.split('/')[0]))].filter(id => UUID.test(id));
+  if (jobIds.length) await look(Object.values(urlOf), jobIds);
+  const rest = paths.filter(p => !found.has(urlOf[p]));
+  if (rest.length) await look(rest.map(p => urlOf[p]), null);
+  const missing = paths.find(p => !found.has(urlOf[p]));
+  if (missing) throw new Error(`A photo (${missing.split('/').pop()}) is not on a job any more. Take it off and add it again.`);
+}
+
 async function loadAttachments(supabaseAdmin, list) {
   if (!Array.isArray(list) || !list.length) return [];
   if (list.length > MAX_FILES) throw new Error(`Attach up to ${MAX_FILES} files.`);
-  const out = []; let total = 0;
   for (const a of list) {
     if (!a || !ALLOWED_BUCKETS.includes(a.bucket) || typeof a.path !== 'string' || !a.path || a.path.includes('..')) throw new Error('One of the attachments is not valid.');
+  }
+  await checkJobPhotos(supabaseAdmin, list.filter(a => a.bucket === 'site-photos').map(a => a.path));
+  // one at a time, stopping as soon as the total is over (no point holding big files we cannot send)
+  const out = []; let total = 0;
+  for (const a of list) {
     const { data, error } = await supabaseAdmin.storage.from(a.bucket).download(a.path);
     if (error || !data) throw new Error(`Could not read the attachment "${a.name || a.path}": ${error ? error.message : 'not found'}`);
     const content = Buffer.from(await data.arrayBuffer());
