@@ -57,10 +57,11 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=124"></script>
+  <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];
+    let myRole = 'staff';
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const dateText = (iso) => iso ? new Date(iso).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const supName = (id) => (suppliers.find(s => s.id === id) || {}).name || 'Unknown supplier';
@@ -120,6 +121,8 @@
         if (b.check_status !== 'no_po') actions += `<button type="button" data-query="${b.id}">${b.check_status === 'queried' ? 'Email again' : 'Query supplier'}</button>`;
         actions += `<button type="button" class="secondary" data-resolve="${b.id}">${b.check_status === 'no_po' ? 'OK without a PO' : 'Accept as is'}</button>`;
       }
+      // paid upfront or at the counter (item 51): Admin and Finance record it here, approved or not
+      if (isFinanceRole(myRole) && !b.paid) actions += `<button type="button" class="secondary" data-paid="${b.id}" title="Paid upfront or at the counter: approves it too">Paid already</button>`;
       actions += `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${b.supplier_id}">Supplier</a>`;
       if (b.file_path) actions += `<button type="button" class="secondary" data-file="${esc(b.file_path)}">Open bill</button>`;
       return `<div class="bc-item">
@@ -165,6 +168,7 @@
         : '<p class="subtitle">Every supplier that billed us last month has sent a statement (checked from the 10th of the month).</p>';
 
       body.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => act(b, { action: 'approve_bill', id: b.dataset.approve }, 'Approving...')));
+      body.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', () => loadPoScan().then(() => openBillPaidPanel(bills.find(x => x.id === b.dataset.paid), load)).catch(err => alert(err.message))));
       body.querySelectorAll('[data-resolve]').forEach(b => b.addEventListener('click', () => {
         const note = prompt('Why is it OK? (for example: price rise agreed with the rep, credit note coming)');
         if (note === null) return;
@@ -221,7 +225,8 @@
         await supabaseClient.auth.signOut();
         window.location.href = '/login.html';
       });
-      if (!isPricingRole(await getMyRole())) {
+      myRole = await getMyRole();
+      if (!isPricingRole(myRole)) {
         document.getElementById('bc-body').innerHTML = '<div class="error-box">Bill checks are for Admin, Finance and Sales.</div>';
         return;
       }

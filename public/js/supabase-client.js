@@ -5383,7 +5383,7 @@ function wireSupplierPicker(overlay, suppliers, ids) {
     }, 250);
   });
 
-  return async function resolveSupplier() {
+  async function resolveSupplier() {
     if (selectedSupplierId) {
       return { supplierId: selectedSupplierId, supplierName: (suppliers.find(s => s.id === selectedSupplierId) || {}).name || searchInput.value.trim() };
     }
@@ -5396,7 +5396,23 @@ function wireSupplierPicker(overlay, suppliers, ids) {
     }).select('id').single();
     if (error) throw error;
     return { supplierId: newSupplier.id, supplierName: typedName };
+  }
+  // Set from a scanned invoice (js/po-scan.js): a matched supplier, or a name typed in as new.
+  resolveSupplier.select = (id, name) => {
+    selectedSupplierId = id;
+    searchInput.value = name;
+    selectedEl.textContent = `Selected: ${name}`;
+    newSection.style.display = 'none';
+    resultsEl.innerHTML = '';
   };
+  resolveSupplier.typeNew = (name) => {
+    selectedSupplierId = null;
+    searchInput.value = name;
+    selectedEl.textContent = '';
+    resultsEl.innerHTML = '';
+    newSection.style.display = 'block';
+  };
+  return resolveSupplier;
 }
 
 // Shared searchable "add a prebuild to this stage" picker - was a plain
@@ -6334,6 +6350,12 @@ function poShowPricesHtml(prefix) {
   return `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:10px;"><input type="checkbox" id="${prefix}-show-prices" style="width:auto;" /> Show prices on the PO sent to the supplier</label>`;
 }
 
+// Paid on the spot (item 51): card at the counter, cash, a transfer made upfront. The panel fields, the
+// PO and bill "paid" panels and the scan button live in js/po-scan.js (loaded on demand: a Create PO panel
+// awaits loadPoScan() first; the PO page and the supplier page load it when a paid button is pressed).
+function poPaidLabel(method) { return { card: 'card', cash: 'cash', bank_transfer: 'bank transfer', airwallex: 'Airwallex' }[method] || 'other'; }
+const loadPoScan = () => loadJsOnce('/js/po-scan.js?v=1', () => typeof wirePoScan === 'function');
+
 // A PO's state, kept by the database from its lines (migration 20261108000000):
 // Ordered (nothing in yet), Part received, All received (close it to approve its bills), Closed (approved).
 function poStatusLabel(po) {
@@ -6349,7 +6371,8 @@ function renderPoBadges(po) {
   const stock = po.stock_source ? `<span class="badge draft" style="margin-left:6px;">Stock PO, from ${escapeHtml(po.supplier_name || 'Warehouse')}</span>` : '';
   const open = po.po_type === 'open' && !po.closed_at ? '<span class="badge draft" style="margin-left:6px;" title="Lines are filled in from the supplier\'s invoice">Open PO: lines from the invoice</span>' : '';
   const tools = po.po_kind === 'tools' ? '<span class="badge draft" style="margin-left:6px;" title="Lines land in the Tools register, not stock or a job">Tools PO</span>' : '';
-  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}${open}${tools}`;
+  const paid = po.paid_method ? `<span class="badge accepted" style="margin-left:6px;" title="Paid on the spot${po.paid_on ? ' on ' + escapeHtml(poShortDay(po.paid_on)) : ''}${po.paid_reference ? ', ' + escapeHtml(po.paid_reference) : ''}. Its bills are marked paid when saved.">Paid by ${escapeHtml(poPaidLabel(po.paid_method))}</span>` : '';
+  return `<span class="badge ${cls}" style="margin-left:6px;">${poStatusLabel(po)}</span>${stock}${open}${tools}${paid}`;
 }
 
 // The two notes on a PO: for the supplier (printed on po.html) and internal (staff only).
@@ -6771,7 +6794,8 @@ function openPoLineMenu(li, po, role, onComplete) {
     if (!tool) items.push({ label: 'Move to another job, the Warehouse or a vehicle', hint: 'Not needed here', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
   }
   if (li.received) {
-    if (li.destination_type !== 'tools' && open) items.push({ label: 'Move some or all of it', hint: 'To another job, the Warehouse or a vehicle', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
+    // a closed (approved, paid) PO still lets received gear move; the PO stays closed, its bills untouched (item 51)
+    if (li.destination_type !== 'tools') items.push({ label: 'Move some or all of it', hint: open ? 'To another job, the Warehouse or a vehicle' : 'To another job, the Warehouse or a vehicle. The PO stays closed.', onPick: () => openMoveLineItemPanel(li, po, onComplete) });
     items.push({ label: 'Undo received', hint: po.closed_at ? 'Reopens the PO (Admin or Finance)' : 'Ticked by mistake, or really back ordered', onPick: () => openUndoReceivePanel(li, po, onComplete) });
   }
   if (pricing && !li.material_id && Number(li.quantity) > 0 && !tool) items.push({ label: 'Add to Stock', hint: 'Make it a Stock item', onPick: () => openAddLineToStockPanel(li, po, onComplete) });
@@ -6851,6 +6875,13 @@ function openPoMoreMenu(po, role, onComplete, { onShowLog } = {}) {
     if (onComplete) await onComplete();
   } });
   if (po.supplier_id && open && isPricingRole(role)) items.push({ label: "Upload the supplier's invoice", onPick: () => uploadInvoiceForPo(po) });
+  if (!po.stock_source && !po.paid_method) items.push({ label: 'Paid already (card, cash)', hint: 'Its bills are marked paid', onPick: () => loadPoScan().then(() => openPoPaidPanel(po, onComplete)).catch(err => alert(err.message)) });
+  if (po.paid_method) items.push({ label: `Not paid after all (was paid by ${poPaidLabel(po.paid_method)})`, hint: 'Takes the paid mark off the PO', onPick: async () => {
+    if (!confirm(`PO ${po.po_number || ''} was marked paid by ${poPaidLabel(po.paid_method)}. Take that back?`)) return;
+    const { error } = await supabaseClient.rpc('po_set_paid', { p_po_id: po.id, p_method: null });
+    if (error) { alert(friendlyError(error)); return; }
+    if (onComplete) await onComplete();
+  } });
   if (open) items.push({ label: po.status === 'received' ? 'Close and approve for payment' : 'Close the PO', hint: po.status === 'received' ? '' : 'Every line must be in, back ordered or moved off', onPick: () => closePurchaseOrder(po, onComplete) });
   if (!open && isFinanceRole(role)) items.push({ label: 'Reopen the PO', hint: 'Admin and Finance, with a note', onPick: async () => {
     const note = prompt(`Why is PO ${po.po_number || ''} being reopened?`);
@@ -7562,6 +7593,7 @@ function buildMaterialSearchRow(materials, containerId) {
     <div class="pml-item" style="position:relative;">
       <input class="po-line-search" placeholder="Search Stock or type a new item..." autocomplete="off" />
       <input type="hidden" class="po-line-material-id" />
+      <input type="hidden" class="po-line-part" />
       <div class="po-line-results" style="position:absolute; top:100%; left:0; right:0; z-index:10; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; display:none;"></div>
     </div>
     <span class="pml-lbl pml-lbl-qty">Qty</span>
@@ -7574,6 +7606,14 @@ function buildMaterialSearchRow(materials, containerId) {
   const searchInput = row.querySelector('.po-line-search');
   const resultsEl = row.querySelector('.po-line-results');
   const materialIdInput = row.querySelector('.po-line-material-id');
+  // filled in from a scanned invoice (js/po-scan.js)
+  row._fill = ({ description, quantity, unit_cost, materialId, partNumber }) => {
+    searchInput.value = description || '';
+    row.querySelector('.po-line-qty').value = quantity == null ? 1 : quantity;
+    row.querySelector('.po-line-cost').value = unit_cost == null ? '' : unit_cost;
+    materialIdInput.value = materialId || '';
+    row.querySelector('.po-line-part').value = partNumber || '';
+  };
 
   searchInput.addEventListener('input', async (e) => {
     materialIdInput.value = ''; // typing again means whatever was selected no longer applies
@@ -7622,6 +7662,7 @@ function readMaterialLineRows(containerId) {
     description: row.querySelector('.po-line-search').value.trim(),
     quantity: parseFloat(row.querySelector('.po-line-qty').value) || 0,
     unit_cost: parseFloat(row.querySelector('.po-line-cost').value) || 0,
+    part_number: (row.querySelector('.po-line-part')?.value || '').trim() || null,
   })).filter(l => l.description && l.quantity > 0);
 }
 

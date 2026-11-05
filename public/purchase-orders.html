@@ -57,7 +57,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=124"></script>
+  <script src="/js/supabase-client.js?v=125"></script>
   <script src="/js/email-compose.js?v=9"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -166,6 +166,7 @@
 
     let createOverlay = null; // the open Create panel, so the tour can step through it and close it
     async function openCreatePoPanel() {
+      await loadPoScan(); // the paid tick and the scan button (js/po-scan.js, item 51)
       if (createOverlay && createOverlay.isConnected) return createOverlay;
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
       const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
@@ -177,6 +178,7 @@
       overlay.innerHTML = `
         <div class="card" style="max-width:600px; width:100%; max-height:90vh; overflow-y:auto;">
           <h2>Create purchase order</h2>
+          ${poScanButtonHtml('np')}
           <label style="margin-top:0">This PO is for</label>
           <select id="np-dest-type">
             <option value="stock">Stock</option>
@@ -211,6 +213,7 @@
           <label style="margin-top:14px;">Lines</label>
           <div id="np-items-container"></div>
           <button type="button" class="secondary btn-sm" id="np-add-line-btn">+ Add item</button>
+          ${poPaidChoiceHtml('np')}
 
           <details class="po-fold" id="np-more" style="margin-top:14px;">
             <summary>More options <span class="subtitle" style="font-weight:400; font-size:12px; margin-left:auto;">open PO, notes, prices, invoice</span></summary>
@@ -284,6 +287,8 @@
       // and Sales only, so nobody else is offered the button (F9).
       const npUploadBtn = overlay.querySelector('#np-upload-invoice-btn');
       if (npUploadBtn) wireUploadInvoiceButton(npUploadBtn, overlay.querySelector('#np-msg'));
+      wirePoPaidChoice(overlay, 'np');
+      wirePoScan(overlay, { prefix: 'np', containerId: 'np-items-container', materials: materials || [], picker: resolveSupplier });
 
       buildMaterialSearchRow(materials || [], 'np-items-container');
       overlay.querySelector('#np-add-line-btn').addEventListener('click', () => buildMaterialSearchRow(materials || [], 'np-items-container'));
@@ -324,6 +329,20 @@
 
           const toolsVehicleId = destType === 'tools' ? (overlay.querySelector('#np-tools-loc').value || null) : null;
           const toolsKind = destType === 'tools' ? overlay.querySelector('#np-tools-kind').value : null;
+          const poDescription = destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : destType === 'tools' ? (toolsKind === 'perishable' ? 'Perishables (tools register)' : 'Tools and equipment') : 'Stock purchase order';
+          if (overlay._poScan) {
+            // scanned receipt: the bill and the PO from it in one server step (js/po-scan.js, item 51)
+            const { po: scannedPo } = await poScanSave(overlay, { prefix: 'np', supplierId, lines: readMaterialLineRows('np-items-container'), po: {
+              project_id: destType === 'job' ? selectedJob.id : null, vehicle_id: destType === 'vehicle' ? vehicleId : toolsVehicleId,
+              po_kind: destType === 'tools' ? 'tools' : 'materials', tools_kind: toolsKind, description: poDescription,
+              ...readPoNotesFields(overlay, 'np'), show_prices: overlay.querySelector('#np-show-prices').checked,
+            } });
+            if (destType === 'job') await createPoFollowUpTask(selectedJob.id, scannedPo.po_number, supplierName);
+            overlay.remove();
+            loadAllPOs();
+            showPoCreatedPanel(scannedPo, supplierName, { onDone: loadAllPOs });
+            return;
+          }
           const { data: newPo, error: poErr } = await supabaseClient.from('purchase_orders').insert({
             project_id: destType === 'job' ? selectedJob.id : null,
             vehicle_id: destType === 'vehicle' ? vehicleId : toolsVehicleId,
@@ -332,7 +351,8 @@
             po_type: readPoTypeChoice(overlay, 'np'), locked: false, status: 'ordered', amount: 0,
             ...readPoNotesFields(overlay, 'np'),
             show_prices: overlay.querySelector('#np-show-prices').checked,
-            description: destType === 'job' ? `PO for ${selectedJob.name}` : destType === 'vehicle' ? (supplierId ? 'PO for vehicle' : 'Pulled from Warehouse stock') : destType === 'tools' ? (toolsKind === 'perishable' ? 'Perishables (tools register)' : 'Tools and equipment') : 'Stock purchase order',
+            ...(supplierId ? readPoPaidChoice(overlay, 'np', user.id) : {}),
+            description: poDescription,
           }).select('id, po_number, supplier_id, project_id').single();
           if (poErr) throw poErr;
           const destLabel = destType === 'job' ? selectedJob.name : destType === 'vehicle' ? (vehicles.find(v => v.id === vehicleId)?.vehicle_name || 'a vehicle') : destType === 'tools' ? 'Tools' : 'Stock';

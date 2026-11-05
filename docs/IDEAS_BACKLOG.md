@@ -1098,9 +1098,9 @@ Found on PO2000 (J7002, Tradezone). Order M03125 was invoiced twice: M61732 ($3,
 
 Touches: `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/_shared/bill-check.js`, `public/js/supabase-client.js` (`billLineState`), production data for PO2000 and bill M61732. Overlaps item 49 (same files, waiting on yes). Kind: bug fix into `main`; migration no; money yes (PO line cost, a duplicate bill).
 
-## 51. PO from a scanned invoice, paid on the spot, lines movable after close (owner's yes 5 Nov 2026)
+## 51. PO from a scanned invoice, paid on the spot, lines movable after close (owner's yes 5 Nov 2026, built the same day, PR into `staging`, see PROJECT_SPEC.md A10)
 
-Building in: `feat/po-from-scan`.
+Built in: `feat/po-from-scan`. Follow-ups to decide: a counter purchase could be received on the spot (the gear is in hand) instead of waiting for Receive; a bill uploaded by hand on the supplier page still flags $0 lines (item 50's known gap).
 
 Owner (5 Nov 2026): paying upfront is normal (card at the counter, a hardware store with no account), so paid must not wait for approval; the PO maker should be able to scan the invoice to fill the PO, say it is paid, and still move lines to stock or another job after the PO is closed or paid.
 
