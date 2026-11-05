@@ -136,6 +136,8 @@ async function mailboxWork() {
         if (r.sorted) parts.push(`${mb.address}: ${r.sorted} sorted, ${r.priority} need a reply, ${r.drafted} drafted`);
         if (r.invoicesPassed) parts.push(`${mb.address}: ${r.invoicesPassed} supplier invoice${r.invoicesPassed === 1 ? '' : 's'} passed to invoice@, ${r.routingReplies} "use invoice@" repl${r.routingReplies === 1 ? 'y' : 'ies'}`);
         if (r.labelsMade) parts.push(`${mb.address}: ${r.labelsMade} new label${r.labelsMade === 1 ? '' : 's'} made`);
+        if (r.suggestionsGrouped) parts.push(`${mb.address}: ${r.suggestionsGrouped} conversation${r.suggestionsGrouped === 1 ? '' : 's'} filed from waiting label suggestions`);
+        if (r.olderFiled) parts.push(`${mb.address}: ${r.olderFiled} older conversation${r.olderFiled === 1 ? '' : 's'} given a label`);
         if (r.labelsSwept || r.labelsFound) parts.push(`${mb.address}: ${r.labelsSwept} label sweep${r.labelsSwept === 1 ? '' : 's'}, ${r.labelsFound} older conversation${r.labelsFound === 1 ? '' : 's'} filed`);
         if (r.pending) more = true;
       }

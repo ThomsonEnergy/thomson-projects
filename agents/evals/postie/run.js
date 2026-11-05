@@ -32,6 +32,7 @@ say(!mentionsLabel(cases.labels, 'Subject: solar quote for 12 Smith St, panel cl
   const items = cases.cases.map((c) => ({
     id: c.id,
     text: `Subject: ${c.input.subject}\nFROM ${c.input.from} (2026-10-20):\n${c.input.body_gist}`,
+    conversation: !!c.input.conversation,
   }));
   const usage = { input_tokens: 0, output_tokens: 0 };
   const picks = await chooseLabels(apiKey, { who: 'the shared sales@thomsonenergy.com.au inbox', labels: cases.labels, items }, usage);
@@ -39,7 +40,10 @@ say(!mentionsLabel(cases.labels, 'Subject: solar quote for 12 Smith St, panel cl
     const p = picks[c.id] || { label: '', sure: false, verified: false, new_label: '' };
     const applied = p.label && p.sure && p.verified ? [p.label] : [];
     const want = c.expect.labels || [];
-    const ok = JSON.stringify(applied) === JSON.stringify(want) && (c.expect.new_label === undefined || (p.new_label || '') === c.expect.new_label);
+    const newOk = c.expect.new_label_prefix !== undefined
+      ? (p.new_label || '').toLowerCase().startsWith(c.expect.new_label_prefix.toLowerCase()) && p.sure && p.verified
+      : (c.expect.new_label === undefined || (p.new_label || '') === c.expect.new_label);
+    const ok = JSON.stringify(applied) === JSON.stringify(want) && newOk;
     say(ok, c.id, `applied ${JSON.stringify(applied)} (model said "${p.label}", sure ${p.sure}, evidence "${p.evidence}" ${p.verified ? 'found' : 'not found'}${p.new_label ? `, new label "${p.new_label}"` : ''}), wanted ${JSON.stringify(want)}`);
   }
   console.log(`${CODE_CHECKS} code checks, ${codeFailed} failed; ${cases.cases.length} model cases, ${failed - codeFailed} failed, ${usage.input_tokens + usage.output_tokens} tokens`);
