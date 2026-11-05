@@ -27,24 +27,31 @@ const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain', csv: 'text/csv', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', dwg: 'application/acad', mp4: 'video/mp4' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// site-photos is a public bucket: a path is only sent when it is a real job photo (a project_photos
-// row), so nobody can attach a file by guessing a path. Stored URLs may have the path encoded.
-async function isJobPhoto(supabaseAdmin, path) {
-  const esc = (s) => s.replace(/[\\%_]/g, (m) => '\\' + m);
-  for (const p of [...new Set([path, encodeURI(path)])]) {
-    const { count } = await supabaseAdmin.from('project_photos').select('id', { count: 'exact', head: true }).like('url', `%/object/public/site-photos/${esc(p)}`);
-    if (count) return true;
+// site-photos is a public bucket that also holds other things (markups, proposal pictures): only
+// paths that are a job's site photo (a project_photos row) are sent. Every row's url was made by
+// getPublicUrl, so the same call gives the exact url to look for, all photos in one query.
+async function checkJobPhotos(supabaseAdmin, paths) {
+  if (!paths.length) return;
+  const urlOf = {};
+  for (const p of paths) {
+    try { urlOf[p] = supabaseAdmin.storage.from('site-photos').getPublicUrl(p).data.publicUrl; } catch (e) { throw new Error('One of the attachments is not valid.'); }
   }
-  return false;
+  const { data, error } = await supabaseAdmin.from('project_photos').select('url').in('url', Object.values(urlOf));
+  if (error) throw new Error('Could not check the photos: ' + error.message);
+  const found = new Set((data || []).map(r => r.url));
+  const missing = paths.find(p => !found.has(urlOf[p]));
+  if (missing) throw new Error(`A photo (${missing.split('/').pop()}) is not on a job any more. Take it off and add it again.`);
 }
 
 async function loadAttachments(supabaseAdmin, list) {
   if (!Array.isArray(list) || !list.length) return [];
   if (list.length > MAX_FILES) throw new Error(`Attach up to ${MAX_FILES} files.`);
-  const out = []; let total = 0;
   for (const a of list) {
     if (!a || !ALLOWED_BUCKETS.includes(a.bucket) || typeof a.path !== 'string' || !a.path || a.path.includes('..')) throw new Error('One of the attachments is not valid.');
-    if (a.bucket === 'site-photos' && !(await isJobPhoto(supabaseAdmin, a.path))) throw new Error(`"${a.name || 'A photo'}" is not on a job any more.`);
+  }
+  await checkJobPhotos(supabaseAdmin, list.filter(a => a.bucket === 'site-photos').map(a => a.path));
+  const out = []; let total = 0;
+  for (const a of list) {
     const { data, error } = await supabaseAdmin.storage.from(a.bucket).download(a.path);
     if (error || !data) throw new Error(`Could not read the attachment "${a.name || a.path}": ${error ? error.message : 'not found'}`);
     const content = Buffer.from(await data.arrayBuffer());

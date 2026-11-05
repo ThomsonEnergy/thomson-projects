@@ -12,6 +12,7 @@
 const EMAIL_MAX_FILE = 15 * 1024 * 1024;
 const EMAIL_MAX_TOTAL = 20 * 1024 * 1024;
 const EMAIL_MAX_FILES = 10;
+const EMAIL_MAX_TOTAL_LABEL = '20 MB';
 const EMAIL_KINDS = { materials_quote: 'Materials quote', client: 'Client', supplier: 'Supplier', other: 'Other' };
 
 const emailSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
@@ -60,7 +61,7 @@ function emailLocalFilePicker(el, opts = {}) {
     const n = files.length + refs.length + extra.count;
     const bytes = files.reduce((t, f) => t + f.size, 0) + refs.reduce((t, r) => t + (r.size || 0), 0) + extra.bytes;
     const over = n > EMAIL_MAX_FILES || bytes > EMAIL_MAX_TOTAL;
-    total.innerHTML = n ? `<span style="${over ? 'color:var(--red); font-weight:700;' : ''}">${n} file${n === 1 ? '' : 's'}${bytes ? ', ' + emailSize(bytes) : ''} of ${EMAIL_MAX_FILES} files and ${emailSize(EMAIL_MAX_TOTAL)}</span>` : '';
+    total.innerHTML = n ? `<span style="${over ? 'color:var(--red); font-weight:700;' : ''}">${n} file${n === 1 ? '' : 's'}${bytes ? ', ' + emailSize(bytes) : ''} of ${EMAIL_MAX_FILES} files and ${EMAIL_MAX_TOTAL_LABEL}</span>` : '';
     jobBtn.style.display = jobs.length ? '' : 'none';
   };
   el.querySelector('.eml-local').addEventListener('click', () => input.click());
@@ -97,7 +98,7 @@ function emailJobFilesReady() {
 // The send limits, checked in the browser before anything is uploaded (send-gmail checks them again).
 function emailAttachLimitError(count, bytes) {
   if (count > EMAIL_MAX_FILES) return `Attach up to ${EMAIL_MAX_FILES} files.`;
-  if (bytes > EMAIL_MAX_TOTAL) return 'The attachments add up to more than 20 MB. Send them in more than one email.';
+  if (bytes > EMAIL_MAX_TOTAL) return `The attachments add up to more than ${EMAIL_MAX_TOTAL_LABEL}. Send them in more than one email.`;
   return '';
 }
 
