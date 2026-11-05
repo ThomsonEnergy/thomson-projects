@@ -37,7 +37,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 47 | Merge a client's jobs into one job, each old job a cost centre, old J numbers still work | LIVE 4 Nov 2026 (spec A13e), migration 20261128080000 | N | None |
 | 54 | Ops manager page trimmed: no-attachment emails filed as not a bill, Needs me one line per kind, digest says what is new since yesterday, workers and runs collapsed | Planned 5 Nov 2026, waiting on yes | N | None |
 | 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Planned 5 Nov 2026, waiting on yes | N | None |
-| 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Planned 5 Nov 2026, waiting on yes | N | Owner's yes to turn auto labels on for the 4 mailboxes |
+| 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Building in: `feat/postie-labels` | N | Owner's yes to turn auto labels on for the 4 mailboxes |
 
 ## High lead time, start now
 
@@ -1180,7 +1180,7 @@ Done means: an FYI email to sales@ on staging lands in Priority or Other with no
 
 Touches: `netlify/functions/_shared/email-agent.js` (triage schema and prompt, `draftReplies` takes a `force` for one thread), `netlify/functions/email-actions.js` (new `draft_reply` action, `requireActiveUser`, mailbox check), `public/inbox.html` (one button and its handler, `?v=` bump), `docs/PROJECT_SPEC.md` A18, `docs/AI_AGENTS_PLAN.md`. Overlaps: item 53 (waiting on yes) touches `inbox.html` (attachments) and `email-actions.js`; item 54 (waiting on yes) does not. If both 53 and 55 get a yes, build them one after the other in one chat. Kind: feature (into `staging`); migration no; money no, stock no, RLS no, payroll no. Size: small to medium (two hours). Test on staging: sales@staging.test, Inbox, the three clicks above; the AI key and the Gmail key on staging (drafts are saved in Gmail too). Best model: Opus 5.5, effort high, because it changes an agent's prompt and adds a server action, no migration.
 
-## 56. A label for every conversation without a job: Postie makes them itself and links the trail (planned 5 Nov 2026, waiting on the owner's yes)
+## 56. A label for every conversation without a job: Postie makes them itself and links the trail (owner's yes 5 Nov 2026, Building in: `feat/postie-labels`)
 
 Owner, 5 Nov 2026: nothing is getting labels, only the GCW dispute one exists. Any email trail without a job where we have conversed more than once should get a label, and every conversation on that matter linked under it.
 
