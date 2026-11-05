@@ -223,11 +223,18 @@ ${jobLines}`,
     }
   }
 
-  // Second pass, stronger model: labels. Only threads the sort said might fit a label (or
-  // that use every word of a label's name), and only when there is a label to pick or the
-  // mailbox may make one.
+  // Second pass, stronger model: labels. Threads the sort said might fit a label (or that use
+  // every word of a label's name), and every conversation (mail both ways, 2 or more emails)
+  // with no job (item 56), when there is a label to pick or the mailbox may make one.
+  const labelChecked = new Set();
   if (forAi.length && (ctx.labels.length || mailbox.auto_labels)) {
-    const candidates = forAi.filter(({ t, text }) => results[t.id]?.maybe_label || mentionsLabel(ctx.labels, text)).map(({ t, text }) => ({ id: t.id, text }));
+    const { data: links } = await admin.from('email_job_links').select('thread_id').in('thread_id', forAi.map((f) => f.t.id));
+    const withJob = new Set((links || []).map((l) => l.thread_id));
+    const candidates = forAi.map(({ t, list, text }) => {
+      const conversation = isConversation(list) && !withJob.has(t.id) && results[t.id]?.job_confidence !== 'sure' && results[t.id]?.section !== 'updates';
+      return (conversation || results[t.id]?.maybe_label || mentionsLabel(ctx.labels, text)) ? { id: t.id, text, conversation } : null;
+    }).filter(Boolean);
+    candidates.forEach((c) => labelChecked.add(c.id));
     if (candidates.length) {
       const picks = await chooseLabels(apiKey, { who, labels: ctx.labels, items: candidates }, usage);
       for (const [id, pick] of Object.entries(picks)) {
@@ -248,29 +255,11 @@ ${jobLines}`,
     if (passed) { r.section = 'other'; r.section_by = 'ai'; r.reason = 'Supplier invoice: passed to invoice@'; }
     const patch = { section: r.section, section_reason: r.reason || null, section_by: r.section_by, triaged_at: now, ai_checked_at: now, ai_claimed_at: null };
 
-    // labels: applied only when the model was sure and its quoted evidence is really in the
-    // email; otherwise suggested for a person to accept (one tap reuses the existing label).
-    // A new label is made on the spot only when the mailbox allows it and the same two
-    // conditions hold; otherwise it is suggested.
-    const apply = [];
-    const pick = r.pick;
-    const proven = !!(pick && pick.sure && pick.verified);
-    if (pick && pick.label) {
-      const label = findLabel(ctx.labels, pick.label);
-      if (label && proven) apply.push(label);
-      else if (label) patch.suggested_label = label.name;
-    } else if (pick && pick.new_label) {
-      const existing = findLabel(ctx.labels, pick.new_label);
-      if (existing) patch.suggested_label = existing.name;
-      else if (mailbox.auto_labels && proven) {
-        const made = await makeAgentLabel(admin, mailbox, ctx, pick.new_label, pick.new_label_about);
-        if (made) apply.push(made);
-      } else patch.suggested_label = pick.new_label;
-    }
-    for (const label of apply) {
-      const { error } = await admin.from('email_thread_labels').upsert({ thread_id: t.id, label_id: label.id, by_ai: true }, { onConflict: 'thread_id,label_id', ignoreDuplicates: true });
-      if (!error) await labelInGmail(admin, mailbox, t, label, true);
-    }
+    // labels (applyLabelPick); a thread the label pass read is marked '' when nothing is waiting,
+    // so the older-conversations pass (_shared/email-matters.js) does not read it again
+    const suggested = await applyLabelPick(admin, mailbox, ctx, t, r.pick);
+    if (suggested) patch.suggested_label = suggested;
+    else if (labelChecked.has(t.id)) patch.suggested_label = '';
 
     // jobs: an explicit J or Q number in the subject, or the agent's match
     const target = r.job ? ctx.jobs.find((j) => jobRef(j) === r.job) : null;
@@ -291,6 +280,39 @@ ${jobLines}`,
 function threadText(t, list) {
   const recent = list.slice(-4).map((m) => `${m.direction === 'outbound' ? 'US' : 'FROM ' + nameOf(m.from_address) + ' <' + addrOf(m.from_address) + '>'} (${String(m.sent_at).slice(0, 10)}):\n${clip(m.body_text, 1500)}`).join('\n---\n');
   return `Subject: ${t.subject || '(no subject)'}\n${recent}`;
+}
+
+// A conversation: we wrote and they wrote, two or more emails (item 56: these get a label).
+const isConversation = (list) => (list || []).length >= 2 && list.some((m) => m.direction === 'inbound') && list.some((m) => m.direction === 'outbound');
+
+// Acts on one label pick. Applied only when the model was sure and its quoted evidence is
+// really in the email; otherwise the label name is returned as a suggestion for a person to
+// accept (one tap reuses the existing label). A new label is made on the spot only when the
+// mailbox allows it and the same two conditions hold. Returns the suggestion, or null.
+async function applyLabelPick(admin, mailbox, ctx, t, pick) {
+  if (!pick) return null;
+  const proven = !!(pick.sure && pick.verified);
+  let label = null, suggest = null;
+  if (pick.label) {
+    const existing = findLabel(ctx.labels, pick.label);
+    if (existing && proven) label = existing;
+    else if (existing) suggest = existing.name;
+  } else if (pick.new_label) {
+    // a "new" name that is a label already (perhaps made earlier in this run) is that label
+    const existing = findLabel(ctx.labels, pick.new_label);
+    if (existing && proven) label = existing;
+    else if (existing) suggest = existing.name;
+    else if (mailbox.auto_labels && proven) label = await makeAgentLabel(admin, mailbox, ctx, pick.new_label, pick.new_label_about);
+    else suggest = pick.new_label;
+  }
+  if (label) await fileUnder(admin, mailbox, t, label);
+  return suggest;
+}
+
+async function fileUnder(admin, mailbox, t, label) {
+  const { error } = await admin.from('email_thread_labels').upsert({ thread_id: t.id, label_id: label.id, by_ai: true }, { onConflict: 'thread_id,label_id', ignoreDuplicates: true });
+  if (!error) await labelInGmail(admin, mailbox, t, label, true);
+  return !error;
 }
 
 // Cheap pre-filter for the label pass: does the thread use every word of a label's name
@@ -338,14 +360,14 @@ const LABEL_SCHEMA = {
   additionalProperties: false,
 };
 
-// The label pass (the "how"; agents/evals/postie/run.js calls it too). items: [{ id, subject,
-// text }]. Returns { [id]: { label, evidence, sure, verified, new_label, new_label_about } }
+// The label pass (the "how"; agents/evals/postie/run.js and _shared/email-matters.js call it
+// too). items: [{ id, text, conversation }]. Returns { [id]: { label, evidence, sure, verified, new_label, new_label_about } }
 // with label "" when none fits. verified is the code's own check that the evidence is in
 // the text; the caller applies a label only when sure and verified.
 async function chooseLabels(apiKey, { who, labels, items }, usage = { input_tokens: 0, output_tokens: 0 }) {
   const labelLines = labels.map((l) => `- ${l.name}${l.description ? `: ${l.description}` : ''}${l.status === 'done' ? ' (finished matter)' : ''}`).join('\n') || '(none yet)';
   const system = LABEL_PROMPT.replace('{{who}}', () => who).replace('{{labels}}', () => labelLines);
-  const content = items.map((i) => `<thread id="${i.id}">\n${i.text}\n</thread>`).join('\n\n');
+  const content = items.map((i) => `<thread id="${i.id}"${i.conversation ? ' conversation="yes"' : ''}>\n${i.text}\n</thread>`).join('\n\n');
   const data = await claude(apiKey, {
     model: LABEL_MODEL,
     max_tokens: 2500,
@@ -592,13 +614,21 @@ async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads 
       }
     }
   }
-  // label sweeps after the sorting, with whatever time is left
+  // older conversations with no job get their labels (item 56); here, not at the top:
+  // email-matters.js uses this file's label pass
+  let matters = { grouped: 0, filed: 0, read: 0, more: false };
+  try { matters = await require('./email-matters').fileMatters(admin, apiKey, mailbox, ctx, usage, startedAt + budgetMs); } catch (err) { console.error(`older conversations for ${mailbox.address} failed:`, err.message); }
+  // label sweeps after the sorting, with whatever time is left (a label just made is swept too)
   let sweep = { swept: 0, found: 0, pending: false };
   try { sweep = await sweepLabels(admin, apiKey, mailbox, ctx, usage, startedAt + budgetMs); } catch (err) { console.error(`label sweep for ${mailbox.address} failed:`, err.message); }
   return {
     sorted, drafted, priority: priorityCount, invoicesPassed: ctx.invoicesPassed || 0, routingReplies: ctx.routingReplies || 0,
-    labelsMade: ctx.labelsMade || 0, labelsSwept: sweep.swept, labelsFound: sweep.found, pending: sweep.pending, usage,
+    labelsMade: ctx.labelsMade || 0, labelsSwept: sweep.swept, labelsFound: sweep.found, pending: sweep.pending || matters.more,
+    suggestionsGrouped: matters.grouped, olderFiled: matters.filed, usage,
   };
 }
 
-module.exports = { runEmailAgent, chooseLabels, evidenceFound, mentionsLabel, TRIAGE_MODEL, DRAFT_MODEL };
+module.exports = {
+  runEmailAgent, chooseLabels, evidenceFound, mentionsLabel, isConversation, applyLabelPick, fileUnder, makeAgentLabel,
+  messagesFor, threadText, findLabel, claude, textOf, addUsage, TRIAGE_MODEL, DRAFT_MODEL, LABEL_MODEL,
+};
