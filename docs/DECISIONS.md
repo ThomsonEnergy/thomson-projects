@@ -4,7 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 5 Nov 2026
 
-- Bug found (owner, J7069), planned, waiting on yes: a ServiceM8 job imported as "Quoted" with a $0 value (J7063 and J7069, both ZASK) shows no Invoice button at all: the job page only offers Invoice actual costs on no-quote jobs (`proposal_template` `direct_job`), and the quoted job's Invoice project button hides when nothing is left to claim. Fix: one rule "no quote behind it" (`direct_job`, or no source quote and $0 quoted) on the job page and in `create-invoice.js`'s invoice naming, and the import (`sm8-import-jobs.js`) makes a $0 job do-and-charge. No migration. Optional now: set J7063 and J7069 to no-quote on production so they can be invoiced before the fix.
+- LIVE (owner: yes, bug fix straight to main, no migration, no data change): J7063 and J7069 now show Invoice actual costs. Was: bug found (owner, J7069): a ServiceM8 job imported as "Quoted" with a $0 value (J7063 and J7069, both ZASK) shows no Invoice button at all: the job page only offers Invoice actual costs on no-quote jobs (`proposal_template` `direct_job`), and the quoted job's Invoice project button hides when nothing is left to claim. Fix: one rule "no quote behind it" (`direct_job`, or no source quote and $0 quoted) on the job page and in `create-invoice.js`'s invoice naming, and the import (`sm8-import-jobs.js`) makes a $0 job do-and-charge. No migration. Optional now: set J7063 and J7069 to no-quote on production so they can be invoiced before the fix.
 
 ## 4 Nov 2026
 
