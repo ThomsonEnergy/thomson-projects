@@ -286,7 +286,7 @@ exports.handler = async (event) => {
         created_by: user.id,
         bill_to_client_id: billToClientId || null,
         commercial_agreement: commercialAgreement,
-        notes: String(notes || '').trim().slice(0, 4000) || null, // "Work completed" (item 57), printed above the terms
+        notes: String(notes || '').trim().slice(0, 2000) || null, // "Work completed" (item 57), printed above the terms
       })
       .select('id')
       .single();

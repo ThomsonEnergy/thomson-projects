@@ -43,7 +43,7 @@ function openInvoiceNotesPanel(invoice, project, onSaved) {
     <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
       <h2>Notes on ${escapeHtml(invoice.invoice_number)}</h2>
       <p class="subtitle" style="margin-bottom:10px;">Printed on the client's invoice as "Work completed", above the terms. Not sent to Xero.</p>
-      <textarea id="in-notes" rows="7" placeholder="What was done on site">${escapeHtml(invoice.notes || '')}</textarea>
+      <textarea id="in-notes" rows="7" maxlength="2000" placeholder="What was done on site">${escapeHtml(invoice.notes || '')}</textarea>
       <button type="button" class="secondary" id="in-write-btn" style="margin-top:8px; font-size:13px;">Write from the site notes</button>
       <div id="in-msg"></div>
       <div style="margin-top:14px;">
@@ -61,7 +61,7 @@ function openInvoiceNotesPanel(invoice, project, onSaved) {
     btn.disabled = true;
     btn.textContent = 'Saving...';
     msg.innerHTML = '';
-    const notes = textarea.value.trim().slice(0, 4000) || null;
+    const notes = textarea.value.trim().slice(0, 2000) || null;
     const { error } = await supabaseClient.from('invoices').update({ notes }).eq('id', invoice.id);
     if (error) {
       msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`;

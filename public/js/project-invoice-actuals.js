@@ -193,7 +193,7 @@ async function openInvoiceActualCostsPanel(project) {
         <div><label>Due date</label><input type="date" id="ia-due-date" /><p class="subtitle" id="ia-due-note" style="font-size:12px; margin:4px 0 0;"></p></div>
       </div>
       <label>Notes on the invoice (Work completed)</label>
-      <textarea id="ia-notes" rows="4" placeholder="What was done on site. Printed on the client's invoice above the terms."></textarea>
+      <textarea id="ia-notes" rows="4" maxlength="2000" placeholder="What was done on site. Printed on the client's invoice above the terms."></textarea>
       <button type="button" class="secondary" id="ia-notes-write-btn" style="margin-top:6px; font-size:13px;">Write from the site notes</button>
       <div id="ia-notes-msg"></div>
       <p id="ia-total" style="margin:14px 0 0; font-weight:600;"></p>
@@ -365,8 +365,10 @@ async function openInvoiceActualCostsPanel(project) {
         const bill = tr.querySelector('.ia-row-bill');
         if (bill) bill.addEventListener('change', (e) => {
           // The tick is per shift: a shift split into bands (or a person's rows in Flat) moves together.
+          // Set on the clocked shifts themselves, since the rows are rebuilt from them (setting it on the
+          // rows alone came straight back ticked).
           const ids = new Set(r.timeEntryIds);
-          centres.forEach(cc => cc.labourRows.forEach(x => { if (x.source === 'shift' && x.timeEntryIds.some(id => ids.has(id))) x.billable = e.target.checked; }));
+          centres.forEach(cc => (cc.labourLines || []).forEach((l) => { if (ids.has(l.timeEntryId)) l.billable = e.target.checked; }));
           buildLabourRows();
           renderCentres();
         });
@@ -446,7 +448,7 @@ async function openInvoiceActualCostsPanel(project) {
     ...c.labourRows.filter(r => r.source === 'added' && r.note).map(r => `Labour: ${r.note}`),
   ]).slice(0, 80);
   const notesWriteBtn = overlay.querySelector('#ia-notes-write-btn');
-  loadJsOnce('/js/invoice-notes.js?v=1', () => typeof wireInvoiceNotesWrite === 'function')
+  loadJsOnce('/js/invoice-notes.js?v=2', () => typeof wireInvoiceNotesWrite === 'function')
     .then(() => wireInvoiceNotesWrite(overlay.querySelector('#ia-notes'), notesWriteBtn, overlay.querySelector('#ia-notes-msg'), () => ({ projectId: project.id, lines: billedLines() })))
     .catch(() => { notesWriteBtn.disabled = true; });
 
