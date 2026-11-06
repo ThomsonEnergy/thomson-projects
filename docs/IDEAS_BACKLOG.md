@@ -37,7 +37,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 54 | Ops manager page trimmed: no-attachment emails filed as not a bill, Needs me one line per kind, digest says what is new since yesterday, workers and runs collapsed | Planned 5 Nov 2026, waiting on yes | N | None |
 | 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Planned 5 Nov 2026, waiting on yes | N | None |
 | 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Planned 5 Nov 2026, waiting on yes | N | Owner's yes to turn auto labels on for the 4 mailboxes |
-| 57 | Invoice actual costs: rate per clocked person, AI invoice notes from the installers' notes, terms note in Settings | Planned 6 Nov 2026, waiting on yes | N | Claude key on staging for the Write button |
+| 57 | Invoice actual costs: rate per clocked person, AI invoice notes from the installers' notes, terms note in Settings | LIVE 6 Nov 2026 (spec A22), migration 20261130010000 | N | None |
 
 ## High lead time, start now
 
@@ -1195,7 +1195,7 @@ Done means: on staging, two threads from the same fake supplier with mail both w
 
 Touches: `netlify/functions/_shared/email-agent.js` (candidate rule, label pass, dedupe against suggestions), `agents/prompts/postie-labels.js` (the prompt: matters, not only disputes; the name shape), `netlify/functions/mailbox-work-background.js` (one-off grouping of the waiting suggestions), `public/settings.html` wording only, `docs/PROJECT_SPEC.md` A18, `docs/AI_AGENTS_PLAN.md`. Overlaps: item 55 (waiting on yes) touches `email-agent.js`; build 55 and 56 in one chat, one after the other. Item 37 step 5 (Postie filing, built) is what this changes. Kind: feature (into `staging`); migration no (`mailboxes.auto_labels` and `email_labels` exist); money no, stock no, RLS no, payroll no; one production data change (`auto_labels` on for 4 mailboxes, and the labels made from the 26 suggestions). Size: medium (a morning). Test on staging: sales@staging.test, Inbox side list, Settings > Email Agent; the AI key and the Gmail key on staging. Best model: Opus 5.5, effort high, because it is an agent rule and prompt change with a known cause, no migration.
 
-## 57. Invoice actual costs: pick a rate per clocked person, invoice notes written from the installers' notes, the terms note set in Settings (planned 6 Nov 2026, waiting on the owner's yes)
+## 57. Invoice actual costs: pick a rate per clocked person, invoice notes written from the installers' notes, the terms note set in Settings (owner's yes 6 Nov 2026: built and shipped straight to `main`, migration 20261130010000; spec A22)
 
 Owner, 6 Nov 2026: when invoicing actual costs, pick a different rate for the clocked in person; invoice notes written by AI from the installers' notes describing what was done, editable; and the 9% interest note on the invoice becomes an editable note set in Settings.
 

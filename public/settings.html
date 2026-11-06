@@ -582,6 +582,11 @@
             <label style="margin-top:14px;">Anything else worth adding</label>
             <textarea id="payment-details-text" style="min-height:70px;" placeholder="Optional - e.g. card payment instructions, late fee terms"></textarea>
           </div>
+          <div class="card">
+            <h2>Invoice terms note</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Printed under the items on every client invoice, beside the totals (late payment interest and the like). Leave blank to print nothing.</p>
+            <textarea id="invoice-terms-text" style="min-height:90px;"></textarea>
+          </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
         </div>
@@ -898,6 +903,7 @@
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
       document.getElementById('payment-details-text').value = data.payment_details_text || '';
+      document.getElementById('invoice-terms-text').value = data.invoice_terms_text || '';
       document.getElementById('bank-name').value = data.bank_name || '';
       document.getElementById('bank-account-name').value = data.bank_account_name || '';
       document.getElementById('bank-bsb').value = data.bank_bsb || '';
@@ -1047,6 +1053,7 @@
           default_terms: document.getElementById('terms-text').value,
           default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
           payment_details_text: document.getElementById('payment-details-text').value,
+          invoice_terms_text: document.getElementById('invoice-terms-text').value.trim() || null,
           bank_name: document.getElementById('bank-name').value.trim(),
           bank_account_name: document.getElementById('bank-account-name').value.trim(),
           bank_bsb: document.getElementById('bank-bsb').value.trim(),
