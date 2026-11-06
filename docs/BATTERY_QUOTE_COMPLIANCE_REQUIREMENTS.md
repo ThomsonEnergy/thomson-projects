@@ -21,7 +21,7 @@ Three things apply on top of the solar rules:
 
 ## 2. On the quote (NETCC, same as solar)
 
-- Battery make, model and usable kWh, and the inverter it pairs with (Pylon pull, "Your system" page on the proposal).
+- Battery make, model and usable kWh, and the inverter it pairs with (Pylon pull, "Your system" page on the proposal). Pylon's `storage_kwh` is the nominal size, not the usable: a SigenStor BAT 10.0 is 9.04 kWh nominal and 8.76 kWh usable, so ten read 90.4 in Pylon and 87.6 usable. The STCs are paid on the usable figure on the CEC approved product list.
 - Which circuits are backed up in a blackout and which are not.
 - Where the battery goes and that the spot meets AS/NZS 5139.
 - Full price inc GST, deposit, the STC credit being applied, and validity.
