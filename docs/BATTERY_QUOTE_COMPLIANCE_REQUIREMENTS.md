@@ -17,7 +17,7 @@ Three things apply on top of the solar rules:
 - **One per premises:** only one battery system per premises can claim. A second or an upgrade at the same address cannot claim again.
 - **Accredited people:** designed and installed (or supervised) by an SAA accredited person with the GCBS class; electrical work by a licensed electrician.
 - **Stacking:** state rebates or loans may be added where the state allows it (NSW's own battery incentive was folded into the federal program; check the current state position when quoting).
-- **STC count:** from 1 May 2026 the STCs are tiered by battery size and the factor drops every six months instead of yearly (industry sources quote a factor of 6.8 per usable kWh for May to December 2026 and 5.7 from 1 January 2027, with the first 14 kWh at the full factor, 14 to 28 kWh at a reduced rate and 28 to 50 kWh at a small rate). TEops does not calculate battery STCs: type the count on the stage ("Number of STCs"), taken from Pylon or Formbay, and the credit is count x $ per STC.
+- **STC count (DCCEEW schedule, confirmed 6 Nov 2026):** STCs = usable kWh (first 50 kWh only) x the factor for the install period, rounded down. Flat factor 9.3 to 31 Dec 2025 and 8.4 from 1 Jan to 30 Apr 2026. From 1 May 2026 the count is tiered: 0 to 14 kWh at 100% of the factor, over 14 to 28 kWh at 60%, over 28 to 50 kWh at 15%. Factor by period: 6.8 May to Dec 2026, 5.7 Jan to Jun 2027, 5.2 Jul to Dec 2027, 4.6 Jan to Jun 2028, 4.1 Jul to Dec 2028, 3.6 Jan to Jun 2029, 3.1 Jul to Dec 2029, 2.6 Jan to Jun 2030, 2.1 Jul to Dec 2030. TEops will work this out from the design's usable kWh (backlog item 58, waiting on yes); until then type the count on the quote.
 
 ## 2. On the quote (NETCC, same as solar)
 
@@ -54,7 +54,7 @@ Three things apply on top of the solar rules:
 
 ## Open points for the owner
 
-- The 1 May 2026 tier percentages above come from installer and retailer pages, not from the regulations: check the CER page before quoting a battery STC count by hand.
+- The tier percentages and the factor schedule above are from the DCCEEW Cheaper Home Batteries page (6 Nov 2026). Check the CER calculator at install time; the regulator's figure is the one that is paid.
 - Confirm which staff hold the SAA GCBS class and record it in Settings > Team with "battery" in the licence name.
 
 ## Sources
