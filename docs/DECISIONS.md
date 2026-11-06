@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 6 Nov 2026
 
+- Planned, waiting on yes: item 57, Invoice actual costs: a rate tier dropdown on every clocked row (reprices that person's rows), invoice notes written by AI from the site visit notes and editable (in the panel and from the invoice card, printed as Work completed), and the 9% interest sentence moved to Settings > Terms as an editable Invoice terms note. One additive migration. Detail: `docs/IDEAS_BACKLOG.md` item 57.
 - Live: item 53 went straight to `main` on the owner's say (PR #298, no migration): Save to job on email attachments and Add from job on emails sent from a job. Real Gmail save and send were not tested on staging first (this session could not reach it). Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.
 
 ## 5 Nov 2026
