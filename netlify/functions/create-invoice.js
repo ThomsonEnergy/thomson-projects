@@ -1,6 +1,7 @@
 // POST /api/create-invoice
 // Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, items? }],
-//         variationEntryIds? (logged variations being billed on this invoice) }
+//         variationEntryIds? (logged variations being billed on this invoice), notes? (item 59: the
+//         "Work completed" note, written from the site notes by generate-invoice-notes.js and edited) }
 // items (do-and-charge invoice builder): Stock materials, prebuilds and labour
 // lines (item 41: hours x $/hr per clocked shift, naming the shifts billed)
 // added straight onto this invoice under that cost centre -
@@ -44,7 +45,7 @@ exports.handler = async (event) => {
 
   const undo = { supabaseAdmin: null, invoiceId: null, usageIds: [], stock: [], added: [] };
   try {
-    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds, billable, notBillable } = JSON.parse(event.body || '{}');
+    const { projectId, claims, sentAt, dueDate: overrideDueDate, billToClientId, variationEntryIds, billable, notBillable, notes } = JSON.parse(event.body || '{}');
 
     if (!projectId || !Array.isArray(claims) || !claims.length) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
@@ -285,6 +286,7 @@ exports.handler = async (event) => {
         created_by: user.id,
         bill_to_client_id: billToClientId || null,
         commercial_agreement: commercialAgreement,
+        notes: String(notes || '').trim().slice(0, 2000) || null, // "Work completed" (item 59), printed above the terms
       })
       .select('id')
       .single();

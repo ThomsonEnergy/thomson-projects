@@ -47,6 +47,7 @@
   .inv-body { margin-top: 20px; }
   .inv-sec { margin-bottom: 18px; }
   .inv-sec h3 { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
+  .inv-notes p { margin: 0; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
   .inv-sheet table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: none; margin: 0; }
   .inv-sheet th { background: #98989d; color: #fff; font-weight: 700; font-size: 13px; padding: 2px 6px; text-align: center; border: none; text-transform: none; letter-spacing: 0; }
   .inv-sheet th:first-child { border-top-left-radius: 6px; }
@@ -135,7 +136,6 @@
 
     const INVOICE_EMAIL = 'admin@thomsonenergy.com.au';
     const PAGE_H = 1123, FOOT_RESERVE = 60;
-    const TERMS_TEXT = 'Kindly ensure that payment is made before the due date specified on the invoice. In the event that payment is not received by the due date and an overdue notice is served, please note that an interest rate of 9% pa will be added to the outstanding amount. Thank you for your prompt payment.';
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const dateText = (d) => d.toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
@@ -292,7 +292,7 @@
       const finalHtml = `
         <div class="inv-final">
           <div class="inv-final-top">
-            <div class="inv-terms">${agreementNote ? `${esc(agreementNote)}<br><br>` : ''}${esc(TERMS_TEXT)}</div>
+            <div class="inv-terms">${[agreementNote, s.invoice_terms_text].filter(Boolean).map(esc).join('<br><br>')}</div>
             <div class="inv-totals">
               <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
@@ -400,6 +400,16 @@
           }
         });
       });
+      // "Work completed" (item 59, invoices.notes) under the items, on a new sheet if it does not fit
+      if (String(inv.notes || '').trim()) {
+        const notesEl = document.createElement('div'); notesEl.className = 'inv-sec inv-notes';
+        notesEl.innerHTML = `<h3>Work completed</h3><p>${esc(String(inv.notes).trim())}</p>`;
+        sheet.querySelector('.inv-body').appendChild(notesEl);
+        if (bottomOf(sheet, notesEl) > limit) {
+          notesEl.remove();
+          sheet = addSheet(); sheet.querySelector('.inv-body').appendChild(notesEl);
+        }
+      }
       // totals, terms and how to pay close the last sheet (on a new one if they do not fit)
       const finalWrap = document.createElement('div'); finalWrap.innerHTML = finalHtml.trim();
       const finalEl = finalWrap.firstElementChild;

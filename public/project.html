@@ -45,7 +45,6 @@
   <script src="/js/email-compose.js?v=10"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
-  <script src="/js/project-invoice-actuals.js?v=4"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/assets.js?v=3"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
@@ -3192,6 +3191,7 @@
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
               <button type="button" class="secondary email-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Email</button>
+              <button type="button" class="secondary invoice-notes-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Notes</button>
               ${inv.pdf_path ? `<button type="button" class="secondary view-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">View PDF</button>` : ''}
               <button type="button" class="secondary generate-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
               ${!inv.xero_invoice_id && !inv.paid_at
@@ -3219,6 +3219,12 @@
       });
       listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
+      });
+      // "Work completed" on the client's invoice (item 59, js/invoice-notes.js).
+      listEl.querySelectorAll('.invoice-notes-btn').forEach(btn => {
+        btn.addEventListener('click', () => loadJsOnce('/js/invoice-notes.js?v=3', () => typeof openInvoiceNotesPanel === 'function')
+          .then(() => openInvoiceNotesPanel(invoices.find(i => i.id === btn.dataset.invoiceId), project, () => loadJobInvoices(project)))
+          .catch(err => alert(friendlyError(err))));
       });
       listEl.querySelectorAll('.issue-credit-note-btn').forEach(btn => {
         btn.addEventListener('click', () => openIssueCreditNotePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
@@ -5328,7 +5334,9 @@
       const invoiceProjectBtn = document.getElementById('invoice-project-btn');
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
-      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => openInvoiceActualCostsPanel(project));
+      // Loaded on first click, so every job page does not carry it (page budget).
+      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => loadJsOnce('/js/project-invoice-actuals.js?v=7', () => typeof openInvoiceActualCostsPanel === 'function')
+        .then(() => openInvoiceActualCostsPanel(project)).catch(err => alert(friendlyError(err))));
       // Do-and-charge jobs: a named cost centre is all that's needed (no
       // quote lines) - it's what the team clocks time and costs Stock to.
       const addCostCentreBtn = document.getElementById('add-cost-centre-btn');

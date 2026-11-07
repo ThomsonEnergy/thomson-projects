@@ -5,7 +5,9 @@
 //            who and their rate tier, hours, $/hr, total. "As per Schedule of Rates" (the
 //            default) prices each shift by its bands (after hours, Saturday, Sunday, public
 //            holiday multipliers) and rounds a person's day up to the 2 hour minimum;
-//            "Flat" is one row per person at the base rate. Every row can be edited,
+//            "Flat" is one row per person at the base rate. A rate tier dropdown next to each
+//            person (item 59) bills all of that person's rows on this invoice at another tier
+//            (bands applied again, typed hours kept). Every row can be edited,
 //            "+ Add labour" adds a row by rate tier (travel, someone who did not clock on),
 //            and a "Less" line under the rows takes an amount or a percent off, lawyer
 //            style. A job under a commercial agreement (item 48) shows one more line, the
@@ -20,6 +22,8 @@
 //   Bill tick  every clocked shift and costed material has a Bill tick. Unticked, it is left
 //            off this invoice and marked not billable on the job when the invoice is created,
 //            so it stays off the next one (it shows greyed at the bottom: tick it to bill it).
+//   Notes    "Work completed" (item 59, invoices.notes), written from the site notes by
+//            generate-invoice-notes.js (js/invoice-notes.js) and edited, printed above the terms.
 // Tick the cost centres to invoice, then raise ONE invoice covering all of them (one Xero
 // invoice, a Labour / Materials line per cost centre) or a separate invoice for each.
 // create-invoice.js prices and checks everything again on the server.
@@ -72,6 +76,13 @@ async function openInvoiceActualCostsPanel(project) {
   let materialMode = 'itemised'; // materials: 'itemised' or 'bulk'
   let mode = 'combined';
   let rowKey = 0;
+  // A different rate tier picked for a person on this invoice (item 59): staffId -> tier. Kept across
+  // rebuilds (rate mode switch, Bill tick), so every clocked row of theirs is billed at it.
+  const tierOverride = {};
+  const tierFor = (l) => {
+    const t = tierOverride[l.staffId];
+    return t ? { rateTierId: t.id, tierName: t.name, rate: t.sellRate } : { rateTierId: l.rateTierId, tierName: l.tierName, rate: l.rate };
+  };
 
   const centres = actuals.centres.map((c) => {
     const unbilledHours = r2((c.labourLines || []).filter(l => l.billable).reduce((s, l) => s + l.hours, 0));
@@ -94,7 +105,7 @@ async function openInvoiceActualCostsPanel(project) {
         const byStaff = new Map();
         (c.labourLines || []).forEach((l) => {
           const k = `${l.staffId}|${l.billable ? 1 : 0}`;
-          if (!byStaff.has(k)) byStaff.set(k, { key: `r${rowKey++}`, source: 'shift', timeEntryIds: [], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, hours: 0, rate: l.rate, billable: l.billable });
+          if (!byStaff.has(k)) byStaff.set(k, { key: `r${rowKey++}`, source: 'shift', timeEntryIds: [], staffId: l.staffId, staffName: l.staffName, ...tierFor(l), mult: 1, hours: 0, billable: l.billable });
           const row = byStaff.get(k);
           row.timeEntryIds.push(l.timeEntryId);
           row.hours = r2(row.hours + l.hours);
@@ -106,7 +117,8 @@ async function openInvoiceActualCostsPanel(project) {
             const hours = Number(l.bands?.[band]) || 0;
             if (hours <= 0) return;
             const b = rules.bands[band];
-            rows.push({ key: `r${rowKey++}`, source: 'shift', timeEntryIds: [l.timeEntryId], staffId: l.staffId, staffName: l.staffName, rateTierId: l.rateTierId, tierName: l.tierName, bandLabel: b.label, dateKey: l.dateKey, start: l.start, end: l.end, hours, rate: r2(l.rate * b.multiplier), minTag: false, billable: l.billable });
+            const t = tierFor(l);
+            rows.push({ key: `r${rowKey++}`, source: 'shift', timeEntryIds: [l.timeEntryId], staffId: l.staffId, staffName: l.staffName, rateTierId: t.rateTierId, tierName: t.tierName, bandLabel: b.label, dateKey: l.dateKey, start: l.start, end: l.end, hours, rate: r2(t.rate * b.multiplier), mult: b.multiplier, minTag: false, billable: l.billable });
           });
         });
       }
@@ -162,7 +174,7 @@ async function openInvoiceActualCostsPanel(project) {
   overlay.innerHTML = `
     <div class="card" style="max-width:900px; width:100%; max-height:90vh; overflow-y:auto;">
       <h2>Invoice actual costs</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Tick the cost centres to invoice. Labour is every clocked shift not yet billed and materials every PO line or Stock draw costed to the job; change any line, untick Bill to leave one off (it stays off next time too), add a line, or take some off at the bottom. Stock comes out of the warehouse when an added Stock item is invoiced.</p>
+      <p class="subtitle" style="margin-bottom:10px;">Tick the cost centres to invoice. Labour is every clocked shift not yet billed and materials every PO line or Stock draw costed to the job; change any line or the rate tier next to a person, untick Bill to leave one off (it stays off next time too), add a line, or take some off at the bottom. Stock comes out of the warehouse when an added Stock item is invoiced.</p>
       <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
         <span style="font-weight:600;">Labour rates</span>
         <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400;"><input type="radio" name="ia-rate-mode" value="schedule" checked style="width:auto;" /> As per Schedule of Rates</label>
@@ -180,6 +192,10 @@ async function openInvoiceActualCostsPanel(project) {
         <div><label>Invoice date</label><input type="date" id="ia-date" value="${new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' })}" /></div>
         <div><label>Due date</label><input type="date" id="ia-due-date" /><p class="subtitle" id="ia-due-note" style="font-size:12px; margin:4px 0 0;"></p></div>
       </div>
+      <label>Notes on the invoice (Work completed)</label>
+      <textarea id="ia-notes" rows="4" maxlength="2000" placeholder="What was done on site. Printed on the client's invoice above the terms."></textarea>
+      <button type="button" class="secondary" id="ia-notes-write-btn" style="margin-top:6px; font-size:13px;">Write from the site notes</button>
+      <div id="ia-notes-msg"></div>
       <p id="ia-total" style="margin:14px 0 0; font-weight:600;"></p>
       <div style="margin-top:14px;">
         <button id="ia-confirm-btn">Create invoice</button>
@@ -235,13 +251,17 @@ async function openInvoiceActualCostsPanel(project) {
   const num = (v) => `type="number" step="0.01" inputmode="decimal" value="${v}" style="padding:4px 6px; margin:0; min-width:70px;"`;
   const billTick = (cls, on) => `<input type="checkbox" class="${cls}" ${on ? 'checked' : ''} title="Bill this line" style="width:auto; margin:0;" />`;
   const removeBtn = (cls) => `<button type="button" class="secondary ${cls}" aria-label="Remove" title="Remove" style="font-size:14px; padding:2px 8px;">&times;</button>`;
+  // The rate tier a clocked person is billed at (item 59): picking one reprices all their rows.
+  const staffTierPick = (r, off) => (rateTiers.length
+    ? ` <select class="ia-staff-tier" title="Bill this person's hours at another rate tier" ${off ? 'disabled' : ''} style="padding:2px 4px; margin:2px 0 0; width:auto; display:inline-block; font-size:12px;">${r.rateTierId && rateTiers.some(t => t.id === r.rateTierId) ? '' : `<option value="">${escapeHtml(r.tierName || 'No rate tier')}</option>`}${rateTiers.map(t => `<option value="${escapeHtml(t.id)}" ${t.id === r.rateTierId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select>`
+    : (r.tierName ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.tierName)}</span>` : ''));
   function labourRowHtml(r, j) {
     const schedule = rateMode === 'schedule';
     const off = r.billable === false;
     const who = r.source === 'added'
       ? `<select class="ia-row-tier" style="padding:4px 6px; margin:0; min-width:120px;">${rateTiers.map(t => `<option value="${escapeHtml(t.id)}" ${t.id === r.rateTierId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select>
          <input class="ia-row-note" value="${escapeHtml(r.note || '')}" placeholder="Note (e.g. travel)" style="padding:4px 6px; margin:4px 0 0; min-width:120px;" />`
-      : `${escapeHtml(r.staffName)}${r.tierName ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.tierName)}${r.bandLabel ? `, ${escapeHtml(r.bandLabel)}` : ''}</span>` : ''}${r.minTag ? ` <span class="subtitle" style="font-size:11px;">min. ${rules.minimumHours} hrs</span>` : ''}${off ? ` <span class="subtitle" style="font-size:11px;">not billable</span>` : ''}`;
+      : `${escapeHtml(r.staffName)}${staffTierPick(r, off)}${r.bandLabel ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.bandLabel)}</span>` : ''}${r.minTag ? ` <span class="subtitle" style="font-size:11px;">min. ${rules.minimumHours} hrs</span>` : ''}${off ? ` <span class="subtitle" style="font-size:11px;">not billable</span>` : ''}`;
     return `
       <tr data-lr="${j}" style="${off ? 'opacity:0.5;' : ''}">
         <td>${r.source === 'added' ? '' : billTick('ia-row-bill', !off)}</td>
@@ -345,13 +365,25 @@ async function openInvoiceActualCostsPanel(project) {
         const bill = tr.querySelector('.ia-row-bill');
         if (bill) bill.addEventListener('change', (e) => {
           // The tick is per shift: a shift split into bands (or a person's rows in Flat) moves together.
+          // Set on the clocked shifts themselves, since the rows are rebuilt from them (setting it on the
+          // rows alone came straight back ticked).
           const ids = new Set(r.timeEntryIds);
-          centres.forEach(cc => cc.labourRows.forEach(x => { if (x.source === 'shift' && x.timeEntryIds.some(id => ids.has(id))) x.billable = e.target.checked; }));
+          centres.forEach(cc => (cc.labourLines || []).forEach((l) => { if (ids.has(l.timeEntryId)) l.billable = e.target.checked; }));
           buildLabourRows();
           renderCentres();
         });
         const rm = tr.querySelector('.ia-row-remove');
         if (rm) rm.addEventListener('click', () => { c.labourRows.splice(Number(tr.dataset.lr), 1); renderCentres(); });
+        const staffTier = tr.querySelector('.ia-staff-tier');
+        if (staffTier) staffTier.addEventListener('change', (e) => {
+          const t = rateTiers.find(x => x.id === e.target.value);
+          if (!t) return;
+          tierOverride[r.staffId] = t;
+          centres.forEach(cc => cc.labourRows.forEach((x) => {
+            if (x.source === 'shift' && x.staffId === r.staffId) { x.rateTierId = t.id; x.tierName = t.name; x.rate = r2(t.sellRate * (x.mult || 1)); }
+          }));
+          renderCentres();
+        });
         const tierSel = tr.querySelector('.ia-row-tier');
         if (tierSel) tierSel.addEventListener('change', (e) => {
           const t = rateTiers.find(x => x.id === e.target.value);
@@ -407,6 +439,19 @@ async function openInvoiceActualCostsPanel(project) {
   }
   renderCentres();
 
+  // What this invoice bills, for the notes writer: materials and hand-added labour say what was
+  // fitted; clocked rows only say who and when, so they are left out.
+  const billedLines = () => centres.filter(c => c.include).flatMap(c => [
+    `Cost centre: ${c.name}`,
+    ...billedMaterials(c).map(m => `Material: ${m.description} x ${m.quantity}`),
+    ...c.items.map(it => `Material: ${it.name} x ${it.quantity}`),
+    ...c.labourRows.filter(r => r.source === 'added' && r.note).map(r => `Labour: ${r.note}`),
+  ]).slice(0, 80);
+  const notesWriteBtn = overlay.querySelector('#ia-notes-write-btn');
+  loadJsOnce('/js/invoice-notes.js?v=3', () => typeof wireInvoiceNotesWrite === 'function')
+    .then(() => wireInvoiceNotesWrite(overlay.querySelector('#ia-notes'), notesWriteBtn, overlay.querySelector('#ia-notes-msg'), () => ({ projectId: project.id, lines: billedLines() })))
+    .catch(() => { notesWriteBtn.disabled = true; });
+
   overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#ia-confirm-btn').addEventListener('click', async () => {
     const confirmBtn = overlay.querySelector('#ia-confirm-btn');
@@ -453,6 +498,7 @@ async function openInvoiceActualCostsPanel(project) {
             ...batch,
             sentAt: overlay.querySelector('#ia-date').value || null,
             dueDate: overlay.querySelector('#ia-due-date').value || null,
+            notes: overlay.querySelector('#ia-notes').value.trim() || null,
           }),
         });
         const data = await res.json();
