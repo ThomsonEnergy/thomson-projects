@@ -34,6 +34,7 @@ async function extractSupplierInvoiceWithUsage({ fileBase64, mediaType }) {
   - part_number: the supplier's product code, part number or catalogue number for the line, exactly as printed (often its own column, such as "Code", "Item", "Part No" or "Product"), null if the line has none
   - quantity: the quantity supplied on THIS invoice, as a number. When the line shows separate ordered, supplied (shipped, delivered) and back-ordered figures, use the supplied one: an item listed with 0 supplied (already delivered and invoiced earlier, or still on back order) is quantity 0, not the ordered quantity. Default to 1 only when no quantity is shown at all
   - unit_cost: the cost per unit, ex-GST if both are shown, as a plain number (no currency symbols)
+  - unit: what the unit price is per, as printed in the line's unit or UOM column (EA, EACH, M, MTR, DRUM, ROLL, COIL, BOX, PK, BAG), null when the invoice shows none
 - subtotal: the subtotal before GST, as a plain number
 - paid_status: "paid" when the document shows it has already been paid (a PAID or RECEIPT stamp, "amount due $0.00" or "balance $0.00" with payments listed, "paid by card", "tendered", a point-of-sale or counter receipt), "unpaid" when it asks for payment (a due date, "amount due" above zero, "please pay", bank or BPAY details for paying), "unknown" when you cannot tell
 - payment_method: when paid, how: "card", "cash", "bank_transfer" or "other"; null when not paid or not shown
