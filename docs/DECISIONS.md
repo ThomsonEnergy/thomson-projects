@@ -12,6 +12,10 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 - Owner's direction, 6 Nov 2026: Pylon is design only (layout, warranty documents, data sheets); the ROI, pricing and terms live in TEops; battery STCs are worked out in TEops from the design's usable kWh when Pylon cannot give the count. Item 58 rewritten to that: one pull fills sizes, link and equipment lines, the layout image goes on the proposal in place of the Pylon link, BSTC count from usable kWh with the factors and tiers as data in Settings (the 28 to 50 kWh share still to confirm against the CER calculator). Planned, waiting on yes. Detail: `docs/IDEAS_BACKLOG.md` item 58.
 - Live: item 53 went straight to `main` on the owner's say (PR #298, no migration): Save to job on email attachments and Add from job on emails sent from a job. Real Gmail save and send were not tested on staging first (this session could not reach it). Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.
 
+## 7 Nov 2026
+
+- LIVE (owner, 6 Nov: "go straight to main, this is a bug"): item 57, stock kinds and cable drums, PR 311 into `main` (item 57 alone: `staging` also holds items 54 to 56, not released). Production migration 20261130000000 applied by hand in sections through the database tool (it stops on drop and on a delete inside a function body, so the old price function is renamed and two functions run their deletes as dynamic SQL), backups `backup_20261105_*`, version recorded by hand. Detail: `docs/IDEAS_BACKLOG.md` item 57.
+
 ## 5 Nov 2026
 
 - Built: item 53 on `feat/email-job-files` (PR #293 into `staging`): Save to job on email attachments (Site Photos with a caption, or Documents in a folder, copied from Gmail on the server) and Add from job (the job's documents and site photos) on every email sent from a job and on Inbox replies to tagged conversations. No migration. Detail: `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md` item 53.
