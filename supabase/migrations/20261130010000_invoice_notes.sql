@@ -1,4 +1,4 @@
--- Invoice notes and the terms note in Settings (docs/IDEAS_BACKLOG.md item 57, spec A22).
+-- Invoice notes and the terms note in Settings (docs/IDEAS_BACKLOG.md item 59, spec A22).
 --
 --  * invoices.notes: "Work completed", written by AI from the job's site notes (generate-invoice-notes.js)
 --    and edited by a person, in the Invoice actual costs panel or from the invoice card's Notes button.

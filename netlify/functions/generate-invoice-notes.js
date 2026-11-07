@@ -1,6 +1,6 @@
 // POST { projectId, invoiceId?, lines? }   (pricing roles: Admin, Finance, Sales)
 //
-// Writes the "Work completed" note for an invoice (item 57) from what the installers wrote on the
+// Writes the "Work completed" note for an invoice (item 59) from what the installers wrote on the
 // job: site notes saved at clock off (project_field_notes), job feed posts and finished tasks with
 // their notes, between the job's previous invoice and this one (the whole job for the first).
 // For a new invoice (Invoice actual costs panel, js/project-invoice-actuals.js) the window ends now
