@@ -30,7 +30,7 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=125"></script>
+  <script src="/js/supabase-client.js?v=126"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const vehicleId = new URLSearchParams(window.location.search).get('id');
@@ -44,12 +44,16 @@
       }
       currentVehicle = vehicle;
 
-      const { data: stockRows } = await supabaseClient
-        .from('material_stock_by_location')
-        .select('*, materials(id, name, cost_price, is_consumable, pack_label)')
-        .eq('vehicle_id', vehicleId)
-        .eq('location_type', 'vehicle')
-        .gt('quantity', 0);
+      await loadStockKinds();
+      const [{ data: stockRows }, drums] = await Promise.all([
+        supabaseClient
+          .from('material_stock_by_location')
+          .select('*, materials(id, name, cost_price, is_consumable, pack_label, kind, pack_qty)')
+          .eq('vehicle_id', vehicleId)
+          .eq('location_type', 'vehicle')
+          .gt('quantity', 0),
+        loadDrums({ loc: 'vehicle', vehicleId }),
+      ]);
 
       // Open POs for this vehicle as short rows (backlog item 31); closed ones are on the Purchase Orders page.
       const { data: pos } = await supabaseClient
@@ -60,10 +64,11 @@
         .order('created_at', { ascending: false });
 
       const myRole = await getMyRole();
-      render(vehicle, stockRows || [], pos || [], {}, myRole);
+      render(vehicle, stockRows || [], pos || [], drums, myRole);
     }
 
-    function render(vehicle, stockRows, pos, billsByPo, myRole) {
+    function render(vehicle, stockRows, pos, drums, myRole) {
+      const vehLabel = vehicle.vehicle_name || vehicle.rego;
       document.getElementById('content').innerHTML = `
         <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
@@ -87,8 +92,8 @@
               <tbody>
                 ${stockRows.map(r => `
                   <tr>
-                    <td data-label="Material">${escapeHtml(r.materials?.name || 'Unknown')}</td>
-                    <td class="num" data-label="Quantity"><button type="button" class="secondary btn-sm veh-qty-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" data-qty="${escapeHtml(r.quantity)}" title="Tap to correct the count">${escapeHtml(r.quantity)}</button>${r.materials?.is_consumable ? ` <button type="button" class="secondary btn-sm veh-low-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" title="One tap: Admin is told to restock">Running low</button>` : ''}</td>
+                    <td data-label="Material">${escapeHtml(r.materials?.name || 'Unknown')}${stockKindChip(r.materials) ? ' ' + stockKindChip(r.materials) : ''}${stockIsDrumItem(r.materials) ? drumListHtml(drums.filter(u => u.material_id === r.material_id), r.materials, { loc: 'vehicle', vehicleId, placeLabel: vehLabel }) : ''}</td>
+                    <td class="num" data-label="Quantity">${stockIsDrumItem(r.materials) ? `${escapeHtml(poQty(r.quantity))}m` : `<button type="button" class="secondary btn-sm veh-qty-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" data-qty="${escapeHtml(r.quantity)}" title="Tap to correct the count">${escapeHtml(r.quantity)}</button>`}${r.materials?.is_consumable ? ` <button type="button" class="secondary btn-sm veh-low-btn" data-material-id="${escapeHtml(r.material_id)}" data-name="${escapeHtml(r.materials?.name || '')}" title="One tap: Admin is told to restock">Running low</button>` : ''}</td>
                     <td class="num" data-label="Value">${money(r.quantity * (r.materials?.cost_price || 0))}</td>
                   </tr>`).join('')}
               </tbody>
@@ -104,9 +109,9 @@
       `;
 
       document.getElementById('create-po-btn').addEventListener('click', openCreatePoPanel);
-      const vehLabel = vehicle.vehicle_name || vehicle.rego;
-      document.getElementById('move-stock-btn').addEventListener('click', () => openStockTransferPanel({ fromLoc: 'warehouse', fromVehicleId: null, fromLabel: 'Warehouse', toLoc: 'vehicle', toVehicleId: vehicleId, toLabel: vehLabel, onDone: loadVehicleStock }));
-      document.getElementById('stocktake-btn').addEventListener('click', () => openStocktakePanel({ loc: 'vehicle', vehicleId, placeLabel: vehLabel, onDone: loadVehicleStock }));
+      wireDrumLists(document.getElementById('content'), Object.fromEntries(stockRows.map(r => [r.material_id, r.materials])), loadVehicleStock);
+      document.getElementById('move-stock-btn').addEventListener('click', () => loadStockPanels().then(() => openStockTransferPanel({ fromLoc: 'warehouse', fromVehicleId: null, fromLabel: 'Warehouse', toLoc: 'vehicle', toVehicleId: vehicleId, toLabel: vehLabel, onDone: loadVehicleStock })).catch(err => alert(err.message)));
+      document.getElementById('stocktake-btn').addEventListener('click', () => loadStockPanels().then(() => openStocktakePanel({ loc: 'vehicle', vehicleId, placeLabel: vehLabel, onDone: loadVehicleStock })).catch(err => alert(err.message)));
       document.getElementById('scan-part-btn').addEventListener('click', () => loadStockScan().then(() => openStockScanPanel({ loc: 'vehicle', vehicleId, onDone: loadVehicleStock })).catch(err => alert(err.message)));
       document.querySelectorAll('.veh-low-btn').forEach(btn => btn.addEventListener('click', async () => {
         btn.disabled = true;
@@ -139,7 +144,7 @@
       await loadPoScan(); // the paid tick and the scan button (js/po-scan.js, item 51)
       const myRole = await getMyRole();
       const { data: suppliers } = await supabaseClient.from('suppliers').select('id, name').order('name');
-      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');
+      const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price, kind, pack_qty').order('name');
 
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
