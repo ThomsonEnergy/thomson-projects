@@ -400,7 +400,7 @@
           }
         });
       });
-      // "Work completed" (item 57, invoices.notes) under the items, on a new sheet if it does not fit
+      // "Work completed" (item 59, invoices.notes) under the items, on a new sheet if it does not fit
       if (String(inv.notes || '').trim()) {
         const notesEl = document.createElement('div'); notesEl.className = 'inv-sec inv-notes';
         notesEl.innerHTML = `<h3>Work completed</h3><p>${esc(String(inv.notes).trim())}</p>`;

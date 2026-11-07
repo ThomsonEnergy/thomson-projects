@@ -1,4 +1,4 @@
-// The invoice notes prompt (netlify/functions/generate-invoice-notes.js, item 57): writes the
+// The invoice notes prompt (netlify/functions/generate-invoice-notes.js, item 59): writes the
 // "Work completed" note on a client's invoice from what the installers wrote on the job.
 // {{job}} is the job name and site, {{notes}} the site notes, feed posts and finished tasks,
 // {{lines}} what the invoice bills. A JS module so the function bundler ships it. No em dashes.

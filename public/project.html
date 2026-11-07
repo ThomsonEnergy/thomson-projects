@@ -3220,9 +3220,9 @@
       listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
       });
-      // "Work completed" on the client's invoice (item 57, js/invoice-notes.js).
+      // "Work completed" on the client's invoice (item 59, js/invoice-notes.js).
       listEl.querySelectorAll('.invoice-notes-btn').forEach(btn => {
-        btn.addEventListener('click', () => loadJsOnce('/js/invoice-notes.js?v=2', () => typeof openInvoiceNotesPanel === 'function')
+        btn.addEventListener('click', () => loadJsOnce('/js/invoice-notes.js?v=3', () => typeof openInvoiceNotesPanel === 'function')
           .then(() => openInvoiceNotesPanel(invoices.find(i => i.id === btn.dataset.invoiceId), project, () => loadJobInvoices(project)))
           .catch(err => alert(friendlyError(err))));
       });
@@ -5335,7 +5335,7 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       // Loaded on first click, so every job page does not carry it (page budget).
-      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => loadJsOnce('/js/project-invoice-actuals.js?v=6', () => typeof openInvoiceActualCostsPanel === 'function')
+      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => loadJsOnce('/js/project-invoice-actuals.js?v=7', () => typeof openInvoiceActualCostsPanel === 'function')
         .then(() => openInvoiceActualCostsPanel(project)).catch(err => alert(friendlyError(err))));
       // Do-and-charge jobs: a named cost centre is all that's needed (no
       // quote lines) - it's what the team clocks time and costs Stock to.

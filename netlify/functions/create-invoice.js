@@ -1,6 +1,6 @@
 // POST /api/create-invoice
 // Body: { projectId, claims: [{ costCentreId, labourAmount, materialAmount, stcAmount, claimPercent, items? }],
-//         variationEntryIds? (logged variations being billed on this invoice), notes? (item 57: the
+//         variationEntryIds? (logged variations being billed on this invoice), notes? (item 59: the
 //         "Work completed" note, written from the site notes by generate-invoice-notes.js and edited) }
 // items (do-and-charge invoice builder): Stock materials, prebuilds and labour
 // lines (item 41: hours x $/hr per clocked shift, naming the shifts billed)
@@ -286,7 +286,7 @@ exports.handler = async (event) => {
         created_by: user.id,
         bill_to_client_id: billToClientId || null,
         commercial_agreement: commercialAgreement,
-        notes: String(notes || '').trim().slice(0, 2000) || null, // "Work completed" (item 57), printed above the terms
+        notes: String(notes || '').trim().slice(0, 2000) || null, // "Work completed" (item 59), printed above the terms
       })
       .select('id')
       .single();

@@ -6,7 +6,7 @@
 //            default) prices each shift by its bands (after hours, Saturday, Sunday, public
 //            holiday multipliers) and rounds a person's day up to the 2 hour minimum;
 //            "Flat" is one row per person at the base rate. A rate tier dropdown next to each
-//            person (item 57) bills all of that person's rows on this invoice at another tier
+//            person (item 59) bills all of that person's rows on this invoice at another tier
 //            (bands applied again, typed hours kept). Every row can be edited,
 //            "+ Add labour" adds a row by rate tier (travel, someone who did not clock on),
 //            and a "Less" line under the rows takes an amount or a percent off, lawyer
@@ -22,7 +22,7 @@
 //   Bill tick  every clocked shift and costed material has a Bill tick. Unticked, it is left
 //            off this invoice and marked not billable on the job when the invoice is created,
 //            so it stays off the next one (it shows greyed at the bottom: tick it to bill it).
-//   Notes    "Work completed" (item 57, invoices.notes), written from the site notes by
+//   Notes    "Work completed" (item 59, invoices.notes), written from the site notes by
 //            generate-invoice-notes.js (js/invoice-notes.js) and edited, printed above the terms.
 // Tick the cost centres to invoice, then raise ONE invoice covering all of them (one Xero
 // invoice, a Labour / Materials line per cost centre) or a separate invoice for each.
@@ -76,7 +76,7 @@ async function openInvoiceActualCostsPanel(project) {
   let materialMode = 'itemised'; // materials: 'itemised' or 'bulk'
   let mode = 'combined';
   let rowKey = 0;
-  // A different rate tier picked for a person on this invoice (item 57): staffId -> tier. Kept across
+  // A different rate tier picked for a person on this invoice (item 59): staffId -> tier. Kept across
   // rebuilds (rate mode switch, Bill tick), so every clocked row of theirs is billed at it.
   const tierOverride = {};
   const tierFor = (l) => {
@@ -251,7 +251,7 @@ async function openInvoiceActualCostsPanel(project) {
   const num = (v) => `type="number" step="0.01" inputmode="decimal" value="${v}" style="padding:4px 6px; margin:0; min-width:70px;"`;
   const billTick = (cls, on) => `<input type="checkbox" class="${cls}" ${on ? 'checked' : ''} title="Bill this line" style="width:auto; margin:0;" />`;
   const removeBtn = (cls) => `<button type="button" class="secondary ${cls}" aria-label="Remove" title="Remove" style="font-size:14px; padding:2px 8px;">&times;</button>`;
-  // The rate tier a clocked person is billed at (item 57): picking one reprices all their rows.
+  // The rate tier a clocked person is billed at (item 59): picking one reprices all their rows.
   const staffTierPick = (r, off) => (rateTiers.length
     ? ` <select class="ia-staff-tier" title="Bill this person's hours at another rate tier" ${off ? 'disabled' : ''} style="padding:2px 4px; margin:2px 0 0; width:auto; display:inline-block; font-size:12px;">${r.rateTierId && rateTiers.some(t => t.id === r.rateTierId) ? '' : `<option value="">${escapeHtml(r.tierName || 'No rate tier')}</option>`}${rateTiers.map(t => `<option value="${escapeHtml(t.id)}" ${t.id === r.rateTierId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}</select>`
     : (r.tierName ? ` <span class="subtitle" style="font-size:11px;">${escapeHtml(r.tierName)}</span>` : ''));
@@ -448,7 +448,7 @@ async function openInvoiceActualCostsPanel(project) {
     ...c.labourRows.filter(r => r.source === 'added' && r.note).map(r => `Labour: ${r.note}`),
   ]).slice(0, 80);
   const notesWriteBtn = overlay.querySelector('#ia-notes-write-btn');
-  loadJsOnce('/js/invoice-notes.js?v=2', () => typeof wireInvoiceNotesWrite === 'function')
+  loadJsOnce('/js/invoice-notes.js?v=3', () => typeof wireInvoiceNotesWrite === 'function')
     .then(() => wireInvoiceNotesWrite(overlay.querySelector('#ia-notes'), notesWriteBtn, overlay.querySelector('#ia-notes-msg'), () => ({ projectId: project.id, lines: billedLines() })))
     .catch(() => { notesWriteBtn.disabled = true; });
 

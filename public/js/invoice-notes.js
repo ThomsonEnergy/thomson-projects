@@ -1,4 +1,4 @@
-// Invoice notes (item 57): the "Work completed" note printed on the client's invoice and PDF above
+// Invoice notes (item 59): the "Work completed" note printed on the client's invoice and PDF above
 // the terms (invoices.notes). Written by AI from the job's site notes, feed posts and finished tasks
 // (netlify/functions/generate-invoice-notes.js), then edited by a person. Never sent to Xero.
 //   wireInvoiceNotesWrite(textarea, button, msgEl, args): the "Write from the site notes" button,
