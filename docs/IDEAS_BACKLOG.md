@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 5 Nov 2026 (item 48 built)
+Last updated 9 Nov 2026 (item 62 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -39,6 +39,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Planned 5 Nov 2026, waiting on yes | N | None |
 | 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Planned 5 Nov 2026, waiting on yes | N | Owner's yes to turn auto labels on for the 4 mailboxes |
 | 59 | Invoice actual costs: rate per clocked person, AI invoice notes from the installers' notes, terms note in Settings | LIVE 6 Nov 2026 (spec A22), migration 20261130010000 | N | None |
+| 62 | Pipeline moves done by the database: task gate, handover check and all-paid check as triggers, no-quote invoices move to Awaiting Payment, board quote columns for quotes only, 9 jobs put back in the right column | Planned 9 Nov 2026, waiting on yes | N | None |
 
 ## High lead time, start now
 
@@ -1257,3 +1258,30 @@ Touches: one migration 20261130000000 (`materials.kind`, `pack_qty`, `pack_unit`
 Timesheets > Leave card: "Add leave for someone" (person, dates, kind, notes, "Mark approved now" on by default) and a Delete button on every row with a confirm; leave already sent to Xero warns to delete it in Xero Payroll too (the app does not delete in Xero). Two RLS policies on `leave_requests`: insert for Admin and Finance (pending, or approved by themselves; Xero columns empty) and delete for Admin and Finance.
 
 Touches: `timesheets.html`, migration 20261130020000.
+
+## 62. Pipeline moves done by the database (planned 9 Nov 2026, waiting on the owner's yes)
+
+**What the check found (9 Nov 2026, production, read only).** The moves that happen in the database or on the server work: Ready to Book and Job Booked follow bookings and clock-ins (triggers, nightly sweep), a quote approval makes the job and the deposit, a paid deposit moves it on (J7057), a final claim moves Ready to Invoice to Awaiting Payment (J7056), Complete archives after 2 days. The moves that only run in the browser get skipped:
+
+- **Awaiting Our Action with nothing open:** J7009, J7010, J7034 have no open required-before-scheduling task but sit at Awaiting Our Action. The gate (`refreshPipelineTaskGate`) only runs when a task is ticked on the job page, Tasks or My Day; a task deleted, made not required, or finished another way never re-runs it.
+- **Client Handover with nothing left to do:** J7001, J7005, J7038, J7046 (direct jobs, no tasks at all) have sat at Client Handover since their clock-out "Complete". The handover check (`checkAndAdvanceHandover`) only runs when a handover task is ticked or the handover card is saved, so a job with no handover tasks never moves. J7012 was invoiced from Client Handover and stayed there.
+- **Invoiced no-quote jobs never reach Awaiting Payment:** `create-invoice.js` only moves a job when the claim is "final", which needs a quoted total; a do-and-charge job ($0 quoted) is never final. J7012 and J7068 are invoiced and still at Client Handover and Ready to Invoice.
+- **Paid only by webhook:** only the Xero and Airwallex webhooks set `paid_at` and run the all-paid check. SI3003 to SI3006 are not in Xero, so their jobs can never reach Complete by themselves. PR 316 (item 61) does not add mark paid by hand either.
+- **Jobs in quote columns:** the board offers every column to a job, so J7036 sits at Quote Sent and J7037 at Lead (ServiceM8 imports moved by hand). J7031 is at Awaiting Payment with no invoice in the app (invoiced in ServiceM8). Board moves are not written to the activity log, so there is no trail.
+- By design and left alone: Job Not Complete is hand-moved only (J7004 since 22 Oct, J7014 and J7051 have people booked or clocked in).
+
+**Plan.** One migration moves the three browser-only checks into the database so every route (page, board, server, SQL, a future mark-paid button) lands a job in the right column, and each automatic move writes an activity line ("Moved to Ready to Book: no required tasks open", `changed_by` null):
+
+1. `project_handover_ready(p_project_id)`: the same rule as `checkAndAdvanceHandover` (no open handover task; solar also NMI, panel and inverter serials and a Formbay status; battery NMI and Formbay).
+2. `job_tasks_sync_stage` trigger (after insert, update, delete on `job_tasks`): the job at Awaiting Our Action or Ready to Book takes `project_unbooked_stage`; at Client Handover it moves to Ready to Invoice when `project_handover_ready`.
+3. `projects_stage_rules` before-update trigger on `projects`: a job entering Client Handover, or one at Client Handover whose NMI, serials or Formbay status change, moves on to Ready to Invoice when ready (so the clock-out "Complete" on a direct job lands at Ready to Invoice).
+4. `invoices_sync_complete` trigger (after update of `paid_at` on `invoices`): a job at Awaiting Payment with every invoice paid moves to Complete, whichever way the invoice was marked paid.
+5. `create-invoice.js`: an invoice on a job with no quoted total raised while the job is at Client Handover or Ready to Invoice moves it to Awaiting Payment (it is the invoice for the work); a final claim raised from Client Handover moves it too. Job Not Complete stays put (work still going).
+6. `dashboard.html`: Lead, Draft Quote and Quote Sent offered to quotes only, and a board move writes an activity line.
+7. Delete `checkAndAdvanceHandover` and `refreshPipelineTaskGate` and their calls (`project.html`, `tasks.html`, `my-day.html`, `assets.js`): the triggers do the work. The clock-out message says which column the job landed in.
+8. One-off in the migration: J7009, J7010, J7034 to Ready to Book; J7001, J7005, J7038, J7046 to Ready to Invoice; J7012 and J7068 to Awaiting Payment; J7036 and J7037 to Ready to Book. J7031 is left for the owner (Complete, or Archived).
+
+**Done means:** (1) tick the last required task on a job at Awaiting Our Action from the Tasks page: the board shows it at Ready to Book with an activity line; (2) delete that task instead: same result; (3) clock out of a direct job with no tasks and tap Complete: the job lands at Ready to Invoice; (4) raise an invoice on a no-quote job at Ready to Invoice: it lands at Awaiting Payment; (5) set `paid_at` on that invoice by SQL on staging: it lands at Complete; (6) a job card on the board no longer offers Lead, Draft Quote or Quote Sent.
+
+Touches: one migration (`job_tasks_sync_stage`, `projects_stage_rules`, `invoices_sync_complete`, `project_handover_ready`, the 11 job moves), `public/js/supabase-client.js` (delete two functions, clock-out message, `?v=` bump on every page), `public/project.html`, `public/tasks.html`, `public/my-day.html`, `public/js/assets.js`, `public/dashboard.html`, `netlify/functions/create-invoice.js` (the stage block only), `docs/PROJECT_SPEC.md` A6. Overlaps: PR 316 (item 61, open) touches `create-invoice.js`, `project.html` and both webhooks; build this after 316 merges, or in the same chat; no unmerged branches on `staging`; nothing waiting on yes touches these. Kind: bug fix (jobs not moving is wrong on live) into `main`, then `main` into `staging`; migration yes; money no (stage only), stock no, RLS no, payroll no. Size: medium (a morning). Test on staging: admin@staging.test, the six Done means clicks; no keys needed. Best model: Fable 5.1, effort xhigh, because it is a migration with triggers on the live jobs table plus code in one go.
+
