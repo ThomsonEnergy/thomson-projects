@@ -1,4 +1,4 @@
-// Invoice history (item 60): one line in invoice_events for each thing the server does to an
+// Invoice history (item 61): one line in invoice_events for each thing the server does to an
 // invoice, so the Invoices page can show who did what and when. Called by create-invoice.js,
 // create-job-from-quote.js (the deposit), send-gmail.js (emailed, reminder), push-invoice-to-xero.js,
 // create-credit-note.js, push-credit-note-to-xero.js, xero-webhook.js and airwallex-webhook.js (paid).

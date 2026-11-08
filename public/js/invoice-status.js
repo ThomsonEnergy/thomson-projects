@@ -1,4 +1,4 @@
-// Invoice status in plain words (item 60): the same words on the Invoices page and on the job's
+// Invoice status in plain words (item 61): the same words on the Invoices page and on the job's
 // Invoices tab, worked out from the invoice row, its history (invoice_events, oldest first) and
 // its credit notes. Pure: no page, no network. Loaded by invoices.html (a script tag) and
 // project.html (loadInvoiceActions, with js/invoice-actions.js).

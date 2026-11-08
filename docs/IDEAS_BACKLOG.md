@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 8 Nov 2026 (item 60 claimed)
+Last updated 8 Nov 2026 (item 61 claimed)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -39,7 +39,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 55 | Postie drafts only when the email asks for an answer; Draft reply button on the Inbox for the rest | Planned 5 Nov 2026, waiting on yes | N | None |
 | 56 | A label for every conversation without a job (mail both ways, 2+ messages), made by Postie itself, one per matter, the trail linked | Planned 5 Nov 2026, waiting on yes | N | Owner's yes to turn auto labels on for the 4 mailboxes |
 | 59 | Invoice actual costs: rate per clocked person, AI invoice notes from the installers' notes, terms note in Settings | LIVE 6 Nov 2026 (spec A22), migration 20261130010000 | N | None |
-| 60 | Invoices page as the accounts desk: status in plain words, a history of who did what and when on every invoice, email, reminder, push, edit and credit note from the list | Owner's yes 8 Nov 2026, building in `claude/nice-clarke-8bshow`, straight to `main` (weekend rule) | N | None |
+| 61 | Invoices page as the accounts desk: status in plain words, a history of who did what and when on every invoice, email, reminder, push, edit and credit note from the list | Owner's yes 8 Nov 2026, building in `claude/nice-clarke-8bshow`, straight to `main` (weekend rule) | N | None |
 
 ## High lead time, start now
 
@@ -1231,7 +1231,7 @@ Migration (one): `invoices.notes text`, `company_settings.invoice_terms_text tex
 Done means: on staging (admin@staging.test, a do-and-charge job with clocked shifts) (1) Invoice actual costs > change one clocked row's tier to another tier: every row for that person reprices to that tier's $/hr times the band, the created invoice's line names the tier; (2) Write from the site notes fills the Notes box from the job's site notes, edit a word, Create invoice, open the client link: "Work completed" shows the edited text, the PDF too; (3) the invoice card's Notes button, change the text, Save: the client link and PDF show the new text; (4) Settings > Terms > Invoice terms note, change 9% to 10%, Save: the client link shows the new wording.
 
 Touches: `public/project.html` (a Notes button and its listener on the invoice card, a script tag, `?v=` bumps), `public/settings.html` (one card on the Terms tab, load and save), `public/invoice.html` (notes block, terms from Settings), `public/js/project-invoice-actuals.js` (tier dropdown on clocked rows, Notes box), new `public/js/invoice-notes.js` (the Notes panel and the Write call, shared by the panel and the card), new `netlify/functions/generate-invoice-notes.js` (pricing roles, Claude Sonnet 5.5), `netlify/functions/create-invoice.js` (accepts `notes`), one migration, `docs/PROJECT_SPEC.md` A22. Overlaps: none (PRs 299 and 300 are merged into `staging`, no unmerged branches). Kind: feature into `staging`; migration yes; money, stock, RLS or payroll no. Size: medium (a morning). Test on staging: admin@staging.test; the Write button needs the Claude key in Settings > Integration keys on staging.
-## 60. Invoices page as the accounts desk: status, history, and every action from the list (owner's yes 8 Nov 2026, built the same day straight to `main`)
+## 61. Invoices page as the accounts desk: status, history, and every action from the list (owner's yes 8 Nov 2026, built the same day straight to `main`)
 
 Owner, 8 Nov 2026: invoices are created from the job, but checked, sent, chased, pushed and corrected from the Invoices page, usually by an accounts person who was not on the job. The whole process has to be easy to see: what stage each invoice is at, who did what and when.
 

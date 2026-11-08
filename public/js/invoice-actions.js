@@ -1,4 +1,4 @@
-// The invoice panel and every action on an invoice after it is made (item 60): email to the
+// The invoice panel and every action on an invoice after it is made (item 61): email to the
 // client, send a reminder, push to Xero, edit (while not in Xero and not paid), issue a credit
 // note (once in Xero, Finance and Admin), notes, PDF, and the history of who did what and when.
 // One panel, two doors: the Invoices page (invoices.html, a row click) and the job's Invoices tab

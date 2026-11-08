@@ -2,7 +2,7 @@
 // Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId?,
 //         invoiceEvent? }
 //   invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } records the send in the invoice's history
-//                 (invoice_events, item 60) once Gmail has taken it, so the Invoices page shows it as sent
+//                 (invoice_events, item 61) once Gmail has taken it, so the Invoices page shows it as sent
 //   mailboxId: send a new email from your own inbox (My inbox) instead of sales@
 //   draftId:   the draft this came from: marked sent, and removed from Gmail's drafts
 //   attachments: [{ bucket: 'email-attachments' | 'project-documents' | 'site-photos' (job photos only), path, name }]

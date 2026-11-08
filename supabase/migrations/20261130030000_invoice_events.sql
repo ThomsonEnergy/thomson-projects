@@ -1,4 +1,4 @@
--- Invoice history (docs/IDEAS_BACKLOG.md item 60, spec A28): one row per thing that happens to an
+-- Invoice history (docs/IDEAS_BACKLOG.md item 61, spec A28): one row per thing that happens to an
 -- invoice, so the Invoices page and the job's Invoices tab can say where each invoice is and who did
 -- what, when. Read by pricing roles. Written by the server where the server does the work
 -- (netlify/functions/_shared/invoice-events.js: created, emailed, reminder, pushed to Xero, paid,
