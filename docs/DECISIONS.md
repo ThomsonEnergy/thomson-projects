@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 8 Nov 2026
+
+- LIVE (owner: "bug, ship straight to main"): on a job or quote, the client name in the header is now a link that opens that client's card on the Clients page in a new tab (details, contacts, sites, payment terms, rate card, delete). Sales, finance and admin only, and only when the job is linked to a client. `public/project.html`, no migration.
+
 ## 6 Nov 2026
 
 - Built: item 55, Postie drafts by itself only when the email asks for an answer; Draft reply on the Inbox reply box drafts any conversation on request (background, fills the box in about a minute). PR into `staging` (`feat/draft-on-request`), no migration. Detail: `docs/IDEAS_BACKLOG.md` item 55, `docs/PROJECT_SPEC.md` A18.
