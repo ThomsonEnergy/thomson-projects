@@ -26,6 +26,7 @@
 
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
+const { logInvoiceEvent } = require('./invoice-events');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 const { entryHours } = require('./compute-labour-cost');
@@ -125,6 +126,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
     throw err;
   }
 
+  await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` });
   return invoiceToken;
 }
 

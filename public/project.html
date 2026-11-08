@@ -42,7 +42,7 @@
   <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
-  <script src="/js/email-compose.js?v=10"></script>
+  <script src="/js/email-compose.js?v=11"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=1"></script>
   <script src="/js/rate-cards.js?v=2"></script>
@@ -2680,54 +2680,6 @@
       });
     }
 
-    // One "Email invoice to client" for every place an invoice is made or listed: makes sure the PDF
-    // exists (the one made on create is reused), then opens the in-app email window with it attached
-    // and a View and pay button. Same shape as emailPurchaseOrder in supabase-client.js.
-    async function emailInvoiceToClient(invoiceId, project, { btn, msgEl } = {}) {
-      const label = btn ? btn.textContent : '';
-      if (btn) { btn.disabled = true; btn.textContent = 'Making the PDF...'; }
-      if (msgEl) msgEl.innerHTML = '';
-      try {
-        const readInvoice = async () => {
-          const { data, error } = await supabaseClient.from('invoices').select('invoice_number, invoice_token, pdf_path, bill_to_client_id').eq('id', invoiceId).single();
-          if (error) throw error;
-          return data;
-        };
-        let inv = await readInvoice();
-        if (!inv.pdf_path) {
-          await generateClientPdf('invoice', invoiceId); // copes with autoGenerateInvoicePdf running at the same time
-          inv = await readInvoice();
-          if (!inv.pdf_path) throw new Error('The PDF is not ready yet. Try again in a moment.');
-        }
-        const n = inv.invoice_number;
-        let to = project.client_email || '', name = project.client_name || '';
-        if (inv.bill_to_client_id) { // a warranty job billed to the manufacturer
-          const { data: billTo } = await supabaseClient.from('clients').select('name, email').eq('id', inv.bill_to_client_id).maybeSingle();
-          if (billTo) { to = billTo.email || ''; name = billTo.name || ''; }
-        }
-        const first = name.trim().split(/\s+/)[0] || 'there';
-        const fileName = `${projectRef(project)} - Invoice ${n}.pdf`;
-        openEmailComposer({
-          title: `Email invoice ${n}`,
-          to,
-          subject: `Invoice ${n} - ${projectRef(project)}`,
-          body: `Hi ${first},\n\nPlease find invoice ${n} for ${project.name} attached. You can also view and pay it online with the button below.\n\nThanks,`,
-          projectId: project.id, tagKind: 'client',
-          quoteLink: { url: `${shareOrigin()}/invoice.html?token=${inv.invoice_token}`, label: 'Include a button to view and pay the invoice online', buttonText: 'View and pay your invoice', checked: true },
-          attachOptions: [{ group: 'Invoice', label: fileName, bucket: 'project-documents', path: inv.pdf_path, name: fileName, checked: true }],
-          onSent: async () => {
-            await logActivity('project', project.id, 'invoice_emailed', `Invoice ${n} emailed to ${name || 'the client'}`);
-            if (btn) { btn.textContent = 'Emailed'; btn.disabled = true; }
-          },
-        });
-      } catch (err) {
-        const text = friendlyError(err, 'Could not set up the email.');
-        if (msgEl) msgEl.innerHTML = `<div class="error-box">${escapeHtml(text)}</div>`; else alert(text);
-      } finally {
-        if (btn && btn.textContent === 'Making the PDF...') { btn.disabled = false; btn.textContent = label; }
-      }
-    }
-
     // One invoice, multiple stage-claim lines: either a single % of the
     // whole project's contract value (distributed across every stage in
     // proportion to its quoted amount, capped at each stage's own
@@ -3047,7 +2999,7 @@
             <label>Invoice link (for pasting into a text)</label>
             <input readonly value="${escapeHtml(invoiceUrl)}" onclick="this.select()" />
             <div id="inv-email-msg"></div>`;
-          overlay.querySelector('#inv-email-btn').addEventListener('click', (e) => emailInvoiceToClient(data.invoiceId, project, { btn: e.currentTarget, msgEl: overlay.querySelector('#inv-email-msg') }));
+          overlay.querySelector('#inv-email-btn').addEventListener('click', (e) => { const btn = e.currentTarget; loadInvoiceActions().then(() => emailInvoiceToClient(data.invoiceId, project, { btn, msgEl: overlay.querySelector('#inv-email-msg') })).catch(err => alert(friendlyError(err))); });
           confirmBtn.style.display = 'none';
           overlay.querySelector('#inv-cancel-btn').textContent = 'Close';
 
@@ -3095,37 +3047,14 @@
       })();
     }
 
-    async function pushExistingInvoiceToXero(btn, msgElId = 'push-xero-msg') {
-      const msg = document.getElementById(msgElId);
-      btn.disabled = true;
-      btn.textContent = 'Pushing...';
-      msg.innerHTML = '';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/push-invoice-to-xero', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ invoiceId: btn.dataset.invoiceId }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
-        msg.innerHTML = `<div class="success-box">Pushed ${data.invoiceNumber} to Xero.</div>`;
-        location.reload();
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-        btn.disabled = false;
-        btn.textContent = 'Push to Xero';
-      }
-    }
-
-    // Internal view of every invoice raised for this job - shown as its own
-    // tab rather than only a link out to the client-facing page, and
-    // specifically showing how each one will actually post to Xero: split
-    // into Labour/Materials/STC groups (not by stage - that's how Xero
-    // actually codes them), using the accounts set in Settings > Xero
-    // Mapping. Same xeroBreakdownHtml() the standalone Invoices list uses,
-    // so the two can never disagree. Each invoice pushes to Xero on its
-    // own; never bundled together by project.
+    // The job's Invoices tab (item 60). Invoices are made from this job; everything after that
+    // (email, reminder, push to Xero, edit, credit note, notes, the history of who did what) is the
+    // invoice panel in js/invoice-actions.js, the same panel the Invoices page opens, so the two can
+    // never disagree. Each card shows the status in plain words (js/invoice-status.js), the last thing
+    // that happened, an Open button, and how the invoice posts to Xero (xeroBreakdownHtml, the same
+    // one the Invoices page uses). Both scripts load the first time they are needed.
+    const loadInvoiceActions = () => loadJsOnce('/js/invoice-status.js?v=1', () => typeof invoiceStatus === 'function')
+      .then(() => loadJsOnce('/js/invoice-actions.js?v=1', () => typeof openInvoicePanel === 'function'));
     // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
     // folder "ServiceM8 invoices"). Copies of what ServiceM8 already sent,
     // for reference: not invoices in the app, so they never touch Xero or
@@ -3168,10 +3097,9 @@
 
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
-      const myRole = await getMyRole();
-      const canIssueCreditNote = myRole === 'admin' || myRole === 'finance';
+      try { await loadInvoiceActions(); } catch (err) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
       const [{ data: invoices, error }, { data: mappings }, { data: client }] = await Promise.all([
-        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*)').eq('project_id', project.id).order('sent_at', { ascending: false }),
+        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order)), credit_notes(id), invoice_events(kind, detail, created_at, actor:profiles(full_name))').eq('project_id', project.id).order('sent_at', { ascending: false }),
         supabaseClient.from('xero_account_mapping').select('*'),
         project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
@@ -3179,424 +3107,31 @@
       if (!invoices.length) { listEl.innerHTML = `<p class="subtitle">No invoices raised yet.</p>`; return; }
 
       const clientType = client?.client_type || 'individual';
-
-      listEl.innerHTML = invoices.map(inv => `
+      listEl.innerHTML = invoices.map(inv => {
+        const status = invoiceStatus(inv);
+        const last = invoiceLastActionText(status);
+        return `
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
             <div>
               <strong>${escapeHtml(inv.invoice_number)}</strong>${inv.description ? ` - ${escapeHtml(inv.description)}` : ''}
-              <span class="badge ${inv.paid_at ? 'accepted' : 'sent'}" style="margin-left:6px;">${inv.paid_at ? 'Paid' : 'Awaiting payment'}</span>
-              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">${new Date(inv.sent_at).toLocaleDateString('en-AU')}${inv.due_date ? ` &middot; Due ${new Date(inv.due_date + 'T00:00:00').toLocaleDateString('en-AU')}` : ''}</p>
+              <span style="margin-left:6px;">${invoiceStatusChipHtml(status)}</span>
+              ${inv.xero_invoice_id ? '<span class="badge draft" style="margin-left:4px;">In Xero</span>' : ''}
+              <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Dated ${escapeHtml(invoiceShortDate(inv.sent_at))}${inv.due_date ? ` &middot; Due ${escapeHtml(invoiceShortDate(inv.due_date))}` : ''}${last ? ` &middot; ${escapeHtml(last)}` : ''}</p>
+              ${status.next ? `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">Next: ${escapeHtml(status.next)}</p>` : ''}
             </div>
             <div>
               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:10px;">View client-facing invoice</a>
-              <button type="button" class="secondary email-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Email</button>
-              <button type="button" class="secondary invoice-notes-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Notes</button>
-              ${inv.pdf_path ? `<button type="button" class="secondary view-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">View PDF</button>` : ''}
-              <button type="button" class="secondary generate-invoice-pdf-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
-              ${!inv.xero_invoice_id && !inv.paid_at
-                ? `<button type="button" class="secondary edit-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Edit</button>`
-                : (canIssueCreditNote ? `<button type="button" class="secondary issue-credit-note-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px; margin-right:8px;">Issue credit note</button>` : '')}
-              ${inv.xero_invoice_id ? '<span class="subtitle" style="font-size:12px;">In Xero</span>' : `<button type="button" class="secondary push-xero-tab-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>`}
+              <button type="button" class="secondary open-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Open</button>
             </div>
-            ${(inv.credit_notes || []).length ? `
-              <div style="width:100%; margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
-                ${inv.credit_notes.map(cn => `
-                  <p class="subtitle" style="font-size:12px; margin:4px 0;">
-                    Credit note${cn.reason ? ` - ${escapeHtml(cn.reason)}` : ''} (${new Date(cn.created_at).toLocaleDateString('en-AU')})
-                    ${cn.refund ? `<span class="badge info" style="margin-left:4px;">Refunded${cn.refund_reference ? ` - ${escapeHtml(cn.refund_reference)}` : ''}</span>` : `<span class="badge accepted" style="margin-left:4px;">Account credit</span>`}
-                    ${cn.xero_credit_note_id ? '<span style="margin-left:6px;">In Xero</span>' : (canIssueCreditNote ? `<button type="button" class="secondary push-credit-note-btn" data-credit-note-id="${cn.id}" style="font-size:11px; padding:4px 8px; margin-left:6px;">Push to Xero</button>` : '')}
-                    ${cn.xero_credit_note_error ? `<span class="error-box" style="display:block; margin-top:4px;">${escapeHtml(cn.xero_credit_note_error)}</span>` : ''}
-                  </p>`).join('')}
-              </div>` : ''}
           </div>
           <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
-          <div id="invoice-pdf-msg-${inv.id}">${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(inv.pdf_error)}</div>` : ''}</div>
-        </div>`).join('') + `<div id="job-invoices-msg"></div>`;
-
-      listEl.querySelectorAll('.push-xero-tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => pushExistingInvoiceToXero(btn, 'job-invoices-msg'));
-      });
-      listEl.querySelectorAll('.edit-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => openEditInvoicePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
-      });
-      // "Work completed" on the client's invoice (item 59, js/invoice-notes.js).
-      listEl.querySelectorAll('.invoice-notes-btn').forEach(btn => {
-        btn.addEventListener('click', () => loadJsOnce('/js/invoice-notes.js?v=3', () => typeof openInvoiceNotesPanel === 'function')
-          .then(() => openInvoiceNotesPanel(invoices.find(i => i.id === btn.dataset.invoiceId), project, () => loadJobInvoices(project)))
-          .catch(err => alert(friendlyError(err))));
-      });
-      listEl.querySelectorAll('.issue-credit-note-btn').forEach(btn => {
-        btn.addEventListener('click', () => openIssueCreditNotePanel(invoices.find(i => i.id === btn.dataset.invoiceId), project));
-      });
-      listEl.querySelectorAll('.push-credit-note-btn').forEach(btn => {
-        btn.addEventListener('click', () => pushCreditNoteToXero(btn));
-      });
-      listEl.querySelectorAll('.email-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => emailInvoiceToClient(btn.dataset.invoiceId, project, { btn, msgEl: document.getElementById(`invoice-pdf-msg-${btn.dataset.invoiceId}`) }));
-      });
-      listEl.querySelectorAll('.view-invoice-pdf-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
-          openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`, { projectId: project.id, folder: 'Marked up' });
-        });
-      });
-      listEl.querySelectorAll('.generate-invoice-pdf-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const inv = invoices.find(i => i.id === btn.dataset.invoiceId);
-          const msgEl = document.getElementById(`invoice-pdf-msg-${inv.id}`);
-          btn.disabled = true;
-          btn.textContent = 'Generating...';
-          msgEl.innerHTML = '';
-          try {
-            await generateClientPdf('invoice', inv.id);
-            loadJobInvoices(project);
-          } catch (err) {
-            msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-            btn.disabled = false;
-            btn.textContent = inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF';
-          }
-        });
-      });
-    }
-
-    // Lets an invoice's claim amounts be corrected before it's ever been
-    // pushed to Xero - per stage, split into Labour/Materials/STC (the
-    // actual invoice_claims granularity; a legacy single-stage invoice
-    // just gets one row here). Adjusts each touched cost centre's
-    // invoiced_amount by the delta between old and new (never overwrites
-    // it outright, since that figure aggregates every invoice on that
-    // stage, not just this one). Only ever called for an unpushed,
-    // unpaid invoice (see loadJobInvoices' button gating) - once pushed,
-    // Xero itself rejects line-item edits on an AUTHORISED invoice via
-    // the API, so correcting it from that point on goes through a credit
-    // note instead (openIssueCreditNotePanel), not this panel.
-    function openEditInvoicePanel(invoice, project) {
-      const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
-      const rows = isMultiStage
-        ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-            .map(ic => ({ id: ic.id, cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0, bstc: Number(ic.bstc_amount) || 0 }))
-        : [{
-            id: null,
-            cost_centre_id: invoice.cost_centre_id || null,
-            stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
-            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0, bstc: Number(invoice.bstc_amount) || 0,
-          }];
-
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:560px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Edit ${invoice.invoice_number}</h2>
-          <p class="subtitle" style="margin-bottom:12px;">Not yet pushed to Xero - saving just updates the amounts here.</p>
-          <div class="grid cols-2" style="margin-bottom:12px;">
-            <div>
-              <label style="margin-top:0">Invoice date</label>
-              <input type="date" id="ei-date" value="${invoice.sent_at ? new Date(invoice.sent_at).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : ''}" />
-            </div>
-            <div>
-              <label style="margin-top:0">Due date</label>
-              <input type="date" id="ei-due-date" value="${invoice.due_date || ''}" />
-            </div>
-          </div>
-          <table>
-            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC credit</th><th class="num">BSTC credit</th></tr></thead>
-            <tbody>
-              ${rows.map((r, i) => `
-                <tr>
-                  <td>${escapeHtml(r.stageName)}</td>
-                  <td class="num"><input type="number" step="0.01" class="ei-labour" data-i="${i}" value="${r.labour}" style="width:100px;" /></td>
-                  <td class="num"><input type="number" step="0.01" class="ei-material" data-i="${i}" value="${r.material}" style="width:100px;" /></td>
-                  <td class="num"><input type="number" step="0.01" class="ei-stc" data-i="${i}" value="${r.stc}" style="width:100px;" /></td>
-                  <td class="num"><input type="number" step="0.01" class="ei-bstc" data-i="${i}" value="${r.bstc}" style="width:100px;" /></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-          <p style="margin-top:12px;">Total: <strong id="ei-total"></strong></p>
-          <div style="margin-top:10px;">
-            <button id="ei-save-btn">Save${invoice.xero_invoice_id ? ' &amp; push to Xero' : ''}</button>
-            <button type="button" class="secondary" id="ei-cancel-btn">Cancel</button>
-          </div>
-          <div id="ei-msg"></div>
         </div>`;
-      document.body.appendChild(overlay);
-
-      function readValues() {
-        return rows.map((r, i) => ({
-          ...r,
-          labour: parseFloat(overlay.querySelector(`.ei-labour[data-i="${i}"]`).value) || 0,
-          material: parseFloat(overlay.querySelector(`.ei-material[data-i="${i}"]`).value) || 0,
-          stc: parseFloat(overlay.querySelector(`.ei-stc[data-i="${i}"]`).value) || 0,
-          bstc: parseFloat(overlay.querySelector(`.ei-bstc[data-i="${i}"]`).value) || 0,
-        }));
-      }
-      function updateTotal() {
-        const vals = readValues();
-        const total = vals.reduce((s, r) => s + r.labour + r.material - r.stc - r.bstc, 0);
-        overlay.querySelector('#ei-total').textContent = money(total);
-      }
-      overlay.querySelectorAll('input').forEach(inp => inp.addEventListener('input', updateTotal));
-
-      overlay.querySelector('#ei-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#ei-save-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#ei-msg');
-        const saveBtn = overlay.querySelector('#ei-save-btn');
-        const saveBtnLabel = saveBtn.textContent;
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-        try {
-          const newRows = readValues();
-          // The quote's STC and BSTC credits are the cap (the server caps labour and materials on a new
-          // invoice): this invoice can hold at most what is left of each after every other invoice on
-          // the job, and it can never be a credit on its own (that is a negative invoice).
-          const credit = quoteCreditSummary(project);
-          const sumOf = (list, k) => list.reduce((s, r) => s + r[k], 0);
-          const stcCap = Math.max(0, credit.stcRemaining + sumOf(rows, 'stc'));
-          const bstcCap = Math.max(0, credit.bstcRemaining + sumOf(rows, 'bstc'));
-          if (newRows.some(r => r.labour < 0 || r.material < 0 || r.stc < 0 || r.bstc < 0)) throw new Error('Amounts cannot be negative.');
-          if (sumOf(newRows, 'stc') > stcCap + 0.01) throw new Error(`The STC credit on this invoice can be at most ${money(stcCap)}: the quote's credit less what other invoices already hold.`);
-          if (sumOf(newRows, 'bstc') > bstcCap + 0.01) throw new Error(`The BSTC credit on this invoice can be at most ${money(bstcCap)}: the quote's credit less what other invoices already hold.`);
-          if (sumOf(newRows, 'labour') + sumOf(newRows, 'material') <= 0 && sumOf(newRows, 'stc') + sumOf(newRows, 'bstc') > 0) throw new Error('An invoice cannot be only a credit. Give it a labour or materials amount, or issue a credit note instead.');
-          // Every write is checked. Order: claims, then the invoice, then each stage's
-          // invoiced_amount. If one fails, what was already written is put back (best
-          // effort) so the stage and the invoice never disagree.
-          const undo = [];
-          const mustUpdate = async (table, values, id, what) => {
-            const { data, error } = await supabaseClient.from(table).update(values).eq('id', id).select('id');
-            if (error) throw new Error(`Could not save ${what}: ${error.message}`);
-            if (!data || !data.length) throw new Error(`Could not save ${what}: no permission or it no longer exists.`);
-          };
-          try {
-            if (isMultiStage) {
-              for (let i = 0; i < rows.length; i++) {
-                const o = rows[i], r = newRows[i];
-                await mustUpdate('invoice_claims', { labour_amount: r.labour, material_amount: r.material, stc_amount: r.stc, bstc_amount: r.bstc }, r.id, `the ${r.stageName} claim`);
-                undo.push(() => supabaseClient.from('invoice_claims').update({ labour_amount: o.labour, material_amount: o.material, stc_amount: o.stc, bstc_amount: o.bstc }).eq('id', o.id));
-              }
-            }
-
-            const totalLabour = newRows.reduce((s, r) => s + r.labour, 0);
-            const totalMaterial = newRows.reduce((s, r) => s + r.material, 0);
-            const totalStc = newRows.reduce((s, r) => s + r.stc, 0);
-            const totalBstc = newRows.reduce((s, r) => s + r.bstc, 0);
-            const newDate = overlay.querySelector('#ei-date').value;
-            const newDueDate = overlay.querySelector('#ei-due-date').value || null;
-            // Compared as Sydney dates: a deposit invoice's sent_at carries a time of day, so a save that
-            // keeps the date keeps the timestamp too (or every save would drop the PDF as stale).
-            const sydneyDay = (iso) => iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : null;
-            const dateChanged = !!newDate && newDate !== sydneyDay(invoice.sent_at);
-            const newSentAt = dateChanged ? new Date(newDate).toISOString() : invoice.sent_at;
-            // The PDF made at creation shows the old figures and dates. Once any of them changes it is
-            // dropped, so Email and View make a fresh one (both regenerate when pdf_path is empty).
-            const changed = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) > 0.001;
-            const pdfStale = changed(totalLabour, invoice.labour_amount) || changed(totalMaterial, invoice.material_amount)
-              || changed(totalStc, invoice.stc_amount) || changed(totalBstc, invoice.bstc_amount)
-              || newRows.some((r, i) => changed(r.labour, rows[i].labour) || changed(r.material, rows[i].material) || changed(r.stc, rows[i].stc) || changed(r.bstc, rows[i].bstc))
-              || dateChanged || (newDueDate || null) !== (invoice.due_date || null);
-            await mustUpdate('invoices', {
-              labour_amount: totalLabour, material_amount: totalMaterial, stc_amount: totalStc, bstc_amount: totalBstc,
-              sent_at: newSentAt,
-              due_date: newDueDate,
-              ...(pdfStale ? { pdf_path: null, pdf_generated_at: null } : {}),
-            }, invoice.id, `invoice ${invoice.invoice_number}`);
-            undo.push(() => supabaseClient.from('invoices').update({
-              labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
-              sent_at: invoice.sent_at, due_date: invoice.due_date, pdf_path: invoice.pdf_path, pdf_generated_at: invoice.pdf_generated_at,
-            }).eq('id', invoice.id));
-
-            for (let i = 0; i < rows.length; i++) {
-              const oldRow = rows[i], newRow = newRows[i];
-              if (!newRow.cost_centre_id) continue;
-              const delta = (newRow.labour + newRow.material) - (oldRow.labour + oldRow.material);
-              if (Math.abs(delta) < 0.001) continue;
-              const { data: centre, error: ccErr } = await supabaseClient.from('cost_centres').select('invoiced_amount').eq('id', newRow.cost_centre_id).single();
-              if (ccErr) throw new Error(`Could not read the ${newRow.stageName} stage: ${ccErr.message}`);
-              const before = Number(centre?.invoiced_amount) || 0;
-              await mustUpdate('cost_centres', { invoiced_amount: before + delta }, newRow.cost_centre_id, `the ${newRow.stageName} stage's invoiced amount`);
-              undo.push(() => supabaseClient.from('cost_centres').update({ invoiced_amount: before }).eq('id', newRow.cost_centre_id));
-            }
-          } catch (saveErr) {
-            let undoFailed = false;
-            for (const fn of undo.reverse()) {
-              try { const { error } = await fn(); if (error) undoFailed = true; } catch (e) { undoFailed = true; }
-            }
-            throw new Error(`${saveErr.message} ${undoFailed
-              ? 'Some changes could not be put back: reload and check this invoice and its stages before trying again.'
-              : 'Nothing was changed.'}`);
-          }
-
-          await logActivity('project', project.id, 'invoice_edited', `Edited invoice ${invoice.invoice_number}`);
-
-          overlay.remove();
-          location.reload();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          saveBtn.disabled = false;
-          saveBtn.textContent = saveBtnLabel;
-        }
+      }).join('');
+      // The panel reloads the page when it closes after a change: the claims card and progress bar on this page read the same invoices.
+      listEl.querySelectorAll('.open-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => openInvoicePanel(btn.dataset.invoiceId, { onChange: () => location.reload() }));
       });
-
-      updateTotal();
-    }
-
-    // The correction path for an invoice that's already been pushed to
-    // Xero (see openEditInvoicePanel's comment for why a raw edit no
-    // longer works past that point). Pre-fills each stage's still-
-    // creditable amount (this invoice's original claim, minus whatever's
-    // already been credited against it before), staff can reduce any of
-    // them for a partial credit. Finance/Admin only (button gated in
-    // loadJobInvoices) - server-side enforced too, see require-finance-role.js.
-    async function openIssueCreditNotePanel(invoice, project) {
-      const isMultiStage = invoice.invoice_claims && invoice.invoice_claims.length > 0;
-      const originalRows = isMultiStage
-        ? invoice.invoice_claims.slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-            .map(ic => ({ cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour: Number(ic.labour_amount) || 0, material: Number(ic.material_amount) || 0, stc: Number(ic.stc_amount) || 0, bstc: Number(ic.bstc_amount) || 0 }))
-        : [{
-            cost_centre_id: invoice.cost_centre_id || null,
-            stageName: invoice.cost_centre_id ? (invoice.cost_centres?.name || 'Stage') : (invoice.description || 'Invoice'),
-            labour: Number(invoice.labour_amount) || 0, material: Number(invoice.material_amount) || 0, stc: Number(invoice.stc_amount) || 0, bstc: Number(invoice.bstc_amount) || 0,
-          }];
-
-      const { data: priorCredits } = await supabaseClient
-        .from('credit_note_claims')
-        .select('cost_centre_id, labour_amount, material_amount, stc_amount, bstc_amount, credit_notes!inner(invoice_id)')
-        .eq('credit_notes.invoice_id', invoice.id);
-      const alreadyCreditedByCentre = {};
-      (priorCredits || []).forEach(pc => {
-        const cur = alreadyCreditedByCentre[pc.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
-        cur.labour += Number(pc.labour_amount) || 0;
-        cur.material += Number(pc.material_amount) || 0;
-        cur.stc += Number(pc.stc_amount) || 0;
-        cur.bstc += Number(pc.bstc_amount) || 0;
-        alreadyCreditedByCentre[pc.cost_centre_id] = cur;
-      });
-
-      const rows = originalRows.map(r => {
-        const already = alreadyCreditedByCentre[r.cost_centre_id] || { labour: 0, material: 0, stc: 0, bstc: 0 };
-        return {
-          cost_centre_id: r.cost_centre_id, stageName: r.stageName,
-          maxLabour: Math.max(0, r.labour - already.labour), maxMaterial: Math.max(0, r.material - already.material), maxStc: Math.max(0, r.stc - already.stc), maxBstc: Math.max(0, r.bstc - already.bstc),
-        };
-      }).filter(r => r.maxLabour + r.maxMaterial + r.maxStc + r.maxBstc > 0.004);
-
-      if (!rows.length) {
-        alert('This invoice has already been fully credited - there\'s nothing left to credit.');
-        return;
-      }
-
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:600px; width:100%; max-height:85vh; overflow-y:auto;">
-          <h2>Issue credit note - ${invoice.invoice_number}</h2>
-          <p class="subtitle" style="margin-bottom:12px;">Defaults to a full credit of what's left claimable on this invoice - reduce any amount for a partial credit. This creates the credit note here; push it to Xero separately once you're happy with it.</p>
-          <table>
-            <thead><tr><th>Stage</th><th class="num">Labour</th><th class="num">Materials</th><th class="num">STC</th><th class="num">BSTC</th></tr></thead>
-            <tbody>
-              ${rows.map((r, i) => `
-                <tr>
-                  <td>${r.stageName}</td>
-                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxLabour}" class="cn-labour" data-i="${i}" value="${r.maxLabour.toFixed(2)}" style="width:100px;" /></td>
-                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxMaterial}" class="cn-material" data-i="${i}" value="${r.maxMaterial.toFixed(2)}" style="width:100px;" /></td>
-                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxStc}" class="cn-stc" data-i="${i}" value="${r.maxStc.toFixed(2)}" style="width:90px;" /></td>
-                  <td class="num"><input type="number" step="0.01" min="0" max="${r.maxBstc}" class="cn-bstc" data-i="${i}" value="${r.maxBstc.toFixed(2)}" style="width:90px;" /></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-          <p class="subtitle" style="margin-top:8px;">Total credit: <strong id="cn-total" style="color:var(--text);"></strong></p>
-          <label style="margin-top:10px;">Reason</label>
-          <input id="cn-reason" placeholder="e.g. Client disputed the materials line, agreed to reduce it" />
-          <label style="display:flex; align-items:center; gap:6px; margin-top:12px;">
-            <input type="checkbox" id="cn-refund" style="width:auto;" ${invoice.paid_at ? 'checked' : ''} />
-            This has already been paid - refund the money back to the client (rather than leave it as account credit)
-          </label>
-          <div id="cn-refund-ref-row" style="display:${invoice.paid_at ? 'block' : 'none'};">
-            <label>How was it refunded</label>
-            <input id="cn-refund-ref" placeholder="e.g. Bank transfer 12 Sep, or Airwallex refund ID" />
-          </div>
-          <div style="margin-top:14px;">
-            <button id="cn-save-btn">Create credit note</button>
-            <button type="button" class="secondary" id="cn-cancel-btn">Cancel</button>
-          </div>
-          <div id="cn-msg"></div>
-        </div>`;
-      document.body.appendChild(overlay);
-
-      function readValues() {
-        return rows.map((r, i) => ({
-          cost_centre_id: r.cost_centre_id,
-          labour: Math.min(r.maxLabour, Math.max(0, parseFloat(overlay.querySelector(`.cn-labour[data-i="${i}"]`).value) || 0)),
-          material: Math.min(r.maxMaterial, Math.max(0, parseFloat(overlay.querySelector(`.cn-material[data-i="${i}"]`).value) || 0)),
-          stc: Math.min(r.maxStc, Math.max(0, parseFloat(overlay.querySelector(`.cn-stc[data-i="${i}"]`).value) || 0)),
-          bstc: Math.min(r.maxBstc, Math.max(0, parseFloat(overlay.querySelector(`.cn-bstc[data-i="${i}"]`).value) || 0)),
-        }));
-      }
-      function updateTotal() {
-        const total = readValues().reduce((s, r) => s + r.labour + r.material, 0);
-        overlay.querySelector('#cn-total').textContent = money(total);
-      }
-      overlay.querySelectorAll('input[type="number"]').forEach(inp => inp.addEventListener('input', updateTotal));
-      overlay.querySelector('#cn-refund').addEventListener('change', (e) => {
-        overlay.querySelector('#cn-refund-ref-row').style.display = e.target.checked ? 'block' : 'none';
-      });
-
-      overlay.querySelector('#cn-cancel-btn').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#cn-save-btn').addEventListener('click', async () => {
-        const msg = overlay.querySelector('#cn-msg');
-        const saveBtn = overlay.querySelector('#cn-save-btn');
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Creating...';
-        try {
-          const claims = readValues().filter(r => r.labour + r.material + r.stc + r.bstc > 0.004);
-          if (!claims.length) throw new Error('Enter at least one non-zero credit amount');
-
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          const res = await fetch('/.netlify/functions/create-credit-note', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-            body: JSON.stringify({
-              invoiceId: invoice.id,
-              reason: overlay.querySelector('#cn-reason').value.trim() || null,
-              refund: overlay.querySelector('#cn-refund').checked,
-              refundReference: overlay.querySelector('#cn-refund-ref').value.trim() || null,
-              claims: claims.map(c => ({ costCentreId: c.cost_centre_id, labourAmount: c.labour, materialAmount: c.material, stcAmount: c.stc, bstcAmount: c.bstc })),
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the credit note');
-
-          await logActivity('project', project.id, 'credit_note_created', `Credit note created against invoice ${invoice.invoice_number}`);
-          overlay.remove();
-          location.reload();
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Create credit note';
-        }
-      });
-
-      updateTotal();
-    }
-
-    async function pushCreditNoteToXero(btn) {
-      const msg = document.getElementById('job-invoices-msg');
-      btn.disabled = true;
-      btn.textContent = 'Pushing...';
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        const res = await fetch('/.netlify/functions/push-credit-note-to-xero', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          body: JSON.stringify({ creditNoteId: btn.dataset.creditNoteId }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Push failed');
-        location.reload();
-      } catch (err) {
-        if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-        btn.disabled = false;
-        btn.textContent = 'Push to Xero';
-      }
     }
 
     // Needs attention line on the Summary tab: shown until a certificate is
@@ -5539,7 +5074,20 @@
         }
       });
       document.querySelectorAll('.push-xero-btn').forEach(btn => {
-        btn.addEventListener('click', () => pushExistingInvoiceToXero(btn));
+        btn.addEventListener('click', async () => {
+          const msg = document.getElementById('push-xero-msg');
+          btn.disabled = true;
+          btn.textContent = 'Pushing...';
+          try {
+            await loadInvoiceActions();
+            await pushInvoiceToXero(btn.dataset.invoiceId);
+            location.reload();
+          } catch (err) {
+            if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+            btn.disabled = false;
+            btn.textContent = 'Push to Xero';
+          }
+        });
       });
 
       const editToggleBtn = document.getElementById('edit-toggle-btn');

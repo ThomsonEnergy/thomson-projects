@@ -8,6 +8,7 @@
 // doesn't create a duplicate in Xero - it'll just retry the allocation.
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 const { xeroRequest } = require('./_shared/xero-client');
 const { buildXeroCreditNotePayload } = require('./_shared/build-xero-credit-note-payload');
 
@@ -96,6 +97,8 @@ exports.handler = async (event) => {
       ? `$${leftOver.toFixed(2)} of this credit note is unallocated in Xero (the invoice was already paid). Refund it or apply it to another invoice in Xero.`
       : null;
     await supabaseAdmin.from('credit_notes').update({ xero_credit_note_error: note }).eq('id', creditNoteId).then(() => {}, () => {});
+    const { data: cnRow } = await supabaseAdmin.from('credit_notes').select('invoice_id').eq('id', creditNoteId).single();
+    if (cnRow) await logInvoiceEvent(supabaseAdmin, { invoiceId: cnRow.invoice_id, kind: 'credit_note_pushed', actorId: auth.user.id, detail: `$${toAllocate.toFixed(2)} taken off the invoice in Xero${leftOver > 0 ? `, $${leftOver.toFixed(2)} unallocated` : ''}` });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, xeroCreditNoteId, unallocated: leftOver }) };
   } catch (err) {

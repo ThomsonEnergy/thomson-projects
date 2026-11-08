@@ -14,6 +14,7 @@ const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { xeroRequest } = require('./_shared/xero-client');
 const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
 const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -84,6 +85,7 @@ exports.handler = async (event) => {
       // sitting at quote_approved, so a redelivered/duplicate webhook
       // (or a deposit paid well after the job moved on for some other
       // reason) can't push it backwards.
+      if (justPaid) await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceRow.id, kind: 'paid', detail: `Paid in Xero ($${Number(xeroInvoice.AmountPaid || 0).toFixed(2)} received)` });
       if (justPaid) await regenerateInvoicePdf(invoiceRow.id, 1200); // short wait: Xero wants its answer within 5 seconds // remake the PDF so it carries the PAID stamp
 
       if (justPaid && invoiceRow.project_id) {
