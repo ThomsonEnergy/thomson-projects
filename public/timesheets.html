@@ -113,6 +113,37 @@
     <div class="card" id="approvals-card" style="display:none;">
       <h2>Leave</h2>
       <p class="subtitle" style="margin-bottom:10px;">Everyone's leave: who, when, what kind, and whether it is approved. Approved leave goes to Xero with the timesheet push below.</p>
+      <details id="add-leave-box" style="margin-bottom:12px;">
+        <summary style="cursor:pointer; font-weight:600;">Add leave for someone</summary>
+        <div class="grid cols-4" style="margin-top:8px;">
+          <div>
+            <label style="margin-top:0">Who</label>
+            <select id="add-leave-staff"><option value="">Loading...</option></select>
+          </div>
+          <div>
+            <label style="margin-top:0">Start date</label>
+            <input type="date" id="add-leave-start" />
+          </div>
+          <div>
+            <label style="margin-top:0">End date</label>
+            <input type="date" id="add-leave-end" />
+          </div>
+          <div>
+            <label style="margin-top:0">Type</label>
+            <select id="add-leave-type">
+              <option value="sick">Sick leave</option>
+              <option value="annual">Annual leave</option>
+              <option value="unpaid">Unpaid leave</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+        <label>Notes (optional)</label>
+        <input id="add-leave-notes" placeholder="Anything worth flagging" />
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px;"><input type="checkbox" id="add-leave-approved" checked style="width:auto;" /> Mark approved now</label>
+        <button id="add-leave-btn" style="margin-top:8px;">Add leave</button>
+        <div id="add-leave-msg"></div>
+      </details>
       <div id="leave-filters" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
       <div id="approvals-msg"></div>
       <div id="approvals-list"></div>
@@ -1206,9 +1237,8 @@
       const end_date = document.getElementById('leave-end').value;
       const leave_type = document.getElementById('leave-type').value;
       const notes = document.getElementById('leave-notes').value.trim();
-      if (!start_date || !end_date) { msg.innerHTML = `<div class="error-box">Pick a start and end date.</div>`; return; }
-      if (end_date < start_date) { msg.innerHTML = `<div class="error-box">End date can't be before the start date.</div>`; return; }
-      if (!/^20\d\d-\d\d-\d\d$/.test(start_date) || !/^20\d\d-\d\d-\d\d$/.test(end_date)) { msg.innerHTML = `<div class="error-box">Check the year on those dates.</div>`; return; }
+      const dateProblem = leaveDateProblem(start_date, end_date);
+      if (dateProblem) { msg.innerHTML = `<div class="error-box">${dateProblem}</div>`; return; }
       const btn = document.getElementById('request-leave-btn');
       const label = btn.textContent;
       btn.disabled = true;
@@ -1229,6 +1259,13 @@
         btn.textContent = label;
       }
     });
+
+    function leaveDateProblem(start, end) {
+      if (!start || !end) return 'Pick a start and end date.';
+      if (end < start) return "End date can't be before the start date.";
+      if (!/^20\d\d-\d\d-\d\d$/.test(start) || !/^20\d\d-\d\d-\d\d$/.test(end)) return 'Check the year on those dates.';
+      return '';
+    }
 
     async function loadMyLeave() {
       const listEl = document.getElementById('my-leave-list');
@@ -1403,6 +1440,46 @@
       btn.textContent = 'Push timesheets';
     });
 
+    // Admin and Finance: add leave for any staff member, approved straight away
+    // by default (usually sick leave entered after the day).
+    async function initAddLeave(myRole) {
+      if (myRole !== 'admin' && myRole !== 'finance') return;
+      const staffSel = document.getElementById('add-leave-staff');
+      const { data: staff, error } = await supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name');
+      staffSel.innerHTML = error
+        ? '<option value="">Could not load staff</option>'
+        : '<option value="">Pick a person</option>' + (staff || []).map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.full_name || 'No name')}</option>`).join('');
+      const btn = document.getElementById('add-leave-btn');
+      btn.addEventListener('click', async () => {
+        const msg = document.getElementById('add-leave-msg');
+        const staff_id = staffSel.value;
+        const start_date = document.getElementById('add-leave-start').value;
+        const end_date = document.getElementById('add-leave-end').value;
+        const leave_type = document.getElementById('add-leave-type').value;
+        const notes = document.getElementById('add-leave-notes').value.trim();
+        const approved = document.getElementById('add-leave-approved').checked;
+        if (!staff_id) { msg.innerHTML = `<div class="error-box">Pick who the leave is for.</div>`; return; }
+        const dateProblem = leaveDateProblem(start_date, end_date);
+        if (dateProblem) { msg.innerHTML = `<div class="error-box">${dateProblem}</div>`; return; }
+        const row = { staff_id, start_date, end_date, leave_type, notes };
+        if (approved) Object.assign(row, { status: 'approved', decided_by: myUserId, decided_at: new Date().toISOString() });
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+        try {
+          const { error: insErr } = await supabaseClient.from('leave_requests').insert(row);
+          const name = staffSel.options[staffSel.selectedIndex].text;
+          if (insErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(insErr))}</div>`; return; }
+          msg.innerHTML = `<div class="success-box">Added: ${escapeHtml(name)}, ${LEAVE_TYPE_LABEL[leave_type] || 'leave'} ${leaveSpanLabel(row)}${approved ? ', approved.' + (leave_type !== 'other' ? ' It goes to Xero with the next timesheet push.' : '') : ', waiting for approval.'}</div>`;
+          ['add-leave-start', 'add-leave-end', 'add-leave-notes'].forEach(id => { document.getElementById(id).value = ''; });
+          await loadApprovals(myRole);
+          if (staff_id === myUserId) await loadMyLeave();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Add leave';
+        }
+      });
+    }
+
     // Admin and Finance: everyone's leave, with the decision buttons on the
     // ones still waiting. Filters are status, kind and how far back.
     const leaveFilter = { status: 'all', kind: 'all', older: false };
@@ -1460,11 +1537,33 @@
                 <td data-label="Xero">${l.xero_pushed_at ? `Sent${Number(l.xero_units) > 0 ? ` (${Number(l.xero_units)}h)` : ''}` : (l.status === 'approved' ? '<span class="subtitle">With the next push</span>' : '<span class="subtitle">-</span>')}</td>
                 <td>${l.status === 'pending' ? `
                   <button class="secondary approve-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Approve</button>
-                  <button class="secondary danger decline-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Decline</button>` : ''}</td>
+                  <button class="secondary danger decline-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Decline</button>` : ''}
+                  <button class="secondary danger delete-leave-btn" data-id="${l.id}" style="font-size:12px; padding:4px 8px;">Delete</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
         </div>`;
+      listEl.querySelectorAll('.delete-leave-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const l = data.find(x => x.id === btn.dataset.id);
+          const msgEl = document.getElementById('approvals-msg');
+          const what = `${who(l)}'s ${LEAVE_TYPE_LABEL[l.leave_type] || 'leave'} ${leaveSpanLabel(l)}`;
+          const xeroNote = l.xero_pushed_at ? `\n\nThis is already in Xero Payroll. Delete it there too: Payroll > Employees > ${who(l)} > Leave.` : '';
+          if (!confirm(`Delete ${what}? This can't be undone.${xeroNote}`)) return;
+          btn.disabled = true;
+          btn.textContent = 'Deleting...';
+          const { data: gone, error: delErr } = await supabaseClient.from('leave_requests').delete().eq('id', l.id).select('id');
+          if (delErr || !(gone && gone.length)) {
+            btn.disabled = false;
+            btn.textContent = 'Delete';
+            msgEl.innerHTML = `<div class="error-box">Could not delete ${escapeHtml(what)}${delErr ? ': ' + escapeHtml(friendlyError(delErr)) : '.'}</div>`;
+            return;
+          }
+          msgEl.innerHTML = `<div class="success-box">Deleted: ${escapeHtml(what)}.${l.xero_pushed_at ? ' It is still in Xero Payroll: delete it there too (Payroll > Employees > ' + escapeHtml(who(l)) + ' > Leave).' : ''}</div>`;
+          await loadApprovals(myRole);
+          if (l.staff_id === myUserId) await loadMyLeave();
+        });
+      });
       listEl.querySelectorAll('.approve-leave-btn, .decline-leave-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const approving = btn.classList.contains('approve-leave-btn');
@@ -1531,6 +1630,7 @@
         issuesReady,
         loadMyLeave().catch(logFail('leave')),
         loadApprovals(myRole).catch(logFail('approvals')),
+        initAddLeave(myRole).catch(logFail('add leave')),
       ]);
       const aiPf = aiPrefillRead('timesheet');
       const fixParams = new URLSearchParams(window.location.search);
