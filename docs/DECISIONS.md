@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 8 Nov 2026
+
+- LIVE (owner, Sunday: "ship straight to live"): item 60. Admin and Finance add leave for any staff member (approved now by default) and delete any leave on the Timesheets Leave card; leave already in Xero Payroll warns to delete it there too. Migration 20261130020000 (two RLS policies), production backup `backup_20261108.leave_requests`. See PROJECT_SPEC.md (Leave card) and IDEAS_BACKLOG.md item 60.
+
 ## 6 Nov 2026
 
 - Renumbered: the invoice notes and rate per person item is item 59 (was 57 on `main`, but `staging` already had an item 57, stock kinds and cable drums, not yet live). Code comments and docs changed to match.
