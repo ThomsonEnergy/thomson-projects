@@ -37,7 +37,9 @@ function invoiceEventLabel(kind) { return INVOICE_EVENT_LABELS[kind] || kind; }
 function invoiceEventWho(e) {
   if (e.actor && e.actor.full_name) return e.actor.full_name;
   if (e.kind === 'paid') return 'the payment';
-  if (e.kind === 'created') return 'the quote approval';
+  // a deposit is made by the approval itself; an older invoice may simply not know who made it
+  if (e.kind === 'created') return /approved/i.test(e.detail || '') ? 'the quote approval' : '';
+  if (e.kind === 'sent_elsewhere') return /approval page/i.test(e.detail || '') ? 'the quote approval' : '';
   return '';
 }
 
@@ -52,17 +54,21 @@ function invoiceStatus(inv, { today, balanceDue } = {}) {
   const lastEvent = events[events.length - 1] || null;
   const dueKey = inv.due_date || null;
   const overdueDays = dueKey && dueKey < todayKey ? Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${dueKey}T00:00:00Z`)) / 86400000) : 0;
-  const base = { sentAt: sent.length ? sent[sent.length - 1].created_at : null, reminders, inXero, credited, events, lastEvent };
+  // unsent: no email or "sent another way" recorded in TEops (the invoice may still have gone out
+  // some other way before today's history existed; Sent another way puts that right)
+  const base = { sentAt: sent.length ? sent[sent.length - 1].created_at : null, unsent: !sent.length, reminders, inXero, credited, events, lastEvent };
 
   if (inv.paid_at) return { ...base, key: 'paid', label: `Paid ${invoiceShortDate(inv.paid_at)}`, cls: 'accepted', next: inXero ? '' : 'Push to Xero' };
   if (credited && balanceDue != null && Number(balanceDue) <= 0.004) return { ...base, key: 'credited', label: 'Credited in full', cls: 'draft', next: '' };
-  if (!sent.length) return { ...base, key: 'not_sent', label: 'Not sent', cls: 'amber', next: inXero ? 'Email to client' : 'Email to client, push to Xero' };
+  // Overdue comes before Not sent: money owed and late is the thing to act on, whether or not a
+  // send was recorded (an unsent overdue invoice still offers Send reminder and sits in Needs sending too).
   if (overdueDays > 0) {
     const last = reminders[reminders.length - 1];
     const sinceReminder = last ? Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${sydneyDateKey(new Date(last.created_at))}T00:00:00Z`)) / 86400000) : null;
-    const next = !last ? 'Send reminder' : sinceReminder >= 7 ? 'Send another reminder' : `Reminder sent ${invoiceShortDate(last.created_at)}, wait`;
+    const next = !sent.length ? 'Email to client (no send recorded)' : !last ? 'Send reminder' : sinceReminder >= 7 ? 'Send another reminder' : `Reminder sent ${invoiceShortDate(last.created_at)}, wait`;
     return { ...base, key: 'overdue', label: `Overdue ${overdueDays} day${overdueDays === 1 ? '' : 's'}`, cls: 'red', next: inXero ? next : `${next}, push to Xero` };
   }
+  if (!sent.length) return { ...base, key: 'not_sent', label: 'Not sent', cls: 'amber', next: inXero ? 'Email to client' : 'Email to client, push to Xero' };
   const due = dueKey ? `Due ${invoiceShortDate(dueKey)}` : 'Wait for payment';
   return { ...base, key: 'awaiting', label: 'Sent, awaiting payment', cls: 'info', next: inXero ? due : `Push to Xero. ${due}` };
 }

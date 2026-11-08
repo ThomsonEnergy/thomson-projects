@@ -28,7 +28,8 @@
 // invoice, a Labour / Materials line per cost centre) or a separate invoice for each.
 // create-invoice.js prices and checks everything again on the server.
 // Needs from project.html / supabase-client.js: supabaseClient, escapeHtml, money, friendlyError,
-// getPrebuilds, openVariationStockPicker, wireInvoiceDueDate, shareOrigin, emailInvoiceToClient.
+// getPrebuilds, openVariationStockPicker, wireInvoiceDueDate, shareOrigin, loadInvoiceActions (which
+// brings emailInvoiceToClient from js/invoice-actions.js).
 
 async function openInvoiceActualCostsPanel(project) {
   const overlay = document.createElement('div');
@@ -524,7 +525,9 @@ async function openInvoiceActualCostsPanel(project) {
         <label>${escapeHtml(d.invoiceNumber)} link</label><input readonly value="${escapeHtml(`${shareOrigin()}/invoice.html?token=${d.invoiceToken}`)}" onclick="this.select()" />
         <button type="button" class="ia-email-btn" data-id="${escapeHtml(d.invoiceId)}" style="margin-top:8px;">Email ${escapeHtml(d.invoiceNumber)} to client</button>
         <div class="ia-email-msg"></div>`).join('')}`;
-    msg.querySelectorAll('.ia-email-btn').forEach(b => b.addEventListener('click', () => emailInvoiceToClient(b.dataset.id, project, { btn: b, msgEl: b.nextElementSibling })));
+    msg.querySelectorAll('.ia-email-btn').forEach(b => b.addEventListener('click', () => loadInvoiceActions()
+      .then(() => emailInvoiceToClient(b.dataset.id, project, { btn: b, msgEl: b.nextElementSibling }))
+      .catch(err => { b.nextElementSibling.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; })));
     confirmBtn.style.display = 'none';
     overlay.querySelector('#ia-cancel-btn').textContent = 'Close';
     overlay.querySelector('#ia-cancel-btn').addEventListener('click', () => window.location.reload());

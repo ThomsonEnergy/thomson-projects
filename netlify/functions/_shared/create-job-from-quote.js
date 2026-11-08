@@ -45,7 +45,7 @@ function splitLabourMaterial(centre, amount) {
   return { labourAmount, materialAmount };
 }
 
-async function raiseDepositInvoice(supabaseAdmin, job, centres) {
+async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
   const depositPercent = Number(job.deposit_percent) || 0;
   const totalQuoted = centres.reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
   if (!(depositPercent > 0) || !(totalQuoted > 0)) return null;
@@ -127,6 +127,8 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
   }
 
   await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` });
+  // approved online: the client lands on this invoice straight after accepting (quote.html), so it is sent
+  if (!approvedBy) await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', detail: 'Shown to the client on the quote approval page' });
   return invoiceToken;
 }
 
@@ -415,7 +417,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   const { data: haveTasks } = retry ? await supabaseAdmin.from('job_tasks').select('id').eq('project_id', job.id).limit(1) : { data: [] };
   if (!(haveTasks || []).length) await createDefaultJobTasks(supabaseAdmin, job, newStages);
 
-  const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages);
+  const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages, approvedBy);
   // No deposit invoice means nothing will ever fire the deposit-paid
   // webhook for this job - move it past that stage immediately instead
   // of leaving it stuck at 'quote_approved' forever.

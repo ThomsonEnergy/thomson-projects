@@ -32,7 +32,7 @@ exports.handler = async (event) => {
 
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from('credit_notes')
-      .select('id, xero_credit_note_id')
+      .select('id, invoice_id, xero_credit_note_id')
       .eq('id', creditNoteId)
       .single();
     if (existingErr || !existing) throw new Error('Credit note not found');
@@ -97,8 +97,7 @@ exports.handler = async (event) => {
       ? `$${leftOver.toFixed(2)} of this credit note is unallocated in Xero (the invoice was already paid). Refund it or apply it to another invoice in Xero.`
       : null;
     await supabaseAdmin.from('credit_notes').update({ xero_credit_note_error: note }).eq('id', creditNoteId).then(() => {}, () => {});
-    const { data: cnRow } = await supabaseAdmin.from('credit_notes').select('invoice_id').eq('id', creditNoteId).single();
-    if (cnRow) await logInvoiceEvent(supabaseAdmin, { invoiceId: cnRow.invoice_id, kind: 'credit_note_pushed', actorId: auth.user.id, detail: `$${toAllocate.toFixed(2)} taken off the invoice in Xero${leftOver > 0 ? `, $${leftOver.toFixed(2)} unallocated` : ''}` });
+    await logInvoiceEvent(supabaseAdmin, { invoiceId: existing.invoice_id, kind: 'credit_note_pushed', actorId: auth.user.id, detail: `$${toAllocate.toFixed(2)} taken off the invoice in Xero${leftOver > 0 ? `, $${leftOver.toFixed(2)} unallocated` : ''}` });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, xeroCreditNoteId, unallocated: leftOver }) };
   } catch (err) {

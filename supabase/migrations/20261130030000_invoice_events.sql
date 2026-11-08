@@ -57,6 +57,24 @@ where a.entity_type = 'project'
   and a.action in ('invoice_emailed', 'invoice_edited', 'credit_note_created')
   and not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind <> 'created');
 
+-- A deposit the client approved online was shown to them straight after accepting (quote.html sends
+-- them to the invoice page), so it counts as sent. A deposit raised by a staff approval does not.
+insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
+select i.id, 'sent_elsewhere', 'Shown to the client on the quote approval page', null, i.created_at
+from public.invoices i
+join public.projects j on j.id = i.project_id
+left join public.projects q on q.id = j.source_quote_id
+where i.is_deposit and q.approved_by is null
+  and not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind in ('emailed', 'sent_elsewhere'));
+
+-- In Xero already: the push happened before today's history, so its date is not known (listed at the
+-- invoice's own date and says so).
+insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
+select i.id, 'pushed_to_xero', 'In Xero (pushed before today''s history, date not recorded)', null, i.created_at
+from public.invoices i
+where i.xero_invoice_id is not null
+  and not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind = 'pushed_to_xero');
+
 -- Paid: at paid_at. Which way (Xero or the pay online link) was not recorded before today.
 insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
 select i.id, 'paid', 'Payment recorded', null, i.paid_at

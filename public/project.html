@@ -3052,7 +3052,7 @@
     // invoice panel in js/invoice-actions.js, the same panel the Invoices page opens, so the two can
     // never disagree. Each card shows the status in plain words (js/invoice-status.js), the last thing
     // that happened, an Open button, and how the invoice posts to Xero (xeroBreakdownHtml, the same
-    // one the Invoices page uses). Both scripts load the first time they are needed.
+    // one the Invoices page uses). Both scripts load with the tab (every job page a pricing role opens).
     const loadInvoiceActions = () => loadJsOnce('/js/invoice-status.js?v=1', () => typeof invoiceStatus === 'function')
       .then(() => loadJsOnce('/js/invoice-actions.js?v=1', () => typeof openInvoicePanel === 'function'));
     // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
@@ -3107,8 +3107,14 @@
       if (!invoices.length) { listEl.innerHTML = `<p class="subtitle">No invoices raised yet.</p>`; return; }
 
       const clientType = client?.client_type || 'individual';
+      // the balance (less credit notes) decides "Credited in full": only invoices with a credit note need it
+      const balances = {};
+      await Promise.all(invoices.filter(inv => (inv.credit_notes || []).length).map(async (inv) => {
+        const { data: bal, error: balErr } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
+        if (!balErr && bal != null) balances[inv.id] = Number(bal);
+      }));
       listEl.innerHTML = invoices.map(inv => {
-        const status = invoiceStatus(inv);
+        const status = invoiceStatus(inv, { balanceDue: balances[inv.id] });
         const last = invoiceLastActionText(status);
         return `
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
@@ -4870,7 +4876,7 @@
       if (invoiceProjectBtn) invoiceProjectBtn.addEventListener('click', () => openInvoiceProjectPanel(project, pricingVisible));
       const invoiceActualBtn = document.getElementById('invoice-actual-btn');
       // Loaded on first click, so every job page does not carry it (page budget).
-      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => loadJsOnce('/js/project-invoice-actuals.js?v=7', () => typeof openInvoiceActualCostsPanel === 'function')
+      if (invoiceActualBtn) invoiceActualBtn.addEventListener('click', () => loadJsOnce('/js/project-invoice-actuals.js?v=8', () => typeof openInvoiceActualCostsPanel === 'function')
         .then(() => openInvoiceActualCostsPanel(project)).catch(err => alert(friendlyError(err))));
       // Do-and-charge jobs: a named cost centre is all that's needed (no
       // quote lines) - it's what the team clocks time and costs Stock to.

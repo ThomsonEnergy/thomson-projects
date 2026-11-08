@@ -63,7 +63,7 @@
     // ?id= (from the top bar search, or a link from a job) opens that invoice's panel over the full list
     const openInvoiceId = params.get('id');
     const FILTERS = [
-      ['needs_sending', 'Needs sending', (st) => st.key === 'not_sent'],
+      ['needs_sending', 'Needs sending', (st) => st.unsent && st.key !== 'paid' && st.key !== 'credited'],
       ['awaiting', 'Awaiting payment', (st) => st.key === 'awaiting'],
       ['overdue', 'Overdue', (st) => st.key === 'overdue'],
       ['paid', 'Paid', (st) => st.key === 'paid' || st.key === 'credited'],
@@ -194,7 +194,7 @@
                   <td class="num" data-label="Amount">${money(invoiceTotal(inv))}</td>
                   <td data-label="Status">
                     ${invoiceStatusChipHtml(st)}
-                    <div class="subtitle" style="font-size:11px; margin:2px 0 0;">${st.inXero ? 'In Xero' : 'Not in Xero'}${st.reminders.length ? ` &middot; ${st.reminders.length} reminder${st.reminders.length === 1 ? '' : 's'}` : ''}${st.credited ? ' &middot; credit note' : ''}</div>
+                    <div class="subtitle" style="font-size:11px; margin:2px 0 0;">${st.inXero ? 'In Xero' : 'Not in Xero'}${st.unsent && st.key === 'overdue' ? ' &middot; no send recorded' : ''}${st.reminders.length ? ` &middot; ${st.reminders.length} reminder${st.reminders.length === 1 ? '' : 's'}` : ''}${st.credited ? ' &middot; credit note' : ''}</div>
                   </td>
                   <td data-label="Last action" style="font-size:12px;">${escapeHtml(last) || '-'}</td>
                   <td data-label="Next" style="font-size:12px;">${escapeHtml(st.next) || '-'}</td>

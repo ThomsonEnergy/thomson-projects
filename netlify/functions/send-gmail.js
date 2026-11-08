@@ -142,7 +142,8 @@ exports.handler = async (event) => {
     thread = sentRec.thread;
     const nowIso = new Date().toISOString();
 
-    if (invoiceEvent && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
+    // the same rule as the table's own insert policy: pricing roles only
+    if (invoiceEvent && ['admin', 'finance', 'sales'].includes(auth.role) && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
       const { data: inv } = await supabaseAdmin.from('invoices').select('id').eq('id', invoiceEvent.invoiceId).maybeSingle();
       if (inv) await logInvoiceEvent(supabaseAdmin, { invoiceId: inv.id, kind: invoiceEvent.kind, actorId: user.id, emailThreadId: thread.id, detail: `To ${String(to).slice(0, 200)}` });
     }

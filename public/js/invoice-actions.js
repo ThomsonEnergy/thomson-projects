@@ -11,8 +11,8 @@
 //   pushCreditNoteToXero(creditNoteId)           throws on failure
 //   recordInvoiceEvent(invoiceId, kind, detail)  one history line written by the browser (edit, notes, sent another way)
 // Writes invoices, invoice_claims, cost_centres.invoiced_amount (the edit panel, as before) and
-// invoice_events. Needs js/supabase-client.js, js/invoice-status.js and js/email-compose.js; loads
-// js/invoice-notes.js when Notes is pressed.
+// invoice_events. Needs js/supabase-client.js, js/invoice-status.js and js/email-compose.js
+// (openEmailComposer, emailPostFn); loads js/invoice-notes.js when Notes is pressed.
 
 const INVOICE_PANEL_SELECT = '*, cost_centres(name, project_id), invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_events(*, actor:profiles(full_name))';
 const INVOICE_OVERLAY_CSS = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px;';
@@ -20,30 +20,18 @@ const INVOICE_BTN = 'font-size:12px; padding:6px 10px;';
 const loadInvoiceNotes = () => loadJsOnce('/js/invoice-notes.js?v=3', () => typeof openInvoiceNotesPanel === 'function');
 
 // One history line from the browser. The insert policy needs the actor to be the signed in person.
+// Throws when it could not be written: for "Sent another way" the line is the action itself, so the
+// person must hear about it; the edit and notes panels catch it (their real change is already saved).
 async function recordInvoiceEvent(invoiceId, kind, detail) {
-  try {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    const { error } = await supabaseClient.from('invoice_events').insert({ invoice_id: invoiceId, kind, detail: detail ? String(detail).slice(0, 500) : null, actor_id: user.id });
-    if (error) throw error;
-  } catch (err) {
-    console.error('Invoice history write failed:', err); // never block the real action over a history line
-  }
-}
-
-async function invoicePostFn(name, body) {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  const res = await fetch(`/.netlify/functions/${name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) throw new Error(data.error || 'The server could not do that');
-  return data;
+  if (!session) throw new Error('You are signed out. Sign in again.');
+  const { error } = await supabaseClient.from('invoice_events').insert({ invoice_id: invoiceId, kind, detail: detail ? String(detail).slice(0, 500) : null, actor_id: session.user.id });
+  if (error) throw new Error(`The history line was not saved: ${error.message}`);
 }
 
-const pushInvoiceToXero = (invoiceId) => invoicePostFn('push-invoice-to-xero', { invoiceId });
-const pushCreditNoteToXero = (creditNoteId) => invoicePostFn('push-credit-note-to-xero', { creditNoteId });
+// emailPostFn (js/email-compose.js) is the one authenticated POST helper both pages already load.
+const pushInvoiceToXero = (invoiceId) => emailPostFn('push-invoice-to-xero', { invoiceId }, 'Could not push the invoice to Xero');
+const pushCreditNoteToXero = (creditNoteId) => emailPostFn('push-credit-note-to-xero', { creditNoteId }, 'Could not push the credit note to Xero');
 
 async function loadInvoiceForPanel(invoiceId) {
   const { data: inv, error } = await supabaseClient.from('invoices').select(INVOICE_PANEL_SELECT).eq('id', invoiceId).single();
@@ -122,11 +110,14 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     const canIssueCreditNote = role === 'admin' || role === 'finance';
     const canEdit = !inv.xero_invoice_id && !inv.paid_at && !!projectId;
     const clientType = (project && project.clients && project.clients.client_type) || 'individual';
+    // the server's balance (inc GST, less credits); if it cannot answer, the ex GST total, said so
     const amount = balanceDue != null ? balanceDue : Number(inv.labour_amount || 0) + Number(inv.material_amount || 0);
+    const amountNote = balanceDue == null ? 'ex GST (the balance could not be read)' : `${inv.paid_at ? 'paid' : status.key === 'credited' ? 'left to pay' : 'to pay'}, inc GST`;
     const why = [];
     if (!canEdit) why.push(inv.xero_invoice_id ? 'Edit is off: this invoice is in Xero. Changes go through a credit note.' : inv.paid_at ? 'Edit is off: this invoice is paid.' : 'Edit is off: this invoice has no job.');
     if (inv.xero_invoice_id && !canIssueCreditNote) why.push('Issue credit note: Finance and Admin only.');
     if (inv.paid_at) why.push('Paid: no more emails or reminders from here.');
+    if (status.unsent && status.key === 'overdue') why.push('No send is recorded for this invoice. If it went out another way, press Sent another way so the history is right.');
 
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:flex-start;">
@@ -142,13 +133,13 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
         ${invoiceStatusChipHtml(status)}
         <span class="badge draft">${inv.xero_invoice_id ? 'In Xero' : 'Not in Xero'}</span>
         ${status.credited ? '<span class="badge draft">Credit note</span>' : ''}
-        <span><strong style="font-size:16px;">${money(amount)}</strong> <span class="subtitle" style="font-size:12px;">${inv.paid_at ? 'paid' : status.key === 'credited' ? 'left to pay' : 'to pay'}, inc GST</span></span>
+        <span><strong style="font-size:16px;">${money(amount)}</strong> <span class="subtitle" style="font-size:12px;">${amountNote}</span></span>
         <span class="subtitle" style="font-size:13px; margin:0;">Dated ${escapeHtml(invoiceShortDate(inv.sent_at))}${inv.due_date ? ` &middot; Due ${escapeHtml(invoiceShortDate(inv.due_date))}` : ''}</span>
       </div>
       <p class="subtitle" style="font-size:13px; margin:0 0 12px;"><strong style="color:var(--text);">Next:</strong> ${escapeHtml(status.next || 'Nothing to do')}${status.reminders.length ? ` &middot; Reminders: ${escapeHtml(status.reminders.map(r => invoiceShortDate(r.created_at)).join(', '))}` : ''}</p>
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         ${!inv.paid_at ? `<button type="button" id="ip-email" style="${INVOICE_BTN}">${status.sentAt ? 'Email again' : 'Email to client'}</button>` : ''}
-        ${!inv.paid_at && status.sentAt ? `<button type="button" class="secondary" id="ip-remind" style="${INVOICE_BTN}">Send reminder</button>` : ''}
+        ${!inv.paid_at && (status.sentAt || status.key === 'overdue') ? `<button type="button" class="secondary" id="ip-remind" style="${INVOICE_BTN}">Send reminder</button>` : ''}
         ${!inv.xero_invoice_id ? `<button type="button" class="secondary" id="ip-push" style="${INVOICE_BTN}">Push to Xero</button>` : ''}
         <button type="button" class="secondary" id="ip-edit" style="${INVOICE_BTN}" ${canEdit ? '' : 'disabled title="See the note below"'}>Edit</button>
         ${inv.xero_invoice_id && canIssueCreditNote ? `<button type="button" class="secondary" id="ip-credit" style="${INVOICE_BTN}">Issue credit note</button>` : ''}
@@ -189,7 +180,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     on('#ip-edit', () => openEditInvoicePanel(inv, project, afterChange));
     on('#ip-credit', () => openIssueCreditNotePanel(inv, project, afterChange));
     on('#ip-notes', () => loadInvoiceNotes()
-      .then(() => openInvoiceNotesPanel(inv, project || { id: projectId }, async () => { await recordInvoiceEvent(inv.id, 'notes', 'Work completed notes changed'); afterChange(); }))
+      .then(() => openInvoiceNotesPanel(inv, project || { id: projectId }, async () => { await recordInvoiceEvent(inv.id, 'notes', 'Work completed notes changed').catch(fail); afterChange(); }))
       .catch(fail));
     on('#ip-pdf', () => openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`, projectId ? { projectId, folder: 'Marked up' } : {}));
     on('#ip-make-pdf', async (e) => {
@@ -199,7 +190,9 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     on('#ip-sent-elsewhere', async () => {
       const note = prompt('How was it sent? For example "posted 3 Nov" or "sent from Xero". This records it as sent.');
       if (note === null) return;
-      await recordInvoiceEvent(inv.id, 'sent_elsewhere', note.trim() || null);
+      try {
+        await recordInvoiceEvent(inv.id, 'sent_elsewhere', note.trim() || null);
+      } catch (err) { fail(err); return; }
       if (projectId) await logActivity('project', projectId, 'invoice_emailed', `Invoice ${inv.invoice_number} marked as sent another way${note.trim() ? ` (${note.trim()})` : ''}`);
       afterChange();
     });
@@ -457,8 +450,12 @@ function openEditInvoicePanel(invoice, project, onDone) {
       const what = [`Total ex GST ${money(totalOf(rows))} to ${money(totalOf(newRows))}`];
       if (dateChanged) what.push(`dated ${invoiceShortDate(newDate)}`);
       if (dueChanged) what.push(newDueDate ? `due ${invoiceShortDate(newDueDate)}` : 'due date cleared');
-      await recordInvoiceEvent(invoice.id, 'edited', what.join(', '));
       await logActivity('project', project.id, 'invoice_edited', `Edited invoice ${invoice.invoice_number}: ${what.join(', ')}`);
+      try {
+        await recordInvoiceEvent(invoice.id, 'edited', what.join(', '));
+      } catch (histErr) {
+        alert(`Saved. ${histErr.message}`); // the amounts are saved; only the history line is missing
+      }
 
       overlay.remove();
       if (onDone) onDone();
@@ -579,13 +576,13 @@ async function openIssueCreditNotePanel(invoice, project, onDone) {
     try {
       const claims = readValues().filter(r => r.labour + r.material + r.stc + r.bstc > 0.004);
       if (!claims.length) throw new Error('Enter at least one non-zero credit amount');
-      await invoicePostFn('create-credit-note', {
+      await emailPostFn('create-credit-note', {
         invoiceId: invoice.id,
         reason: overlay.querySelector('#cn-reason').value.trim() || null,
         refund: overlay.querySelector('#cn-refund').checked,
         refundReference: overlay.querySelector('#cn-refund-ref').value.trim() || null,
         claims: claims.map(c => ({ costCentreId: c.cost_centre_id, labourAmount: c.labour, materialAmount: c.material, stcAmount: c.stc, bstcAmount: c.bstc })),
-      });
+      }, 'Could not create the credit note');
       if (project) await logActivity('project', project.id, 'credit_note_created', `Credit note created against invoice ${invoice.invoice_number}`);
       overlay.remove();
       if (onDone) onDone();
