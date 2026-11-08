@@ -5,6 +5,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 ## 8 Nov 2026
 
 - LIVE (owner, Sunday: "ship straight to live"): item 60. Admin and Finance add leave for any staff member (approved now by default) and delete any leave on the Timesheets Leave card; leave already in Xero Payroll warns to delete it there too. Migration 20261130020000 (two RLS policies), production backup `backup_20261108.leave_requests`. See PROJECT_SPEC.md (Leave card) and IDEAS_BACKLOG.md item 60.
+- LIVE (owner: "bug, ship straight to main"): on a job or quote, the client name in the header is now a link that opens that client's card on the Clients page in a new tab (details, contacts, sites, payment terms, rate card, delete). Sales, finance and admin only, and only when the job is linked to a client. `public/project.html`, no migration.
 
 ## 6 Nov 2026
 
