@@ -62,3 +62,9 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 - **Uploads:** every upload goes through `compressImage()`. Use the defaults for site photos, and `compressImage(file, DOC_IMAGE_MAX, DOC_IMAGE_QUALITY)` (2560px / 0.85) for paperwork.
 - **Thumbnails:** use `supaImageVariant()` at display time.
 - **Exceptions:** email attachments, meeting audio and generated PDFs are uploaded untouched on purpose.
+
+## Payment terms and late payment (9 Nov 2026)
+
+- Quote T&Cs clause 5: deposit as quoted, final payment before commissioning, energisation or handover; a disputed invoice is paid for the undisputed part and disputed in writing within 5 days.
+- Quote T&Cs clause 6: overdue amounts accrue interest at 21% per annum calculated daily; recovery costs (legal on a solicitor-client basis, collection, court, adjudication, administrative) are payable by the client.
+- The invoice terms note (Settings > Payment Terms & T&Cs) says the same since 9 Nov 2026; before that it read 9% pa.
