@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 9 Nov 2026
+
+- Planned (waiting on yes): item 62, pipeline moves done by the database. A read-only check of production found 9 jobs in the wrong column because three stage checks only run in the browser (task gate, handover check, all-paid check) and no-quote invoices never count as final. Plan, findings and the job list in IDEAS_BACKLOG.md item 62.
+
 ## 8 Nov 2026
 
 - Owner (Sunday, "build and ship straight to main"): item 61, the Invoices page as the accounts desk. Invoices are created on the job but checked, sent, chased, pushed to Xero and corrected from the Invoices page, usually by an accounts person who was not on the job, so every invoice now carries its status in plain words and a history of who did what and when (`invoice_events`, migration 20261130030000, backfilled). One invoice panel serves both pages (`js/invoice-actions.js`, moved out of `project.html`); a reminder email is one click. Numbered 61 because another chat shipped item 60 (leave) the same day. Detail: `docs/PROJECT_SPEC.md` A28, `docs/IDEAS_BACKLOG.md` item 61.
