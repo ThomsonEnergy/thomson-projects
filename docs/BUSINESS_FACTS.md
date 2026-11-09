@@ -68,3 +68,4 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 - Quote T&Cs clause 5: deposit as quoted, final payment before commissioning, energisation or handover; a disputed invoice is paid for the undisputed part and disputed in writing within 5 days.
 - Quote T&Cs clause 6: overdue amounts accrue interest at 21% per annum calculated daily; recovery costs (legal on a solicitor-client basis, collection, court, adjudication, administrative) are payable by the client.
 - The invoice terms note (Settings > Payment Terms & T&Cs) says the same since 9 Nov 2026; before that it read 9% pa.
+- In TEops, interest is charged per invoice (Charge interest on the invoice panel, item 66): shown as it accrues, quoted on reminders, and charged as a separate GST free interest invoice (Xero account 270 Interest Income, BAS excluded) so the original invoice never changes.
