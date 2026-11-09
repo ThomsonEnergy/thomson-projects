@@ -50,6 +50,7 @@
         <p class="subtitle" id="bulk-delete-projects-hint" style="margin:0;">Enable Dev Mode in Settings to bulk-select and delete jobs.</p>
       </div>
       <div id="bulk-delete-projects-msg"></div>
+      <div class="settings-tabs" id="jobs-folders" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;"></div>
       <div id="projects-list"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
@@ -60,6 +61,11 @@
     let allRows = [];
 
     let costsLoaded = false;
+
+    // Stage folders: All (everything not archived), one per pipeline stage that has jobs, Archived.
+    // The folder last used is remembered on this device.
+    let currentFolder = 'all';
+    try { currentFolder = localStorage.getItem('te-jobs-folder') || 'all'; } catch (e) { /* no storage: start on All */ }
 
     // Materials actually incurred, per job: only received line items count,
     // the same rule the job page's "Actual cost" uses, so a part-received PO
@@ -118,7 +124,6 @@
       const { data: projects, error } = await supabaseClient.from('projects')
         .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
         .not('job_number', 'is', null)
-        .neq('pipeline_stage', 'archived')
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
@@ -150,9 +155,31 @@
     function renderProjects() {
       const listEl = document.getElementById('projects-list');
       const q = document.getElementById('project-search').value.trim().toLowerCase();
+      // Folder counts ignore the search box, as the Quotes tabs do.
+      const inFolder = (p, f) => f === 'all' ? p.pipeline_stage !== 'archived' : p.pipeline_stage === f;
+      const counts = { all: 0, archived: 0 };
+      allRows.forEach(p => {
+        if (p.pipeline_stage === 'archived') counts.archived++;
+        else { counts.all++; counts[p.pipeline_stage] = (counts[p.pipeline_stage] || 0) + 1; }
+      });
+      const stageKeys = PIPELINE_STAGES.map(s => s.key);
+      const folderKeys = ['all',
+        ...stageKeys.filter(k => counts[k]),
+        ...Object.keys(counts).filter(k => k !== 'all' && k !== 'archived' && !stageKeys.includes(k)),
+        'archived'];
+      if (allRows.length && !folderKeys.includes(currentFolder)) currentFolder = 'all'; // a remembered stage with no jobs left
+      const foldersEl = document.getElementById('jobs-folders');
+      foldersEl.innerHTML = folderKeys.map(k => `<button type="button" class="settings-tab${k === currentFolder ? ' active' : ''}" data-folder="${escapeHtml(k)}">${escapeHtml(k === 'all' ? 'All' : pipelineStageLabel(k))} (${counts[k] || 0})</button>`).join('');
+      foldersEl.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => {
+        currentFolder = btn.dataset.folder;
+        try { localStorage.setItem('te-jobs-folder', currentFolder); } catch (e) { /* remembered only when storage works */ }
+        renderProjects();
+      }));
+
+      const folderRows = allRows.filter(p => inFolder(p, currentFolder));
       const filtered = q
-        ? allRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
-        : allRows;
+        ? folderRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
+        : folderRows;
 
       const totals = filtered.reduce((acc, p) => ({
         signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, costIncl: acc.costIncl + p.costInclOverheads, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
@@ -163,7 +190,7 @@
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
       document.getElementById('stat-pending').textContent = money(totals.pending);
 
-      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">${allRows.length ? 'No jobs match.' : 'No jobs yet.'}</p>`; return; }
+      if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">${allRows.length ? (q ? 'No jobs match.' : 'No jobs in this folder.') : 'No jobs yet.'}</p>`; return; }
 
       const devMode = isDevModeActive();
       document.getElementById('bulk-delete-projects-controls').style.display = devMode ? 'flex' : 'none';
