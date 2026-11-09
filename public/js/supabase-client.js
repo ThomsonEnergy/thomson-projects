@@ -6641,13 +6641,10 @@ function poTotalAmount(po) {
 // "J7040 Smith" from a projects row (name, job_number).
 function poJobRef(p) { return `${p.job_number ? 'J' + p.job_number + ' ' : ''}${p.name || ''}`.trim() || 'a job'; }
 
-// Where a received line sits, naming the job when it is not the PO's own job (a line moved to
-// another job): "J7068 Shipping container", "Warehouse", "Vehicle". Lines carry destination_job
-// (the job's name and number) when the loader asked for it.
-function poLinePlace(li, po) {
-  if (li.destination_type === 'job' && li.destination_job_id && li.destination_job_id !== (po && po.project_id)) {
-    return li.destination_job ? poJobRef(li.destination_job) : 'another job';
-  }
+// Where a received line sits, naming the job: "J7068 Shipping container", "Warehouse", "Vehicle".
+// Lines carry destination_job (the job's name and number) when the loader asked for it.
+function poLinePlace(li) {
+  if (li.destination_type === 'job' && li.destination_job) return poJobRef(li.destination_job);
   return poPlaceLabel(li.destination_type);
 }
 
@@ -6664,16 +6661,17 @@ function poJobShare(po, projectId) {
   const away = items.filter(li => !here.includes(li));
   if (own && !away.length) return { amount: poTotalAmount(po), whole: true, progress: '', note: '' };
   const amount = here.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+  // the count is this job's lines only: "6 of 6 received" here, "1 of 1 received" on the other job
   const received = here.filter(li => li.received).length;
-  const progress = `${here.length} of ${items.length} line${items.length === 1 ? '' : 's'} on this job`
-    + (received === here.length ? '' : `, ${received} received`);
+  const backordered = here.filter(li => !li.received && li.is_backordered).length;
+  const progress = `${received} of ${here.length} received${backordered ? `, ${backordered} back ordered` : ''}`;
   let note;
   if (own) {
     // the job's own PO: say where the other lines went, one count per place
     const byPlace = {};
     away.forEach(li => {
       const place = poLineIsTool(li, po) ? 'the Tools register' : !li.received ? 'nowhere yet'
-        : li.destination_type === 'job' ? poLinePlace(li, po) : li.destination_type === 'vehicle' ? 'a vehicle' : 'the Warehouse';
+        : li.destination_type === 'job' ? poLinePlace(li) : li.destination_type === 'vehicle' ? 'a vehicle' : 'the Warehouse';
       byPlace[place] = (byPlace[place] || 0) + 1;
     });
     note = Object.entries(byPlace).map(([place, n]) => `${n} line${n === 1 ? '' : 's'} moved to ${place}`).join(', ');
@@ -6774,7 +6772,7 @@ function renderPoTickLines(po, canEdit) {
     const tickable = canEdit && open && !li.received;
     const eta = li.backorder_eta ? ', ETA ' + new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
     let state = '';
-    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${escapeHtml(poLinePlace(li, po))}</span>`;
+    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${escapeHtml(poLinePlace(li))}</span>`;
     else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
     const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
     const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>`
