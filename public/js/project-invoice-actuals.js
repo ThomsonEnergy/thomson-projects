@@ -37,7 +37,7 @@
 // whole set to update-invoice-lines.js, which saves it into the same invoice in one step. The create
 // panel offers "Add to SI123 instead" when such an invoice already exists on the job.
 // Needs from supabase-client.js: supabaseClient, escapeHtml, money, friendlyError, getPrebuilds,
-// openVariationStockPicker, wireInvoiceDueDate, shareOrigin, openModal, loadInvoiceActions (which brings
+// loadStockPicker (js/stock-picker.js), wireInvoiceDueDate, shareOrigin, openModal, loadInvoiceActions (which brings
 // emailInvoiceToClient from js/invoice-actions.js). Loaded on demand by loadInvoiceActuals.
 
 async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null, onDone = null } = {}) {
@@ -522,6 +522,7 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
         row.querySelector('.ia-item-remove').addEventListener('click', () => { c.items.splice(Number(row.dataset.ii), 1); renderCentres(); });
       });
       box.querySelector('.ia-add-item').addEventListener('click', async () => {
+        await loadStockPicker();
         const picked = await openVariationStockPicker(true);
         if (!picked) return;
         if (picked.kind === 'material') {

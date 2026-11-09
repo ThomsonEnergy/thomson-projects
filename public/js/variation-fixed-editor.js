@@ -7,7 +7,7 @@
 // the prebuild's name, which the client's document shows as one line. Saving keeps it a draft and goes
 // through /.netlify/functions/create-variation, which prices every line again on the server.
 // Downloaded by project.html the first time the editor is opened (openFixedVariationEditor there); needs supabase-client.js (supabaseClient, escapeHtml, money, friendlyError,
-// getPrebuilds, logActivity) and the page's openVariationStockPicker and markupOr45.
+// getPrebuilds, logActivity, loadStockPicker for openVariationStockPicker) and the page's markupOr45.
 (function () {
   const esc = (s) => escapeHtml(s);
   const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -133,6 +133,7 @@
     // components one line each (its labour at the prebuild's own rate, its materials at cost), grouped
     // so the client sees the prebuild's one line. Price only, nothing leaves Stock.
     $('#fv-add-stock').addEventListener('click', async () => {
+      await loadStockPicker(); // js/stock-picker.js, on demand
       const pick = await openVariationStockPicker(true, true); // price only: no low-stock warning
       if (!pick) return;
       const qty = num(pick.quantity) || 1;

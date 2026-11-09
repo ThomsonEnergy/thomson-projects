@@ -586,6 +586,9 @@
             <h2>Invoice terms note</h2>
             <p class="subtitle" style="margin-bottom:10px;">Printed under the items on every client invoice, beside the totals (late payment interest and the like). Leave blank to print nothing.</p>
             <textarea id="invoice-terms-text" style="min-height:90px;"></textarea>
+            <label style="margin-top:14px;">Late payment interest (% per annum)</label>
+            <input id="late-interest-rate" type="number" step="0.1" min="0" max="100" style="max-width:160px;" />
+            <p class="subtitle" style="font-size:12px; margin:4px 0 0;">Used when Charge interest is turned on for an invoice (the invoice panel): simple interest, daily, from the day after the due date, on the balance owing. Keep it the same as the quote T&amp;Cs (clause 6 says 21%).</p>
           </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
@@ -839,7 +842,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=128"></script>
+  <script src="/js/supabase-client.js?v=129"></script>
   <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -904,6 +907,7 @@
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
       document.getElementById('payment-details-text').value = data.payment_details_text || '';
       document.getElementById('invoice-terms-text').value = data.invoice_terms_text || '';
+      document.getElementById('late-interest-rate').value = data.late_interest_rate_pct != null ? data.late_interest_rate_pct : 21;
       document.getElementById('bank-name').value = data.bank_name || '';
       document.getElementById('bank-account-name').value = data.bank_account_name || '';
       document.getElementById('bank-bsb').value = data.bank_bsb || '';
@@ -1047,6 +1051,7 @@
 
     document.getElementById('save-terms-btn').addEventListener('click', async () => {
       const msg = document.getElementById('save-terms-msg');
+      const lateRate = parseFloat(document.getElementById('late-interest-rate').value); // blank keeps the T&Cs rate
       const { error } = await supabaseClient
         .from('company_settings')
         .update({
@@ -1054,6 +1059,7 @@
           default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
           payment_details_text: document.getElementById('payment-details-text').value,
           invoice_terms_text: document.getElementById('invoice-terms-text').value.trim() || null,
+          late_interest_rate_pct: Number.isFinite(lateRate) ? Math.max(0, Math.min(100, lateRate)) : 21,
           bank_name: document.getElementById('bank-name').value.trim(),
           bank_account_name: document.getElementById('bank-account-name').value.trim(),
           bank_bsb: document.getElementById('bank-bsb').value.trim(),

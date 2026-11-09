@@ -128,7 +128,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=128"></script>
+  <script src="/js/supabase-client.js?v=129"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -167,8 +167,11 @@
       const stcAmount = inv.stc_credit_inc_gst != null ? Number(inv.stc_credit_inc_gst) : (Number(inv.stc_amount) || 0);
       // Battery certificates on their own line (item 27), same GST treatment.
       const bstcAmount = inv.bstc_credit_inc_gst != null ? Number(inv.bstc_credit_inc_gst) : (Number(inv.bstc_amount) || 0);
-      const subtotal = labourAmount + materialAmount;
-      const gst = Math.round(subtotal * 0.10 * 100) / 100;
+      // a late payment interest invoice (item 66) carries one GST free amount; a normal invoice shows what is accruing
+      const interestAmount = Number(inv.interest_amount) || 0;
+      const interestAccrued = inv.interest_enabled ? Number(inv.interest_accrued) || 0 : 0;
+      const subtotal = labourAmount + materialAmount + interestAmount;
+      const gst = Math.round((labourAmount + materialAmount) * 0.10 * 100) / 100;
       const totalIncGst = subtotal + gst;
       // Balance due comes straight from the server (the same number the card payment charges),
       // never recalculated here, so the two can never drift apart.
@@ -184,7 +187,9 @@
       const itemRow = (name, amount) => ({ cells: [esc(name), '1.00', money(amount), money(amount)], cls: ['', 'ctr', 'num', 'num'] });
       const qtyRow = (name, qty, unit) => ({ cells: [esc(name), (Number(qty) || 0).toFixed(2), money(unit), money((Number(qty) || 0) * (Number(unit) || 0))], cls: ['', 'ctr', 'num', 'num'] });
       const sections = [];
-      if (isStandalone || !claims.length) {
+      if (interestAmount > 0) {
+        sections.push({ title: 'Late payment interest (GST free)', rows: [itemRow(inv.description || 'Late payment interest', interestAmount)] });
+      } else if (isStandalone || !claims.length) {
         // One line for the client; the labour / materials split stays on our side (Xero income lines, job costing).
         const rows = [itemRow(inv.description || 'Invoice', labourAmount + materialAmount > 0 ? labourAmount + materialAmount : subtotal)];
         sections.push({ title: inv.description || 'Invoice', rows });
@@ -274,7 +279,7 @@
                 <div class="amt"><div class="k">Amount</div><div class="v">${money(balanceDue)}</div></div>
                 <div><div class="k">Invoice date</div><div class="v">${dateText(sentOn)}</div></div>
               </div>
-              <div class="inv-title">TAX INVOICE NO. ${esc(String(inv.invoice_number).replace(/^INV-?/i, ''))}</div>
+              <div class="inv-title">${gst > 0 ? 'TAX INVOICE' : 'INVOICE'} NO. ${esc(String(inv.invoice_number).replace(/^INV-?/i, ''))}</div>
               ${isDeposit ? '<div style="text-align:right;"><span class="inv-deposit">DEPOSIT INVOICE</span></div>' : ''}
               ${first && detailRows.length ? `<div class="inv-details">${detailRows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>` : ''}
             </div>
@@ -289,10 +294,14 @@
       const agreementNote = agreement
         ? `Labour is charged as per our Schedule of Rates. The commercial agreement line is a conditional reduction under our agreement with you${agreement.sent_at ? ` dated ${dateText(new Date(agreement.sent_at))}` : ''}. It applies when this invoice is paid in full by the due date and is otherwise withdrawn, with the balance payable.`
         : '';
+      // interest accruing on an overdue invoice (item 66): shown while it is unpaid; it is invoiced separately
+      const interestNote = interestAccrued > 0 && !isPaid
+        ? `Interest at ${Number(inv.interest_rate_pct) || 21}% per annum accrues daily on this overdue amount: ${money(interestAccrued)} to today (${Number(inv.interest_days) || 0} day${Number(inv.interest_days) === 1 ? '' : 's'}, ${money(Number(inv.interest_daily) || 0)} a day). It is invoiced separately.`
+        : '';
       const finalHtml = `
         <div class="inv-final">
           <div class="inv-final-top">
-            <div class="inv-terms">${[agreementNote, s.invoice_terms_text].filter(Boolean).map(esc).join('<br><br>')}</div>
+            <div class="inv-terms">${[agreementNote, interestNote, s.invoice_terms_text].filter(Boolean).map(esc).join('<br><br>')}</div>
             <div class="inv-totals">
               <div><span class="k">Sub-Total ex GST</span><span class="v">${money(subtotal)}</span></div>
               <div><span class="k">GST</span><span class="v">${money(gst)}</span></div>
@@ -301,6 +310,7 @@
               ${bstcAmount > 0 ? `<div><span class="k">BSTC Credit (battery)${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(bstcAmount)}</span></div>` : ''}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
+              ${interestAccrued > 0 && !isPaid ? `<div><span class="k">Interest accrued to today</span><span class="v">${money(interestAccrued)}</span></div>` : ''}
             </div>
           </div>
           <div class="inv-howto">

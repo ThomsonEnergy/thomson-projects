@@ -8,7 +8,8 @@
 //   logInvoiceEvents(admin, [rows])   several lines in one write
 //   moneyText(n)                      '$1,234.50', the way the app prints money, for detail text
 //   kind: created | edited | emailed | reminder | sent_elsewhere | pushed_to_xero | paid |
-//         credit_note | credit_note_pushed | notes (the table's check constraint)
+//         credit_note | credit_note_pushed | notes | interest_on | interest_off | interest_charged
+//         (the table's check constraint)
 //   actorLabel: what did it when nobody did ('the quote approval', 'Xero', 'the pay online link')
 // A database trigger copies every line to the job's Activity tab (activity_log), so nothing here
 // writes that table.

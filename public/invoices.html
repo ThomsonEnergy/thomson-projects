@@ -47,7 +47,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=128"></script>
+  <script src="/js/supabase-client.js?v=129"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // The accounts desk (item 61): this page decides what shows and in what order; the status words are
@@ -162,7 +162,7 @@
                 <tr class="invoice-row" data-id="${inv.id}" style="cursor:pointer;" title="Open this invoice">
                   <td data-label="Invoice"><strong>${escapeHtml(inv.invoice_number)}</strong>${inv.description ? `<div class="subtitle" style="font-size:11px; margin:0;">${escapeHtml(inv.description)}</div>` : ''}<div class="subtitle" style="font-size:11px; margin:0;">Dated ${escapeHtml(invoiceShortDate(inv.sent_at))}</div></td>
                   <td data-label="Job">${project ? `J${escapeHtml(project.job_number || '-')} ${escapeHtml(project.name)}${project.client_name ? `<div class="subtitle" style="font-size:11px; margin:0;">${escapeHtml(project.client_name)}</div>` : ''}` : '-'}</td>
-                  <td class="num" data-label="Amount">${money(inv.balance_due)}</td>
+                  <td class="num" data-label="Amount">${money(inv.balance_due)}${st.interest.enabled && st.interest.accrued > 0 ? `<div class="subtitle" style="font-size:11px; margin:0;">+ ${money(st.interest.accrued)} interest accruing</div>` : ''}</td>
                   <td data-label="Status">
                     ${invoiceStatusChipHtml(st)}
                     <div class="subtitle" style="font-size:11px; margin:2px 0 0;">${st.inXero ? 'In Xero' : 'Not in Xero'}${st.noSendRecorded ? ' &middot; no send recorded' : ''}${st.reminders.length ? ` &middot; ${st.reminders.length} reminder${st.reminders.length === 1 ? '' : 's'}` : ''}${st.credited ? ' &middot; credit note' : ''}</div>
