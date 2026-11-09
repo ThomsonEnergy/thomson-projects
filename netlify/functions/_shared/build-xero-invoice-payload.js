@@ -102,6 +102,23 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
     await supabaseAdmin.from(contactStoreTable).update({ xero_contact_id: contactId }).eq('id', contactStoreId);
   }
 
+  // Xero's Invoices endpoint takes plain YYYY-MM-DD strings for Date/DueDate.
+  // Sydney calendar date of sent_at (a date-only pick is stored as UTC
+  // midnight, which is still the same Sydney day).
+  const date = invoice.sent_at ? new Date(invoice.sent_at).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : undefined;
+  const dueDate = invoice.due_date || undefined;
+
+  // A late payment interest invoice (item 66): one line, GST free, to the Interest charged account.
+  if (Number(invoice.interest_amount) > 0) {
+    const interestMap = mappings.find(m => m.category === 'interest');
+    if (!interestMap) throw new Error('Set the Interest charged account in Settings > Xero Mapping before pushing an interest invoice.');
+    return {
+      invoice, contactId, jobNumber, date, dueDate,
+      reference: jobNumber ? `Job ${jobNumber} - ${invoice.description || 'Late payment interest'}` : (invoice.description || 'Late payment interest'),
+      lineItems: [{ Description: invoice.description || 'Late payment interest', Quantity: 1, UnitAmount: Number(invoice.interest_amount), AccountCode: interestMap.xero_account_code, TaxType: interestMap.xero_tax_type }],
+    };
+  }
+
   let reference, lineItems;
   if (isMultiStage) {
     const claims = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
@@ -204,12 +221,6 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
       });
     }
   }
-
-  // Xero's Invoices endpoint takes plain YYYY-MM-DD strings for Date/DueDate.
-  // Sydney calendar date of sent_at (a date-only pick is stored as UTC
-  // midnight, which is still the same Sydney day).
-  const date = invoice.sent_at ? new Date(invoice.sent_at).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }) : undefined;
-  const dueDate = invoice.due_date || undefined;
 
   return { invoice, contactId, reference, lineItems, jobNumber, date, dueDate };
 }

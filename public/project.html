@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=128"></script>
+  <script src="/js/supabase-client.js?v=129"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
@@ -7433,6 +7433,7 @@
       }));
 
       listEl.querySelectorAll('.var-mat-add').forEach(btn => btn.addEventListener('click', async () => {
+        await loadStockPicker();
         const picked = await openVariationStockPicker(pricingVisible);
         if (!picked) return;
         btn.disabled = true;
@@ -7561,7 +7562,7 @@
     function openFixedVariationEditor(project, entry, onSaved) {
       if (window.openFixedVariationEditorPanel) return window.openFixedVariationEditorPanel(project, entry, onSaved);
       const s = document.createElement('script');
-      s.src = '/js/variation-fixed-editor.js?v=2';
+      s.src = '/js/variation-fixed-editor.js?v=3';
       s.onload = () => window.openFixedVariationEditorPanel(project, entry, onSaved);
       s.onerror = () => showToast('Could not load the variation editor. Check the connection and try again.', { error: true });
       document.head.appendChild(s);
