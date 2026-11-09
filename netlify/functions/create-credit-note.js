@@ -18,6 +18,7 @@
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { creditNoteTotalIncGst } = require('./_shared/build-xero-credit-note-payload');
+const { logInvoiceEvent, moneyText } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -117,7 +118,8 @@ exports.handler = async (event) => {
     // company client, the client the invoice is billed to).
     const { data: clientType, error: typeErr } = await supabaseAdmin.rpc('invoice_client_type', { p_invoice_id: invoiceId });
     if (typeErr) throw typeErr;
-    if (creditNoteTotalIncGst(claimRows, clientType) < 0) {
+    const creditTotal = creditNoteTotalIncGst(claimRows, clientType);
+    if (creditTotal < 0) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'This credit note would be negative: the STC or BSTC credit taken back is more than the work credited. Taking back an STC credit is a new invoice, not a credit note.' }) };
     }
 
@@ -150,6 +152,10 @@ exports.handler = async (event) => {
       undo.added.push({ centreId: c.cost_centre_id, amount });
     }
     undo.creditNoteId = null; // done: nothing to take back from here on
+    await logInvoiceEvent(supabaseAdmin, {
+      invoiceId, kind: 'credit_note', actorId: user.id,
+      detail: `${moneyText(creditTotal)} inc GST${refund ? ', refunded' : ', left as account credit'}${reason ? `: ${String(reason).trim()}` : ''}`,
+    });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, creditNoteId: insertedCreditNote.id }) };
   } catch (err) {

@@ -11,6 +11,7 @@ const { getAdminClient } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
 const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -67,6 +68,7 @@ exports.handler = async (event) => {
           .from('invoices')
           .update({ paid_at: new Date().toISOString() })
           .eq('id', invoiceRow.id);
+        await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceRow.id, kind: 'paid', actorLabel: 'the pay online link', detail: 'Paid by card through the pay online link' });
         await regenerateInvoicePdf(invoiceRow.id); // remake the PDF so it carries the PAID stamp
 
         // Same deposit -> quote_approved advancement as xero-webhook.js -

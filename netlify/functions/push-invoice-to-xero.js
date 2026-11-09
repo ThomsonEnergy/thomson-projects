@@ -13,6 +13,7 @@
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { xeroRequest } = require('./_shared/xero-client');
 const { buildXeroInvoicePayload } = require('./_shared/build-xero-invoice-payload');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -23,7 +24,7 @@ exports.handler = async (event) => {
   if (!auth) {
     return { statusCode: 403, body: JSON.stringify({ error: 'Not authorized' }) };
   }
-  const { supabaseAdmin } = auth;
+  const { supabaseAdmin, user } = auth;
 
   try {
     const { invoiceId } = JSON.parse(event.body || '{}');
@@ -60,6 +61,7 @@ exports.handler = async (event) => {
         xero_invoice_status: xeroInvoice.Status,
       })
       .eq('id', invoiceId);
+    await logInvoiceEvent(supabaseAdmin, { invoiceId, kind: 'pushed_to_xero', actorId: user.id, detail: `Approved in Xero as ${invoice.invoice_number}` });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, invoiceId: xeroInvoice.InvoiceID, invoiceNumber: invoice.invoice_number }) };
   } catch (err) {

@@ -31,6 +31,7 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { computeDueDate } = require('./_shared/compute-due-date');
 const { priceInvoiceItems, commercialAgreementRow, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
 const { rateCardFor } = require('./_shared/rate-cards');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -376,6 +377,8 @@ exports.handler = async (event) => {
     // cached from invoice creation, and no Airwallex object ever gets
     // created for the (likely common) case of a client who just pays by
     // bank transfer and never clicks the button at all.
+
+    await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', actorId: user.id, detail: `${claimLabel || 'Invoice'}: ${claimRows.length} stage${claimRows.length === 1 ? '' : 's'}` });
 
     return {
       statusCode: 200,

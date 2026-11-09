@@ -1,5 +1,8 @@
 // POST /.netlify/functions/send-gmail
-// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId? }
+// Body: { to, cc, subject, bodyText, replyToThreadId?, attachments?, tagProjectId?, tagKind?, mailboxId?, draftId?,
+//         invoiceEvent? }
+//   invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } records the send in the invoice's history
+//                 (invoice_events, item 61) once Gmail has taken it, so the Invoices page shows it as sent
 //   mailboxId: send a new email from your own inbox (My inbox) instead of sales@
 //   draftId:   the draft this came from: marked sent, and removed from Gmail's drafts
 //   attachments: [{ bucket: 'email-attachments' | 'project-documents' | 'site-photos' (job photos only), path, name }]
@@ -16,10 +19,12 @@
 // not just in this app.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { PRICING_ROLES } = require('./_shared/require-pricing-role');
 const { GMAIL_MAILBOX } = require('./_shared/google-client');
 const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require('./_shared/mailboxes');
 const { signatureForUser } = require('./_shared/build-email-signature');
 const { sendRecordedEmail } = require('./_shared/send-recorded-email');
+const { logInvoiceEvent } = require('./_shared/invoice-events');
 
 const ALLOWED_BUCKETS = ['email-attachments', 'project-documents', 'site-photos'];
 const MAX_FILES = 10;
@@ -87,7 +92,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind, mailboxId, draftId } = JSON.parse(event.body || '{}');
+    const { to, cc, subject, bodyText, replyToThreadId, attachments: attachmentRefs, tagProjectId, tagKind, mailboxId, draftId, invoiceEvent } = JSON.parse(event.body || '{}');
     if (!to || !subject || !bodyText) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'to, subject and bodyText are required' }) };
     }
@@ -137,6 +142,12 @@ exports.handler = async (event) => {
     });
     thread = sentRec.thread;
     const nowIso = new Date().toISOString();
+
+    // the same rule as the table's own insert policy: pricing roles only (an unknown invoice id fails the
+    // foreign key and is logged, nothing else)
+    if (invoiceEvent && PRICING_ROLES.includes(auth.role) && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
+      await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceEvent.invoiceId, kind: invoiceEvent.kind, actorId: user.id, emailThreadId: thread.id, detail: `To ${String(to).slice(0, 200)}` });
+    }
 
     if (draftId && UUID.test(draftId)) {
       const { data: draft } = await supabaseAdmin.from('email_drafts').select('*').eq('id', draftId).eq('mailbox_id', mailbox.id).maybeSingle();

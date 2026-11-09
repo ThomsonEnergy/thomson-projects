@@ -4,8 +4,9 @@
 //   wireInvoiceNotesWrite(textarea, button, msgEl, args): the "Write from the site notes" button,
 //     used by the Invoice actual costs panel (js/project-invoice-actuals.js) and the panel below.
 //     args() returns { projectId, invoiceId?, lines? }.
-//   openInvoiceNotesPanel(invoice, project, onSaved): the invoice card's Notes button (project.html):
-//     edit and save invoices.notes, then remake the PDF when the invoice has one.
+//   openInvoiceNotesPanel(invoice, project, onSaved): the invoice panel's Notes button (js/invoice-actions.js):
+//     edit and save invoices.notes, record the change in the invoice's history (recordInvoiceEvent, when
+//     that script is loaded, and only when the text changed), then remake the PDF when the invoice has one.
 // Loaded on demand with loadJsOnce (js/supabase-client.js). Needs supabaseClient, escapeHtml,
 // friendlyError, generateClientPdf.
 
@@ -69,6 +70,10 @@ function openInvoiceNotesPanel(invoice, project, onSaved) {
       btn.textContent = 'Save';
       return;
     }
+    if (notes !== (invoice.notes || null) && typeof recordInvoiceEvent === 'function') {
+      await recordInvoiceEvent(invoice.id, 'notes', notes ? 'Work completed notes changed' : 'Work completed notes removed').catch(err => console.error(err));
+    }
+    invoice.notes = notes;
     // The PDF is a copy of the invoice page: remake it so it shows the new notes.
     if (invoice.pdf_path) {
       btn.textContent = 'Remaking the PDF...';
