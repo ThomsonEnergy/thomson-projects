@@ -28,8 +28,10 @@ function prebuildUnitPrice(prebuild, markupPercent) {
   return { labour: r2(labour), material: r2(material), materialCost: r2(materialCost) };
 }
 
-// items: [{ kind: 'material' | 'prebuild' | 'labour', materialId?, jobMaterialUsageId?, prebuildId?, quantity, unitPrice?, description?,
-//           staffId?, rateTierId?, timeEntryIds? }]
+// items: [{ kind: 'material' | 'prebuild' | 'labour' | 'custom', materialId?, jobMaterialUsageId?, prebuildId?, quantity, unitPrice?,
+//           unitCost?, description?, staffId?, rateTierId?, timeEntryIds? }]
+//   custom     a one-off material typed onto the invoice (item 63): not in Stock, not added to Stock; the
+//              typed price each (and cost each, for the job's margin) are the line, nothing is looked up
 // Resolves each against Stock / the prebuild library / the rate tiers and returns priced
 // rows ready for invoice_line_items (minus the invoice/claim ids), plus totals.
 // unitPrice, when given, is the sell price ex GST per unit the person typed
@@ -117,6 +119,20 @@ async function priceInvoiceItems(supabaseAdmin, items, markupPercent, rateFactor
       return {
         kind: 'material', material_id: m.id, prebuild_id: null,
         description: (item.description || m.name || 'Material').slice(0, 300), quantity: qty,
+        unit_cost: unitCost, unit_price: unitPrice, labour_amount: 0, material_amount: materialAmount, sort_order: i,
+      };
+    }
+    if (item.kind === 'custom') {
+      const description = String(item.description || '').trim().slice(0, 300);
+      if (!description) throw new Error('A one-off item needs a description.');
+      const unitPrice = override(item.unitPrice);
+      if (unitPrice == null || unitPrice < 0) throw new Error(`"${description}" needs a price each (0 or more).`);
+      const unitCost = Math.max(0, override(item.unitCost) ?? 0);
+      const materialAmount = r2(qty * unitPrice);
+      material += materialAmount;
+      return {
+        kind: 'custom', material_id: null, prebuild_id: null,
+        description, quantity: qty,
         unit_cost: unitCost, unit_price: unitPrice, labour_amount: 0, material_amount: materialAmount, sort_order: i,
       };
     }
