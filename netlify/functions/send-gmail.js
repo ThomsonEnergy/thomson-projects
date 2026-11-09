@@ -19,6 +19,7 @@
 // not just in this app.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
+const { PRICING_ROLES } = require('./_shared/require-pricing-role');
 const { GMAIL_MAILBOX } = require('./_shared/google-client');
 const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require('./_shared/mailboxes');
 const { signatureForUser } = require('./_shared/build-email-signature');
@@ -142,10 +143,10 @@ exports.handler = async (event) => {
     thread = sentRec.thread;
     const nowIso = new Date().toISOString();
 
-    // the same rule as the table's own insert policy: pricing roles only
-    if (invoiceEvent && ['admin', 'finance', 'sales'].includes(auth.role) && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
-      const { data: inv } = await supabaseAdmin.from('invoices').select('id').eq('id', invoiceEvent.invoiceId).maybeSingle();
-      if (inv) await logInvoiceEvent(supabaseAdmin, { invoiceId: inv.id, kind: invoiceEvent.kind, actorId: user.id, emailThreadId: thread.id, detail: `To ${String(to).slice(0, 200)}` });
+    // the same rule as the table's own insert policy: pricing roles only (an unknown invoice id fails the
+    // foreign key and is logged, nothing else)
+    if (invoiceEvent && PRICING_ROLES.includes(auth.role) && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
+      await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceEvent.invoiceId, kind: invoiceEvent.kind, actorId: user.id, emailThreadId: thread.id, detail: `To ${String(to).slice(0, 200)}` });
     }
 
     if (draftId && UUID.test(draftId)) {

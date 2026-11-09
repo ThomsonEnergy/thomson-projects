@@ -26,7 +26,7 @@
 
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
-const { logInvoiceEvent } = require('./invoice-events');
+const { logInvoiceEvents } = require('./invoice-events');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 const { entryHours } = require('./compute-labour-cost');
@@ -126,9 +126,11 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
     throw err;
   }
 
-  await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` });
   // approved online: the client lands on this invoice straight after accepting (quote.html), so it is sent
-  if (!approvedBy) await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', detail: 'Shown to the client on the quote approval page' });
+  await logInvoiceEvents(supabaseAdmin, [
+    { invoiceId: insertedInvoice.id, kind: 'created', actorId: approvedBy, actorLabel: approvedBy ? null : 'the quote approval', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` },
+    approvedBy ? null : { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', actorLabel: 'the quote approval', detail: 'Shown to the client on the quote approval page' },
+  ]);
   return invoiceToken;
 }
 

@@ -47,23 +47,21 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=126"></script>
-  <script src="/js/invoice-status.js?v=1"></script>
+  <script src="/js/supabase-client.js?v=127"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
-    // The accounts desk (item 61): the list decides what shows and in what order; the status words are
+    // The accounts desk (item 61): this page decides what shows and in what order; the status words are
     // js/invoice-status.js and every action is the invoice panel in js/invoice-actions.js (the same panel
-    // the job's Invoices tab opens).
-    let allInvoices = null;
-    // The panel and the email window load the first time a row is opened, so the list itself stays light.
-    const loadInvoiceActions = () => loadJsOnce('/js/email-compose.js?v=11', () => typeof openEmailComposer === 'function')
-      .then(() => loadJsOnce('/js/invoice-actions.js?v=1', () => typeof openInvoicePanel === 'function'));
-    const openInvoice = (id) => loadInvoiceActions().then(() => openInvoicePanel(id, { onChange: loadInvoices })).catch(err => showToast(friendlyError(err), { error: true }));
+    // the job's Invoices tab opens). Both load with the first paint (loadInvoiceActions, supabase-client.js).
+    // Every money figure on this page is the same number: invoices.balance_due (the invoice total inc GST,
+    // less STC credits and credit notes, get_invoice_balance_due), so the tiles, the Amount column and the
+    // client's invoice agree (M37).
+    let allInvoices = null, statuses = {};
     const params = new URLSearchParams(window.location.search);
     // ?id= (from the top bar search, or a link from a job) opens that invoice's panel over the full list
     const openInvoiceId = params.get('id');
     const FILTERS = [
-      ['needs_sending', 'Needs sending', (st) => st.unsent && st.key !== 'paid' && st.key !== 'credited'],
+      ['needs_sending', 'Needs sending', (st) => st.needsSending],
       ['awaiting', 'Awaiting payment', (st) => st.key === 'awaiting'],
       ['overdue', 'Overdue', (st) => st.key === 'overdue'],
       ['paid', 'Paid', (st) => st.key === 'paid' || st.key === 'credited'],
@@ -71,98 +69,71 @@
       ['all', 'All', () => true],
     ];
     // Opened from a search link or for one invoice: show everything, not just the unpaid
-    let filter = params.get('q') || openInvoiceId ? 'all' : 'needs_sending';
-
-    const sydneyToday = () => sydneyDateKey(new Date());
-    const isOverdue = (inv) => !inv.paid_at && !!inv.due_date && inv.due_date < sydneyToday();
-
-    // Every money figure on this page is the same number: the invoice total inc GST, less the STC credit
-    // (with GST for a company) and less credit notes, from get_invoice_balance_due, so Total, This month,
-    // the Amount column, Outstanding and Overdue all agree with each other and with the client's invoice (M37).
-    const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-    let invoiceTotals = {}; // invoice id -> that total, once the server has answered
+    let filter = (params.get('q') || openInvoiceId) ? 'all' : 'needs_sending';
     const invoiceProject = (inv) => inv.cost_centres?.projects || inv.projects;
-    function invoiceTotalFallback(inv) {
-      // the same sum calculate_balance_due does, before credit notes (used until the server answers, or if it cannot)
-      const sub = r2(Number(inv.labour_amount || 0) + Number(inv.material_amount || 0));
-      const project = invoiceProject(inv);
-      // each credit rounded on its own, the way get_invoice_balance_due and the Xero lines do (M25)
-      const incGst = (n) => (project?.clients?.client_type === 'company' ? r2(n * 1.10) : r2(n));
-      return r2(sub + r2(sub * 0.10) - incGst(Number(inv.stc_amount || 0)) - incGst(Number(inv.bstc_amount || 0)));
-    }
-    const invoiceTotal = (inv) => invoiceTotals[inv.id] ?? invoiceTotalFallback(inv);
-    // The server figure differs from the fallback only where a credit note exists, so only those invoices
-    // are asked for (one call each): a few hundred invoices with none would otherwise mean a call apiece on
-    // every visit.
-    async function loadInvoiceTotals(invoices) {
-      const out = {};
-      const need = invoices.filter(inv => (inv.credit_notes || []).length);
-      for (let i = 0; i < need.length; i += 20) {
-        await Promise.all(need.slice(i, i + 20).map(async (inv) => {
-          const { data: bal, error } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
-          if (!error && bal != null) out[inv.id] = Number(bal);
-        }));
-      }
-      return out;
+    const openInvoice = (id) => openInvoicePanel(id, { onChange: loadInvoices });
+
+    function setStats({ total, month, outstanding, overdue }) {
+      document.getElementById('stat-total').textContent = money(total);
+      document.getElementById('stat-month').textContent = money(month);
+      document.getElementById('stat-outstanding').textContent = money(outstanding);
+      document.getElementById('stat-overdue').textContent = money(overdue);
     }
 
     async function loadInvoices() {
       const listEl = document.getElementById('invoices-list');
-      const { data, error } = await supabaseClient
-        .from('invoices')
-        .select(`*, cost_centres(name, project_id, projects(id, name, job_number, client_name, clients(client_type))), projects(id, name, job_number, client_name, clients(client_type)), credit_notes(id), invoice_events(kind, detail, created_at, actor:profiles(full_name))`)
-        .order('sent_at', { ascending: false });
-
-      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+      let data;
+      try {
+        await loadInvoiceActions(); // the select below names INVOICE_STATUS_EMBED from js/invoice-status.js
+        ({ data } = await supabaseClient
+          .from('invoices')
+          .select(`id, invoice_number, description, labour_amount, material_amount, sent_at, due_date, paid_at, xero_invoice_id, cost_centre_id, project_id,
+            cost_centres(name, project_id, projects(id, name, job_number, client_name)), projects(id, name, job_number, client_name), ${INVOICE_STATUS_EMBED}`)
+          .order('sent_at', { ascending: false })
+          .then(r => { if (r.error) throw r.error; return r; }));
+      } catch (err) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
       if (!data.length) {
         listEl.innerHTML = `<p class="subtitle">No invoices raised yet. Create one from a job's Invoices tab.</p>`;
-        ['stat-total', 'stat-month', 'stat-outstanding', 'stat-overdue'].forEach(id => { document.getElementById(id).textContent = money(0); });
+        setStats({ total: 0, month: 0, outstanding: 0, overdue: 0 });
         return;
       }
 
+      // statuses once per load (not per keystroke); the filters, the tiles and the rows all read them
+      const today = sydneyDateKey(new Date());
       allInvoices = data;
-      invoiceTotals = {};
-      ['stat-total', 'stat-month', 'stat-outstanding', 'stat-overdue'].forEach(id => { document.getElementById(id).textContent = '...'; });
-      renderInvoiceList();
-
-      // the list shows straight away; the figures (and the Amount column) settle once the server has answered
-      invoiceTotals = await loadInvoiceTotals(data);
-      const thisMonthKey = sydneyToday().slice(0, 7);
-      let total = 0, thisMonth = 0, outstanding = 0, overdue = 0;
+      statuses = {};
+      const thisMonthKey = today.slice(0, 7);
+      const stats = { total: 0, month: 0, outstanding: 0, overdue: 0 };
       data.forEach(inv => {
-        const amount = invoiceTotal(inv);
-        total += amount;
-        if (inv.sent_at && sydneyDateKey(new Date(inv.sent_at)).slice(0, 7) === thisMonthKey) thisMonth += amount;
-        if (!inv.paid_at) {
-          outstanding += amount;
-          if (isOverdue(inv)) overdue += amount;
-        }
+        const st = statuses[inv.id] = invoiceStatus(inv, { today });
+        const amount = Number(inv.balance_due) || 0;
+        stats.total += amount;
+        if (inv.sent_at && sydneyDateKey(new Date(inv.sent_at)).slice(0, 7) === thisMonthKey) stats.month += amount;
+        if (st.key !== 'paid' && st.key !== 'credited') stats.outstanding += amount;
+        if (st.key === 'overdue') stats.overdue += amount;
       });
-      document.getElementById('stat-total').textContent = money(total);
-      document.getElementById('stat-month').textContent = money(thisMonth);
-      document.getElementById('stat-outstanding').textContent = money(outstanding);
-      document.getElementById('stat-overdue').textContent = money(overdue);
-      if (allInvoices === data) renderInvoiceList();
+      setStats(stats);
+      renderFilters();
+      renderInvoiceList();
     }
 
-    function renderFilters(statuses) {
+    function renderFilters() {
       const el = document.getElementById('invoice-filters');
       el.innerHTML = FILTERS.map(([key, label, test]) => {
         const n = allInvoices.filter(inv => test(statuses[inv.id])).length;
         return `<button type="button" class="settings-tab${filter === key ? ' active' : ''}" data-filter="${key}">${label} (${n})</button>`;
       }).join('');
-      el.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => { filter = btn.dataset.filter; renderInvoiceList(); }));
+      el.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', () => {
+        filter = btn.dataset.filter;
+        el.querySelectorAll('.settings-tab').forEach(b => b.classList.toggle('active', b === btn));
+        renderInvoiceList();
+      }));
     }
 
     function renderInvoiceList() {
       if (!allInvoices) return;
       const listEl = document.getElementById('invoices-list');
       const q = document.getElementById('invoice-search').value.trim().toLowerCase();
-      const today = sydneyToday();
-      const statuses = {};
-      allInvoices.forEach(inv => { statuses[inv.id] = invoiceStatus(inv, { today, balanceDue: invoiceTotal(inv) }); });
-      renderFilters(statuses);
-
       const test = FILTERS.find(f => f[0] === filter)[2];
       let rows = allInvoices.filter(inv => test(statuses[inv.id]));
       if (q) {
@@ -191,10 +162,10 @@
                 <tr class="invoice-row" data-id="${inv.id}" style="cursor:pointer;" title="Open this invoice">
                   <td data-label="Invoice"><strong>${escapeHtml(inv.invoice_number)}</strong>${inv.description ? `<div class="subtitle" style="font-size:11px; margin:0;">${escapeHtml(inv.description)}</div>` : ''}<div class="subtitle" style="font-size:11px; margin:0;">Dated ${escapeHtml(invoiceShortDate(inv.sent_at))}</div></td>
                   <td data-label="Job">${project ? `J${escapeHtml(project.job_number || '-')} ${escapeHtml(project.name)}${project.client_name ? `<div class="subtitle" style="font-size:11px; margin:0;">${escapeHtml(project.client_name)}</div>` : ''}` : '-'}</td>
-                  <td class="num" data-label="Amount">${money(invoiceTotal(inv))}</td>
+                  <td class="num" data-label="Amount">${money(inv.balance_due)}</td>
                   <td data-label="Status">
                     ${invoiceStatusChipHtml(st)}
-                    <div class="subtitle" style="font-size:11px; margin:2px 0 0;">${st.inXero ? 'In Xero' : 'Not in Xero'}${st.unsent && st.key === 'overdue' ? ' &middot; no send recorded' : ''}${st.reminders.length ? ` &middot; ${st.reminders.length} reminder${st.reminders.length === 1 ? '' : 's'}` : ''}${st.credited ? ' &middot; credit note' : ''}</div>
+                    <div class="subtitle" style="font-size:11px; margin:2px 0 0;">${st.inXero ? 'In Xero' : 'Not in Xero'}${st.noSendRecorded ? ' &middot; no send recorded' : ''}${st.reminders.length ? ` &middot; ${st.reminders.length} reminder${st.reminders.length === 1 ? '' : 's'}` : ''}${st.credited ? ' &middot; credit note' : ''}</div>
                   </td>
                   <td data-label="Last action" style="font-size:12px;">${escapeHtml(last) || '-'}</td>
                   <td data-label="Next" style="font-size:12px;">${escapeHtml(st.next) || '-'}</td>

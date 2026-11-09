@@ -14,8 +14,10 @@ create table if not exists public.invoice_events (
   detail text,
   email_thread_id uuid references public.email_threads(id) on delete set null,
   actor_id uuid references public.profiles(id) on delete set null,
+  actor_label text, -- what did it when nobody did: the quote approval, Xero, the pay online link
   created_at timestamptz not null default now()
 );
+alter table public.invoice_events add column if not exists actor_label text;
 create index if not exists invoice_events_invoice_idx on public.invoice_events (invoice_id, created_at);
 create index if not exists invoice_events_email_thread_idx on public.invoice_events (email_thread_id);
 create index if not exists invoice_events_actor_idx on public.invoice_events (actor_id);
@@ -31,10 +33,10 @@ create policy "Pricing roles add their own invoice events" on public.invoice_eve
 
 -- Backfill. Created: every invoice, at its created_at, by created_by (a deposit invoice is made by the
 -- approval, nobody in particular).
-insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
+insert into public.invoice_events (invoice_id, kind, detail, actor_id, actor_label, created_at)
 select i.id, 'created',
   case when i.is_deposit then 'Deposit invoice made when the quote was approved' else 'Invoice created' end,
-  i.created_by, i.created_at
+  i.created_by, case when i.is_deposit and i.created_by is null then 'the quote approval' end, i.created_at
 from public.invoices i
 where not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind = 'created');
 
@@ -59,8 +61,8 @@ where a.entity_type = 'project'
 
 -- A deposit the client approved online was shown to them straight after accepting (quote.html sends
 -- them to the invoice page), so it counts as sent. A deposit raised by a staff approval does not.
-insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
-select i.id, 'sent_elsewhere', 'Shown to the client on the quote approval page', null, i.created_at
+insert into public.invoice_events (invoice_id, kind, detail, actor_id, actor_label, created_at)
+select i.id, 'sent_elsewhere', 'Shown to the client on the quote approval page', null, 'the quote approval', i.created_at
 from public.invoices i
 join public.projects j on j.id = i.project_id
 left join public.projects q on q.id = j.source_quote_id
@@ -76,8 +78,55 @@ where i.xero_invoice_id is not null
   and not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind = 'pushed_to_xero');
 
 -- Paid: at paid_at. Which way (Xero or the pay online link) was not recorded before today.
-insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at)
-select i.id, 'paid', 'Payment recorded', null, i.paid_at
+insert into public.invoice_events (invoice_id, kind, detail, actor_id, actor_label, created_at)
+select i.id, 'paid', 'Payment recorded', null, 'the payment', i.paid_at
 from public.invoices i
 where i.paid_at is not null
   and not exists (select 1 from public.invoice_events e where e.invoice_id = i.id and e.kind = 'paid');
+
+-- Rows backfilled before actor_label existed (staging and production ran the first version by hand).
+update public.invoice_events set actor_label = 'the quote approval'
+  where actor_label is null and actor_id is null and ((kind = 'created' and detail like 'Deposit invoice%') or kind = 'sent_elsewhere');
+update public.invoice_events set actor_label = 'the payment' where actor_label is null and actor_id is null and kind = 'paid' and detail = 'Payment recorded';
+
+-- balance_due as a column on invoices (a PostgREST computed field): the one balance rule (inc GST, less
+-- STC credits and credit notes, get_invoice_balance_due) for the Invoices page, the job tab and the panel,
+-- selected like any column instead of one RPC per invoice.
+create or replace function public.balance_due(i public.invoices)
+returns numeric language sql stable security invoker set search_path = public as $$
+  select public.get_invoice_balance_due(i.id);
+$$;
+revoke execute on function public.balance_due(public.invoices) from public, anon;
+grant execute on function public.balance_due(public.invoices) to authenticated;
+
+-- One writer per fact: every history line is copied to the job's Activity tab by this trigger, so
+-- neither the browser nor the functions write activity_log for an invoice any more. Runs as the table
+-- owner so the copy always lands; nobody calls it directly.
+create or replace function public.invoice_events_to_activity_log()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_inv invoices%rowtype;
+  v_project uuid;
+  v_label text;
+begin
+  select * into v_inv from invoices where id = new.invoice_id;
+  if not found then return new; end if;
+  v_project := coalesce(v_inv.project_id, (select cc.project_id from cost_centres cc where cc.id = v_inv.cost_centre_id));
+  if v_project is null then return new; end if;
+  v_label := case new.kind
+    when 'created' then 'created' when 'edited' then 'edited' when 'emailed' then 'emailed to the client'
+    when 'reminder' then 'reminder sent' when 'sent_elsewhere' then 'sent another way' when 'pushed_to_xero' then 'pushed to Xero'
+    when 'paid' then 'paid' when 'credit_note' then 'credit note issued' when 'credit_note_pushed' then 'credit note pushed to Xero'
+    when 'notes' then 'notes changed' else new.kind end;
+  insert into activity_log (entity_type, entity_id, action, description, changed_by)
+  values ('project', v_project, 'invoice_' || new.kind,
+    'Invoice ' || v_inv.invoice_number || ' ' || v_label || coalesce(': ' || new.detail, '')
+      || case when new.actor_id is null and new.actor_label is not null then ' (by ' || new.actor_label || ')' else '' end,
+    new.actor_id);
+  return new;
+end;
+$$;
+revoke execute on function public.invoice_events_to_activity_log() from public, anon, authenticated;
+drop trigger if exists trg_invoice_events_activity on public.invoice_events;
+create trigger trg_invoice_events_activity after insert on public.invoice_events
+  for each row execute function public.invoice_events_to_activity_log();

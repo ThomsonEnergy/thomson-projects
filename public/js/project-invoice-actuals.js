@@ -449,7 +449,7 @@ async function openInvoiceActualCostsPanel(project) {
     ...c.labourRows.filter(r => r.source === 'added' && r.note).map(r => `Labour: ${r.note}`),
   ]).slice(0, 80);
   const notesWriteBtn = overlay.querySelector('#ia-notes-write-btn');
-  loadJsOnce('/js/invoice-notes.js?v=3', () => typeof wireInvoiceNotesWrite === 'function')
+  loadJsOnce('/js/invoice-notes.js?v=4', () => typeof wireInvoiceNotesWrite === 'function')
     .then(() => wireInvoiceNotesWrite(overlay.querySelector('#ia-notes'), notesWriteBtn, overlay.querySelector('#ia-notes-msg'), () => ({ projectId: project.id, lines: billedLines() })))
     .catch(() => { notesWriteBtn.disabled = true; });
 

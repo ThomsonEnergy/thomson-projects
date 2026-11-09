@@ -4,6 +4,8 @@
 
 const { getAdminClient, getAuthCheckClient } = require('./require-admin');
 
+const PRICING_ROLES = ['admin', 'finance', 'sales'];
+
 async function requirePricingRole(event) {
   const authHeader = event.headers.authorization || event.headers.Authorization || '';
   const token = authHeader.replace(/^Bearer\s+/i, '');
@@ -22,9 +24,9 @@ async function requirePricingRole(event) {
     .single();
 
   if (profileErr || !profile || !profile.active) return null;
-  if (!['admin', 'finance', 'sales'].includes(profile.role)) return null;
+  if (!PRICING_ROLES.includes(profile.role)) return null;
 
   return { supabaseAdmin, user: userData.user, role: profile.role };
 }
 
-module.exports = { requirePricingRole };
+module.exports = { requirePricingRole, PRICING_ROLES };

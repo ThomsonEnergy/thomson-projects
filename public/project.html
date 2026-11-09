@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=126"></script>
+  <script src="/js/supabase-client.js?v=127"></script>
   <script src="/js/template-questions.js?v=3"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
@@ -2986,7 +2986,6 @@
           });
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Could not create the invoice');
-          await logActivity('project', project.id, 'invoice_created', `Invoice ${data.invoiceNumber} created (${claims.length} stage${claims.length === 1 ? '' : 's'} claimed${chosenVars.length ? `, ${chosenVars.length} variation${chosenVars.length === 1 ? '' : 's'} included` : ''})`);
           autoGenerateInvoicePdf(data.invoiceId);
 
           const invoiceUrl = `${shareOrigin()}/invoice.html?token=${data.invoiceToken}`;
@@ -3052,9 +3051,8 @@
     // invoice panel in js/invoice-actions.js, the same panel the Invoices page opens, so the two can
     // never disagree. Each card shows the status in plain words (js/invoice-status.js), the last thing
     // that happened, an Open button, and how the invoice posts to Xero (xeroBreakdownHtml, the same
-    // one the Invoices page uses). Both scripts load with the tab (every job page a pricing role opens).
-    const loadInvoiceActions = () => loadJsOnce('/js/invoice-status.js?v=1', () => typeof invoiceStatus === 'function')
-      .then(() => loadJsOnce('/js/invoice-actions.js?v=1', () => typeof openInvoicePanel === 'function'));
+    // one the Invoices page uses). The scripts (loadInvoiceActions, supabase-client.js) come down the
+    // first time the tab is opened.
     // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
     // folder "ServiceM8 invoices"). Copies of what ServiceM8 already sent,
     // for reference: not invoices in the app, so they never touch Xero or
@@ -3097,24 +3095,20 @@
 
     async function loadJobInvoices(project) {
       const listEl = document.getElementById('job-invoices-list');
-      try { await loadInvoiceActions(); } catch (err) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
-      const [{ data: invoices, error }, { data: mappings }, { data: client }] = await Promise.all([
-        supabaseClient.from('invoices').select('*, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order)), credit_notes(id), invoice_events(kind, detail, created_at, actor:profiles(full_name))').eq('project_id', project.id).order('sent_at', { ascending: false }),
-        supabaseClient.from('xero_account_mapping').select('*'),
-        project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
-      ]);
-      if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+      let invoices, mappings, client;
+      try {
+        await loadInvoiceActions(); // the select below names INVOICE_STATUS_EMBED from js/invoice-status.js
+        [{ data: invoices }, { data: mappings }, { data: client }] = await Promise.all([
+          supabaseClient.from('invoices').select(`id, invoice_number, description, invoice_token, labour_amount, material_amount, stc_amount, bstc_amount, sent_at, due_date, paid_at, xero_invoice_id, cost_centre_id, cost_centres(name), invoice_claims(*, cost_centres(name, sort_order)), ${INVOICE_STATUS_EMBED}`).eq('project_id', project.id).order('sent_at', { ascending: false }).then(r => { if (r.error) throw r.error; return r; }),
+          supabaseClient.from('xero_account_mapping').select('*'),
+          project.client_id ? supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : Promise.resolve({ data: null }),
+        ]);
+      } catch (err) { listEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
       if (!invoices.length) { listEl.innerHTML = `<p class="subtitle">No invoices raised yet.</p>`; return; }
 
       const clientType = client?.client_type || 'individual';
-      // the balance (less credit notes) decides "Credited in full": only invoices with a credit note need it
-      const balances = {};
-      await Promise.all(invoices.filter(inv => (inv.credit_notes || []).length).map(async (inv) => {
-        const { data: bal, error: balErr } = await supabaseClient.rpc('get_invoice_balance_due', { p_invoice_id: inv.id });
-        if (!balErr && bal != null) balances[inv.id] = Number(bal);
-      }));
       listEl.innerHTML = invoices.map(inv => {
-        const status = invoiceStatus(inv, { balanceDue: balances[inv.id] });
+        const status = invoiceStatus(inv);
         const last = invoiceLastActionText(status);
         return `
         <div style="border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:14px;">
@@ -3134,11 +3128,13 @@
           <div style="margin-top:12px;">${xeroBreakdownHtml(inv, mappings, clientType)}</div>
         </div>`;
       }).join('');
-      // The panel reloads the page when it closes after a change: the claims card and progress bar on this page read the same invoices.
       listEl.querySelectorAll('.open-invoice-btn').forEach(btn => {
-        btn.addEventListener('click', () => openInvoicePanel(btn.dataset.invoiceId, { onChange: () => location.reload() }));
+        btn.addEventListener('click', () => openInvoicePanel(btn.dataset.invoiceId, { onChange: onInvoicePanelChange(project) }));
       });
     }
+    // After the panel: a money or Xero change reloads the page (the claims card and progress bar read
+    // the same invoices); an email, reminder or note only refreshes this tab.
+    const onInvoicePanelChange = (project) => ({ money }) => { if (money) location.reload(); else loadJobInvoices(project); };
 
     // Needs attention line on the Summary tab: shown until a certificate is
     // uploaded or a not-required reason is saved (both re-run initCcewSection).
@@ -4454,9 +4450,9 @@
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
                             <td data-label="Sent">${new Date(inv.sent_at).toLocaleDateString('en-AU')}</td>
                             <td data-label="">
-                              ${inv.paid_at ? `<span class="badge accepted">Paid</span>` : `<span class="badge sent" style="margin-right:6px;">Sent</span>`}
+                              ${inv.paid_at ? `<span class="badge accepted" style="margin-right:6px;">Paid</span>` : ''}${inv.xero_invoice_id ? `<span class="subtitle" style="font-size:11px; margin-right:6px;">In Xero</span>` : ''}
                               <a class="link-quiet" href="/invoice.html?token=${inv.invoice_token}" target="_blank" style="font-size:12px; margin-right:6px;">View</a>
-                              ${!inv.xero_invoice_id ? `<button class="secondary push-xero-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Push to Xero</button>` : `<span class="subtitle" style="font-size:11px;">In Xero</span>`}
+                              <button type="button" class="secondary open-invoice-btn" data-invoice-id="${inv.id}" style="font-size:12px; padding:6px 10px;">Open</button>
                             </td>
                           </tr>`).join('')}
                       </tbody>
@@ -4468,7 +4464,6 @@
                   ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Invoice next claim</button>` : ''}
                 </div>`;
               }).join('') : ''}
-              <div id="push-xero-msg"></div>
               `}
             </div>
 
@@ -4794,7 +4789,7 @@
       }
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
-      if (document.getElementById('job-invoices-list')) { loadJobInvoices(project); loadSm8Invoices(project.id); }
+      if (document.getElementById('job-invoices-list')) tabLoaders.invoices = () => { loadJobInvoices(project); loadSm8Invoices(project.id); };
       if (document.getElementById('variation-records-list')) loadVariations(project.id);
       loadJobTasks(project.id);
       initJobSearch(project, pricingVisible);
@@ -5079,21 +5074,11 @@
           lahaToggle.disabled = false;
         }
       });
-      document.querySelectorAll('.push-xero-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const msg = document.getElementById('push-xero-msg');
-          btn.disabled = true;
-          btn.textContent = 'Pushing...';
-          try {
-            await loadInvoiceActions();
-            await pushInvoiceToXero(btn.dataset.invoiceId);
-            location.reload();
-          } catch (err) {
-            if (msg) msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-            btn.disabled = false;
-            btn.textContent = 'Push to Xero';
-          }
-        });
+      // the Cost Centres tab's claims tables: Open is the same invoice panel as the Invoices tab (status, history, every action)
+      document.querySelectorAll('#panel-costcentres .open-invoice-btn').forEach(btn => {
+        btn.addEventListener('click', () => loadInvoiceActions()
+          .then(() => openInvoicePanel(btn.dataset.invoiceId, { onChange: onInvoicePanelChange(project) }))
+          .catch(err => alert(friendlyError(err))));
       });
 
       const editToggleBtn = document.getElementById('edit-toggle-btn');

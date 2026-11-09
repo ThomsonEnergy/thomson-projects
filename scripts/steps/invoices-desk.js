@@ -9,7 +9,7 @@ module.exports = async (page, { base, shot }) => {
   // 1. Needs sending shows the unsent invoice as Not sent
   if (!/Not sent/.test(await text('tr.invoice-row:has-text("SI9102") .badge'))) throw new Error('SI9102 should read Not sent');
 
-  // 5. Overdue shows the emailed invoice with its last action from the history
+  // 2. Overdue shows the emailed invoice with its last action from the history
   await page.click('#invoice-filters .settings-tab[data-filter="overdue"]');
   const overdueRow = page.locator('tr.invoice-row:has-text("SI9101")');
   if (!/Overdue \d+ day/.test(await overdueRow.locator('.badge').textContent())) throw new Error('SI9101 should read Overdue N days');
@@ -60,7 +60,7 @@ module.exports = async (page, { base, shot }) => {
   await shot('panel-paid-in-xero');
   await page.click('#ip-card #ip-close');
 
-  // 6. The job's Invoices tab shows the same words
+  // 5. The job's Invoices tab shows the same words
   await page.goto(`${base}/project.html?id=00000000-0000-4000-c000-000000000002&tab=invoices`, { waitUntil: 'load' });
   await page.waitForSelector('#job-invoices-list .open-invoice-btn', { timeout: 30000 });
   const tab = await text('#job-invoices-list');
@@ -70,4 +70,11 @@ module.exports = async (page, { base, shot }) => {
   await page.locator('#job-invoices-list .open-invoice-btn').first().click();
   await page.waitForSelector('#ip-card ol');
   await shot('job-panel');
+  await page.click('#ip-card #ip-close');
+  // the Cost Centres tab's claims table opens the same panel
+  await page.click('#job-tabs .settings-tab[data-panel="costcentres"]');
+  await page.locator('#panel-costcentres .open-invoice-btn').first().click();
+  await page.waitForSelector('#ip-card ol');
+  await shot('claims-table-panel');
+  await page.click('#ip-card #ip-close');
 };

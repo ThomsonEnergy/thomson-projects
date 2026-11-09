@@ -91,10 +91,10 @@ begin
   insert into public.invoices (id, project_id, description, invoice_number, labour_amount, material_amount, stc_amount, bstc_amount, claim_percent, sent_at, due_date, paid_at, xero_invoice_id, xero_invoice_status, is_deposit, created_by, created_at)
     values (v_inv3, v_project, 'Deposit', 'SI9103', 4000, 1000, 0, 0, 10, now() - interval '40 days', v_today - 33, now() - interval '30 days', 'test-xero-invoice-9103', 'PAID', true, null, now() - interval '40 days');
   insert into public.invoice_claims (invoice_id, cost_centre_id, labour_amount, material_amount, stc_amount, bstc_amount, claim_percent) values (v_inv3, v_centre, 4000, 1000, 0, 0, 10);
-  insert into public.invoice_events (invoice_id, kind, detail, actor_id, created_at) values
-    (v_inv3, 'created', 'Deposit invoice (10%) made when the quote was approved', null, now() - interval '40 days'),
-    (v_inv3, 'emailed', 'To bob@example.test', v_admin, now() - interval '39 days'),
-    (v_inv3, 'pushed_to_xero', 'Approved in Xero as SI9103', v_admin, now() - interval '38 days'),
-    (v_inv3, 'paid', 'Paid in Xero ($5500.00 received)', null, now() - interval '30 days');
+  insert into public.invoice_events (invoice_id, kind, detail, actor_id, actor_label, created_at) values
+    (v_inv3, 'created', 'Deposit invoice (10%) made when the quote was approved', null, 'the quote approval', now() - interval '40 days'),
+    (v_inv3, 'emailed', 'To bob@example.test', v_admin, null, now() - interval '39 days'),
+    (v_inv3, 'pushed_to_xero', 'Approved in Xero as SI9103', v_admin, null, now() - interval '38 days'),
+    (v_inv3, 'paid', 'Paid in Xero ($5,500.00 received)', null, 'Xero', now() - interval '30 days');
   update public.cost_centres set invoiced_amount = coalesce(invoiced_amount, 0) + 9500 where id = v_centre;
 end $$;

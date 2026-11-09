@@ -7080,6 +7080,13 @@ const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=2', () => typeof ope
 const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=2', () => typeof openStockScanPanel === 'function');
 const loadStockKinds = () => loadJsOnce('/js/stock-kinds.js?v=1', () => typeof stockKindGuess === 'function');
 const loadStockPanels = () => loadJsOnce('/js/stock-panels.js?v=1', () => typeof openStocktakePanel === 'function');
+// The invoice panel and its helpers (item 61): the Invoices page, the job's Invoices tab and the Invoice
+// actual costs panel. The three files do not depend on each other at load, so they come down together.
+const loadInvoiceActions = () => Promise.all([
+  loadJsOnce('/js/email-compose.js?v=11', () => typeof openEmailComposer === 'function'),
+  loadJsOnce('/js/invoice-status.js?v=1', () => typeof invoiceStatus === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=1', () => typeof openInvoicePanel === 'function'),
+]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
 const STOCK_BIG_BTN = 'min-height:44px; font-size:15px;';
@@ -7704,6 +7711,9 @@ const JOB_ACTIVITY_TABS = {
   po_created: 'pos',
   variation_logged: 'variations', variation_sent: 'variations', variation_recorded: 'variations', variation_approved: 'variations',
   invoice_created: 'invoices', invoice_edited: 'invoices', credit_note_created: 'invoices', sm8_invoice_deleted: 'invoices',
+  // one line per invoice history line (invoice_events, written by the database trigger, item 61)
+  invoice_emailed: 'invoices', invoice_reminder: 'invoices', invoice_sent_elsewhere: 'invoices', invoice_pushed_to_xero: 'invoices',
+  invoice_paid: 'invoices', invoice_credit_note: 'invoices', invoice_credit_note_pushed: 'invoices', invoice_notes: 'invoices',
 };
 const JOB_ACTIVITY_GROUP_GAP_MS = 30 * 60 * 1000;
 
@@ -7984,13 +7994,16 @@ function projectNumberOnly(project) {
 // fetched with both invoice_claims(*, cost_centres(name, sort_order)) and
 // cost_centres(name) embedded - nothing else is looked up externally, so
 // this works the same wherever an invoice is fetched from.
+// Each row carries the claim id (null for the legacy row) and the stage id, for the edit and credit
+// note panels (js/invoice-actions.js).
 function invoiceClaimRows(invoice) {
   if (invoice.invoice_claims && invoice.invoice_claims.length) {
     return invoice.invoice_claims.slice()
       .sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0))
-      .map(ic => ({ stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount, bstc_amount: ic.bstc_amount }));
+      .map(ic => ({ id: ic.id, cost_centre_id: ic.cost_centre_id, stageName: ic.cost_centres?.name || 'Stage', labour_amount: ic.labour_amount, material_amount: ic.material_amount, stc_amount: ic.stc_amount, bstc_amount: ic.bstc_amount }));
   }
   return [{
+    id: null, cost_centre_id: invoice.cost_centre_id || null,
     stageName: invoice.cost_centres?.name || invoice.description || 'Invoice',
     labour_amount: invoice.labour_amount, material_amount: invoice.material_amount, stc_amount: invoice.stc_amount, bstc_amount: invoice.bstc_amount,
   }];

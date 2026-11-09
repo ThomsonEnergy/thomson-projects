@@ -68,7 +68,7 @@ exports.handler = async (event) => {
           .from('invoices')
           .update({ paid_at: new Date().toISOString() })
           .eq('id', invoiceRow.id);
-        await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceRow.id, kind: 'paid', detail: 'Paid by card through the pay online link' });
+        await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceRow.id, kind: 'paid', actorLabel: 'the pay online link', detail: 'Paid by card through the pay online link' });
         await regenerateInvoicePdf(invoiceRow.id); // remake the PDF so it carries the PAID stamp
 
         // Same deposit -> quote_approved advancement as xero-webhook.js -

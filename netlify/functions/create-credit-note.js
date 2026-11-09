@@ -18,7 +18,7 @@
 
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { creditNoteTotalIncGst } = require('./_shared/build-xero-credit-note-payload');
-const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { logInvoiceEvent, moneyText } = require('./_shared/invoice-events');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -154,7 +154,7 @@ exports.handler = async (event) => {
     undo.creditNoteId = null; // done: nothing to take back from here on
     await logInvoiceEvent(supabaseAdmin, {
       invoiceId, kind: 'credit_note', actorId: user.id,
-      detail: `$${creditTotal.toFixed(2)} inc GST${refund ? ', refunded' : ', left as account credit'}${reason ? `: ${String(reason).trim()}` : ''}`,
+      detail: `${moneyText(creditTotal)} inc GST${refund ? ', refunded' : ', left as account credit'}${reason ? `: ${String(reason).trim()}` : ''}`,
     });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, creditNoteId: insertedCreditNote.id }) };
