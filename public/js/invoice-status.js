@@ -31,6 +31,8 @@ const INVOICE_EVENT_LABELS = {
   interest_on: 'Interest charging turned on',
   interest_off: 'Interest charging turned off',
   interest_charged: 'Interest invoiced',
+  quote_lines_on: 'Quoted lines shown',
+  quote_lines_off: 'Quoted lines hidden',
 };
 const INVOICE_SENT_KINDS = ['emailed', 'sent_elsewhere'];
 // one formatter each: toLocaleDateString with a timeZone builds a new one per call (40x dearer on a long list)

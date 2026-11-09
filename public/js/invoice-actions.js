@@ -108,6 +108,8 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     const isInterestInvoice = !!inv.interest_of_invoice_id || Number(inv.interest_amount) > 0;
     const canEdit = !inv.xero_invoice_id && !inv.paid_at && !!project && !isInterestInvoice;
     const accrued = Number(inv.interest_accrued) || 0, interestDays = Number(inv.interest_days) || 0, daily = Number(inv.interest_daily) || 0;
+    // a claim against a quoted stage (item 67): the client's invoice can list the stage's quoted lines
+    const isClaimInvoice = !isInterestInvoice && !inv.is_deposit && (inv.invoice_claims || []).length > 0 && !(inv.invoice_line_items || []).length;
     const clientType = (project && project.clients && project.clients.client_type) || 'individual';
     const why = [];
     if (!canEdit) why.push(isInterestInvoice ? 'Edit is off: an interest invoice is one fixed amount. If it is wrong, void it in Xero; credit notes here are for claims.' : inv.xero_invoice_id ? 'Edit is off: this invoice is in Xero. Changes go through a credit note.' : inv.paid_at ? 'Edit is off: this invoice is paid.' : 'Edit is off: this invoice has no job.');
@@ -143,7 +145,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
         </label>
         ${inv.interest_enabled ? `
         <p class="subtitle" style="font-size:13px; margin:8px 0 0;">${accrued > 0
-          ? `Interest accrued: <strong style="color:var(--text);">${money(accrued)}</strong> ${inv.paid_at ? `to the payment date (${escapeHtml(invoiceShortDate(inv.paid_at))})` : 'to today'}: ${interestDays} day${interestDays === 1 ? '' : 's'} at ${money(daily)} a day${inv.interest_from ? `, counting from ${escapeHtml(invoiceShortDate(inv.interest_from))}` : ''}. Charging it makes a separate interest invoice, so this invoice and Xero stay as they are.`
+          ? `Interest accrued: <strong style="color:var(--text);">${money(accrued)}</strong> ${inv.paid_at ? `to the payment date (${escapeHtml(invoiceShortDate(inv.paid_at))})` : 'to today'}: ${interestDays} day${interestDays === 1 ? '' : 's'} at ${money(daily)} a day${inv.interest_from ? `, counting from ${escapeHtml(invoiceShortDate(inv.interest_from))}` : ''}. Charging it makes a separate interest invoice, so this invoice and Xero stay as they are. Pay online charges the balance plus this interest and makes the interest invoice by itself.`
           : (inv.paid_at ? 'Paid before any interest accrued.' : status.key === 'overdue' ? 'No interest accrued yet.' : 'Nothing accrues until the day after the due date.')}</p>
         ${accrued >= 0.01 ? `
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
@@ -151,6 +153,12 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
           <button type="button" class="secondary" id="ip-interest-waive" style="${INVOICE_BTN}">Waive ${money(accrued)}${inv.paid_at ? '' : ' and turn off'}</button>
         </div>` : ''}` : ''}
       </div>` : ''}
+      ${isClaimInvoice ? `
+      <label style="display:flex; align-items:center; gap:8px; margin:0 0 12px; font-weight:400; flex-wrap:wrap;">
+        <input type="checkbox" id="ip-quote-lines" ${inv.show_quote_lines ? 'checked' : ''} style="width:auto;" />
+        <strong>Quoted lines on the client's invoice</strong>
+        <span class="subtitle" style="font-size:12px;">${inv.show_quote_lines ? 'The client sees each quoted line under the stage, then this claim.' : 'The client sees the stage as one line.'}</span>
+      </label>` : ''}
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         ${!inv.paid_at ? `<button type="button" id="ip-email" style="${INVOICE_BTN}">${status.sentAt ? 'Email again' : 'Email to client'}</button>` : ''}
         ${!inv.paid_at && (status.sentAt || status.key === 'overdue') ? `<button type="button" class="secondary" id="ip-remind" style="${INVOICE_BTN}">Send reminder</button>` : ''}
@@ -207,6 +215,17 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
           : (accrued > 0 ? waivedText : 'Turned off'), !enabled && accrued > 0);
         afterChange(false);
       } catch (err) { fail(err); interestTick.checked = !enabled; interestTick.disabled = false; }
+    });
+    const quoteTick = card.querySelector('#ip-quote-lines');
+    if (quoteTick) quoteTick.addEventListener('change', async (e) => {
+      const on = e.target.checked;
+      quoteTick.disabled = true;
+      try {
+        const { error } = await supabaseClient.from('invoices').update({ show_quote_lines: on }).eq('id', inv.id);
+        if (error) throw new Error(`Could not save: ${error.message}`);
+        await recordInvoiceEvent(inv.id, on ? 'quote_lines_on' : 'quote_lines_off', null);
+        afterChange(false);
+      } catch (err) { fail(err); quoteTick.checked = !on; quoteTick.disabled = false; }
     });
     const waiveBtn = card.querySelector('#ip-interest-waive');
     if (waiveBtn) waiveBtn.addEventListener('click', call(waiveBtn, 'Waiving...', () => setInterest(false, waivedText, true), false));

@@ -11,9 +11,7 @@
 // See update-invoice-in-xero.js for re-sending edits after this.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { xeroRequest } = require('./_shared/xero-client');
-const { buildXeroInvoicePayload } = require('./_shared/build-xero-invoice-payload');
-const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { pushInvoiceToXero } = require('./_shared/push-invoice-to-xero');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -32,38 +30,12 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'invoiceId is required' }) };
     }
 
-    const { invoice, contactId, reference, lineItems, date, dueDate } = await buildXeroInvoicePayload(supabaseAdmin, invoiceId);
-    if (invoice.xero_invoice_id) {
+    const { data: existing } = await supabaseAdmin.from('invoices').select('xero_invoice_id').eq('id', invoiceId).maybeSingle();
+    if (existing && existing.xero_invoice_id) {
       return { statusCode: 400, body: JSON.stringify({ error: 'This invoice has already been pushed to Xero - use update-invoice-in-xero to push edits instead.' }) };
     }
-
-    const result = await xeroRequest('accounting', 'Invoices', {
-      method: 'POST',
-      body: {
-        Invoices: [{
-          Type: 'ACCREC',
-          Contact: { ContactID: contactId },
-          LineItems: lineItems,
-          Reference: reference,
-          InvoiceNumber: invoice.invoice_number,
-          Date: date,
-          DueDate: dueDate,
-          Status: 'AUTHORISED',
-        }],
-      },
-    });
-
-    const xeroInvoice = result.Invoices[0];
-    await supabaseAdmin
-      .from('invoices')
-      .update({
-        xero_invoice_id: xeroInvoice.InvoiceID,
-        xero_invoice_status: xeroInvoice.Status,
-      })
-      .eq('id', invoiceId);
-    await logInvoiceEvent(supabaseAdmin, { invoiceId, kind: 'pushed_to_xero', actorId: user.id, detail: `Approved in Xero as ${invoice.invoice_number}` });
-
-    return { statusCode: 200, body: JSON.stringify({ ok: true, invoiceId: xeroInvoice.InvoiceID, invoiceNumber: invoice.invoice_number }) };
+    const { xeroInvoiceId, invoiceNumber } = await pushInvoiceToXero(supabaseAdmin, invoiceId, { actorId: user.id });
+    return { statusCode: 200, body: JSON.stringify({ ok: true, invoiceId: xeroInvoiceId, invoiceNumber }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };

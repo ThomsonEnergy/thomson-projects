@@ -8,7 +8,10 @@
 // Creates the Airwallex payment link the first time it's actually needed
 // - when the client clicks "Pay online" - rather than at invoice creation
 // time. Two reasons: the amount is computed fresh at the moment of the
-// click via get_invoice_balance_due(), so it can never go stale even if
+// click via get_invoice_balance_due() plus the late payment interest accrued
+// to today when the invoice's Charge interest toggle is on (item 68: the
+// client pays one figure, Total to pay today, and the webhook turns the
+// interest part into its own invoice), so it can never go stale even if
 // something about the invoice changes later; and no Airwallex object
 // ever gets created for a client who just pays by bank transfer and
 // never clicks the button.
@@ -36,7 +39,7 @@ exports.handler = async (event) => {
 
     const { data: invoice, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, invoice_number, description, paid_at, airwallex_payment_link_url, airwallex_link_amount, cost_centres(name, projects(job_number))')
+      .select('id, invoice_number, description, paid_at, airwallex_payment_link_url, airwallex_link_amount, interest_enabled, interest_accrued, interest_days, cost_centres(name, projects(job_number)))')
       .eq('invoice_token', token)
       .maybeSingle();
     if (invErr || !invoice) {
@@ -48,7 +51,8 @@ exports.handler = async (event) => {
 
     const { data: amount, error: balanceErr } = await supabaseAdmin.rpc('get_invoice_balance_due', { p_invoice_id: invoice.id });
     if (balanceErr) throw balanceErr;
-    const due = Math.round(Number(amount) * 100) / 100;
+    const interest = invoice.interest_enabled ? Math.round((Number(invoice.interest_accrued) || 0) * 100) / 100 : 0;
+    const due = Math.round((Number(amount) + interest) * 100) / 100;
 
     // Already generated on an earlier click for this same amount - hand back the same one.
     if (invoice.airwallex_payment_link_url && Number(invoice.airwallex_link_amount) === due) {
@@ -70,7 +74,9 @@ exports.handler = async (event) => {
         title,
         reusable: false,
         reference: invoice.invoice_number,
-        description: `Invoice ${invoice.invoice_number}`,
+        description: interest > 0
+          ? `Invoice ${invoice.invoice_number} incl. late payment interest $${interest.toFixed(2)} (${invoice.interest_days} day${Number(invoice.interest_days) === 1 ? '' : 's'})`
+          : `Invoice ${invoice.invoice_number}`,
       },
     });
 
