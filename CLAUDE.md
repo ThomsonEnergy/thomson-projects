@@ -8,6 +8,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
 
 - Never use em dashes, anywhere: chat, code, comments, docs, commit messages. Use commas, colons or brackets.
 - Short and concise.
+- **Simple for the people using it (owner's rule from 9 Nov 2026).** Every plan makes the app simpler for the people on it and leaves no room for human error: the right thing happens by itself (a sensible default, an automatic step, one obvious path) rather than a switch, a reminder or a second way of doing it that someone has to know about. A plan that still adds a toggle or a manual step says why it cannot be automatic. Prefer removing a step over adding a screen.
 - Numbers over names everywhere: J, Q, PO, SI numbers, migration numbers.
 - State the plan and wait for "yes" / "let's build" before building.
 - **Plan mode: name the best model and effort.** Every plan (plan mode, or any "here is the plan, yes?" reply) ends with one line: `Best model: <name>, effort <level>, because <one reason>`, and whether to switch with `/model` and `/effort <level>` before saying yes (in cloud sessions type `/effort high`, the slider does not open). Pick by the job, not the question's length:
@@ -22,6 +23,7 @@ TEops: the live operations app for Thomson Energy Australia (electrical and sola
   - `Kind:` bug fix (straight into `main`) or feature (into `staging`); migration yes or no; money, stock, RLS or payroll yes or no (then a backup before the production migration).
   - `Size:` small (under an hour), medium (a morning) or large (a day or more).
   - `Test on staging:` which login to use and the three or four clicks that show it working; anything that needs a key on the staging site (AI, Xero, Gmail).
+  - `Simpler:` what a person no longer has to do, remember or check after this build, and any toggle or manual step the plan still adds, with why it cannot be automatic.
   - `Best model: <name>, effort <level>, because <one reason>` (the line described above).
   The same `Touches:` line goes in the `docs/IDEAS_BACKLOG.md` item when the plan is written up, so other chats can see the overlap before a branch exists.
 - After that "yes", carry the whole plan through without asking again: build, push, open the PR. A bug fix then goes all the way (production migration, merge to `main`); a feature merges into `staging` once it is whole and waits there for release night (see "Releases" below). Only stop and ask the owner if there is a real question or a change of direction (new scope, a different migration, deleting data not in the plan, or a failure that changes the plan).
