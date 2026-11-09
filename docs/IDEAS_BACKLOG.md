@@ -1352,7 +1352,7 @@ Owner, 9 Nov 2026: "On the job page have sub folders like quote do with the stag
 
 Touches: `public/projects.html` only (the tab row, the filter, the remembered folder; no new inline code elsewhere), `docs/PROJECT_SPEC.md` (the Jobs page paragraph). Overlaps: PR 319 (job PO share) bumps the `supabase-client.js?v=` line in `projects.html`, one line, merges clean; no other unmerged branch on `staging` and nothing waiting on yes touches `projects.html` (item 47, job merge, hides merged rows there, not yet yes). Kind: feature (into `staging`, a weekday); migration no; money no (display only), stock no, RLS no, payroll no. Size: small (under an hour). Test on staging: admin@staging.test, Jobs page, the six clicks above; no keys needed. Best model: Sonnet 5.5, effort medium, because it is a one-file front-end change copying a pattern the Quotes page already has.
 
-## 66. simPRO quote into a TEops job (idea 9 Nov 2026, waiting on the owner's yes)
+## 69. simPRO quote into a TEops job (idea 9 Nov 2026, waiting on the owner's yes; was numbered 66 for a few hours, 66 is the interest item)
 
 Owner, 9 Nov 2026: "Is there a way to get a quote out of simPRO and fill out a job in TEops with the quote data?" Yes. TEops already does this for ServiceM8 (spec A27): a review screen shows each quote or job as it would come across (client match, site, name, lines, quoted amount), the admin ticks the rows, and `sm8-import-jobs.js` makes the job the same way an approved quote does (one stage, labour lines on the matching rate tier at sell, materials at cost, the markup worked out so the stage sells for exactly the quoted figure, `stageFromLines`). A simPRO import is that same screen fed from simPRO instead. Two ways in, cheapest first:
 
