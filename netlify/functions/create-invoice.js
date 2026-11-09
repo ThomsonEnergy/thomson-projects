@@ -241,7 +241,8 @@ exports.handler = async (event) => {
     } else if (isFinalClaim) {
       claimLabel = 'Final claim';
     } else {
-      const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId);
+      // an interest invoice (item 66) is not a claim, so it does not count
+      const { data: priorInvoices } = await supabaseAdmin.from('invoices').select('description').eq('project_id', projectId).is('interest_of_invoice_id', null);
       // Claims invoiced before the job came across from ServiceM8 count too (cost_centres.imported_claims, item 45).
       const { data: importedRows } = await supabaseAdmin.from('cost_centres').select('imported_claims').eq('project_id', projectId);
       const importedCount = (importedRows || []).reduce((n, c) => n + (Array.isArray(c.imported_claims) ? c.imported_claims.length : 0), 0);

@@ -1369,7 +1369,7 @@ Owner, 9 Nov 2026: a toggle on the invoice so that, when it is turned on for tha
 4. **Paid without the interest:** the accrual stops at the payment date; the panel shows it with Raise interest invoice (chase it as its own invoice) and Waive (turn off, history line "Interest waived $X").
 5. One rule for the sum: `interest_days`, `interest_daily` and `interest_accrued` are computed columns on `invoices`, read by the Invoices page, the panel, the reminder, the client's page and `raise-interest-invoice.js`.
 
-Not built: automatic reminders or automatic charging, compounding, a per-invoice rate (the toggle can carry one later if wanted).
+Not built: automatic reminders or automatic charging, compounding, a per-invoice rate (the toggle can carry one later if wanted), cancelling an interest invoice from TEops (if one is wrong, void it in Xero; Raise asks before it makes one).
 
 Done means (staging, admin@staging.test): (1) Invoices > SI9101 (overdue) > Charge interest on: the accrual line shows days at the daily figure, history "Interest charging turned on", the list row shows "+ $X interest accruing"; (2) Send reminder: the email quotes the interest to today, the daily figure and the total if paid today; (3) Raise interest invoice: a new invoice "Interest on SI9101: N days to d Mon at 21% pa" appears, GST free, with Push to Xero, SI9101's accrual restarts; (4) Waive: history "Interest waived $X", the toggle is off, the row stops showing interest; (5) Settings > Late payment interest %, 21 to 20: the accrual changes to match.
 

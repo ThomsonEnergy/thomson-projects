@@ -21,7 +21,7 @@
 // js/invoice-notes.js when Notes is pressed.
 
 const INVOICE_PANEL_PROJECT = 'projects(id, name, job_number, quote_number, client_name, client_email, client_id, clients(client_type))';
-const INVOICE_PANEL_SELECT = `*, balance_due, interest_accrued, interest_days, interest_daily, interest_of:invoices!invoices_interest_of_invoice_id_fkey(invoice_number, id), cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_line_items(id), invoice_events(*, actor:profiles(full_name))`;
+const INVOICE_PANEL_SELECT = `*, balance_due, interest_accrued, interest_days, interest_daily, cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_line_items(id), invoice_events(*, actor:profiles(full_name))`;
 const INVOICE_BTN = 'font-size:12px; padding:6px 10px;';
 const loadInvoiceNotes = () => loadJsOnce('/js/invoice-notes.js?v=4', () => typeof openInvoiceNotesPanel === 'function');
 
@@ -93,6 +93,8 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       const [{ data, error }, [mappingsRes, myRole, settingsRes]] = await Promise.all([supabaseClient.from('invoices').select(INVOICE_PANEL_SELECT).eq('id', invoiceId).single(), fixed]);
       if (error) throw error;
       inv = data; mappings = mappingsRes.data || []; role = myRole;
+      // the invoice an interest invoice charges: a self reference, so it is read on its own rather than embedded
+      inv.interest_of = inv.interest_of_invoice_id ? (await supabaseClient.from('invoices').select('id, invoice_number').eq('id', inv.interest_of_invoice_id).maybeSingle()).data : null;
       rate = Number(settingsRes.data && settingsRes.data.late_interest_rate_pct);
       if (!(rate >= 0)) rate = 21;
     } catch (err) {
@@ -108,8 +110,8 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     const accrued = Number(inv.interest_accrued) || 0, interestDays = Number(inv.interest_days) || 0, daily = Number(inv.interest_daily) || 0;
     const clientType = (project && project.clients && project.clients.client_type) || 'individual';
     const why = [];
-    if (!canEdit) why.push(isInterestInvoice ? 'Edit is off: an interest invoice is one fixed amount. Credit it instead.' : inv.xero_invoice_id ? 'Edit is off: this invoice is in Xero. Changes go through a credit note.' : inv.paid_at ? 'Edit is off: this invoice is paid.' : 'Edit is off: this invoice has no job.');
-    if (inv.xero_invoice_id && !canIssueCreditNote) why.push('Issue credit note: Finance and Admin only.');
+    if (!canEdit) why.push(isInterestInvoice ? 'Edit is off: an interest invoice is one fixed amount. If it is wrong, void it in Xero; credit notes here are for claims.' : inv.xero_invoice_id ? 'Edit is off: this invoice is in Xero. Changes go through a credit note.' : inv.paid_at ? 'Edit is off: this invoice is paid.' : 'Edit is off: this invoice has no job.');
+    if (inv.xero_invoice_id && !canIssueCreditNote && !isInterestInvoice) why.push('Issue credit note: Finance and Admin only.');
     if (inv.paid_at) why.push('Paid: no more emails or reminders from here.');
     if (status.noSendRecorded) why.push('No send is recorded for this invoice. If it went out another way, press Sent another way so the history is right.');
 
@@ -154,7 +156,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
         ${!inv.paid_at && (status.sentAt || status.key === 'overdue') ? `<button type="button" class="secondary" id="ip-remind" style="${INVOICE_BTN}">Send reminder</button>` : ''}
         ${!inv.xero_invoice_id ? `<button type="button" class="secondary" id="ip-push" style="${INVOICE_BTN}">Push to Xero</button>` : ''}
         <button type="button" class="secondary" id="ip-edit" style="${INVOICE_BTN}" ${canEdit ? '' : 'disabled title="See the note below"'}>Edit</button>
-        ${inv.xero_invoice_id && canIssueCreditNote ? `<button type="button" class="secondary" id="ip-credit" style="${INVOICE_BTN}">Issue credit note</button>` : ''}
+        ${inv.xero_invoice_id && canIssueCreditNote && !isInterestInvoice ? `<button type="button" class="secondary" id="ip-credit" style="${INVOICE_BTN}">Issue credit note</button>` : ''}
         ${project ? `<button type="button" class="secondary" id="ip-notes" style="${INVOICE_BTN}">Notes</button>` : ''}
         ${inv.pdf_path ? `<button type="button" class="secondary" id="ip-pdf" style="${INVOICE_BTN}">View PDF</button>` : ''}
         <button type="button" class="secondary" id="ip-make-pdf" style="${INVOICE_BTN}">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
@@ -186,8 +188,12 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     on('#ip-email', (e) => emailInvoiceToClient(inv.id, project, { btn: e.currentTarget, msgEl: msg, invoice: inv, status, interestRate: rate, onSent: () => afterChange(false) }));
     on('#ip-remind', (e) => emailInvoiceToClient(inv.id, project, { btn: e.currentTarget, msgEl: msg, invoice: inv, status, interestRate: rate, reminder: true, onSent: () => afterChange(false) }));
     // Charge interest, this invoice only (item 66): the switch is saved on the invoice and in its history
-    const setInterest = async (enabled, detail) => {
-      const { error } = await supabaseClient.from('invoices').update({ interest_enabled: enabled }).eq('id', inv.id);
+    // Waiving also moves the accrual start to tomorrow, so the waived days do not come back if it is turned on again.
+    const sydneyPlus = (key, n) => new Date(Date.parse(`${key}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+    const waivedText = `Interest waived: ${money(accrued)} for ${interestDays} day${interestDays === 1 ? '' : 's'}`;
+    const setInterest = async (enabled, detail, waive) => {
+      const change = waive ? { interest_enabled: false, interest_from: sydneyPlus(sydneyDateKey(new Date()), 1) } : { interest_enabled: enabled };
+      const { error } = await supabaseClient.from('invoices').update(change).eq('id', inv.id);
       if (error) throw new Error(`Could not save: ${error.message}`);
       await recordInvoiceEvent(inv.id, enabled ? 'interest_on' : 'interest_off', detail);
     };
@@ -197,18 +203,21 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       interestTick.disabled = true;
       try {
         await setInterest(enabled, enabled
-          ? `${rate}% pa from ${invoiceShortDate(inv.interest_from || inv.due_date)}${inv.interest_from ? '' : ' (the day after the due date)'}`
-          : (accrued > 0 ? `Interest waived: ${money(accrued)} for ${interestDays} day${interestDays === 1 ? '' : 's'}` : 'Turned off'));
+          ? `${rate}% pa from ${invoiceShortDate(inv.interest_from || sydneyPlus(inv.due_date, 1))}${inv.interest_from ? '' : ' (the day after the due date)'}`
+          : (accrued > 0 ? waivedText : 'Turned off'), !enabled && accrued > 0);
         afterChange(false);
       } catch (err) { fail(err); interestTick.checked = !enabled; interestTick.disabled = false; }
     });
     const waiveBtn = card.querySelector('#ip-interest-waive');
-    if (waiveBtn) waiveBtn.addEventListener('click', call(waiveBtn, 'Waiving...', () => setInterest(false, `Interest waived: ${money(accrued)} for ${interestDays} day${interestDays === 1 ? '' : 's'}`), false));
+    if (waiveBtn) waiveBtn.addEventListener('click', call(waiveBtn, 'Waiving...', () => setInterest(false, waivedText, true), false));
     const raiseBtn = card.querySelector('#ip-interest-raise');
-    if (raiseBtn) raiseBtn.addEventListener('click', call(raiseBtn, 'Raising...', async () => {
-      const d = await emailPostFn('raise-interest-invoice', { invoiceId: inv.id }, 'Could not raise the interest invoice');
-      showToast(`${d.invoiceNumber} raised for ${money(d.amount)}: push it to Xero and email it from its own row`);
-    }, true));
+    if (raiseBtn) raiseBtn.addEventListener('click', (e) => {
+      if (!confirm(`Raise a separate interest invoice for ${money(accrued)} (${interestDays} day${interestDays === 1 ? '' : 's'})? It is then pushed to Xero and emailed from its own row.`)) return;
+      call(raiseBtn, 'Raising...', async () => {
+        const d = await emailPostFn('raise-interest-invoice', { invoiceId: inv.id }, 'Could not raise the interest invoice');
+        showToast(`${d.invoiceNumber} raised for ${money(d.amount)}: push it to Xero and email it from its own row`);
+      }, true)(e);
+    });
     const pushBtn = card.querySelector('#ip-push');
     if (pushBtn) pushBtn.addEventListener('click', call(pushBtn, 'Pushing...', async () => { const data = await pushInvoiceToXero(inv.id); showToast(`Pushed ${data.invoiceNumber} to Xero`); }, true));
     // A do-and-charge invoice (it has line items) reopens the Invoice actual costs panel with its lines (item 64);
@@ -274,7 +283,7 @@ async function emailInvoiceToClient(invoiceId, project, { btn, msgEl, reminder =
       // interest accruing (item 66): the figure to today, the daily figure and the total if paid today
       const accrued = inv.interest_enabled ? Number(inv.interest_accrued) || 0 : 0;
       const interestNote = accrued > 0
-        ? `\n\nUnder our terms, interest accrues on overdue amounts at ${interestRate != null ? interestRate : 21}% per annum, calculated daily. On this invoice it is ${money(accrued)} to today (${Number(inv.interest_days) || 0} days) and ${money(Number(inv.interest_daily) || 0)} for each further day${inv.balance_due != null ? `, so ${money(Number(inv.balance_due) + accrued)} clears it if paid today` : ''}. The interest is invoiced separately.`
+        ? `\n\nUnder our terms, interest accrues on overdue amounts at ${interestRate != null ? interestRate : 21}% per annum, calculated daily. On this invoice it is ${money(accrued)} to today (${Number(inv.interest_days) || 0} day${Number(inv.interest_days) === 1 ? '' : 's'}) and ${money(Number(inv.interest_daily) || 0)} for each further day${inv.balance_due != null ? `, so ${money(Number(inv.balance_due) + accrued)} clears it if paid today` : ''}. The interest is invoiced separately.`
         : '';
       body = `Hi ${first},\n\nA friendly reminder that invoice ${n} for ${jobName}${amount} ${due}. You can view and pay it online with the button below, or by bank transfer using the details on the invoice.${interestNote}\n\nIf you have already paid, thank you, and please ignore this note.\n\nThanks,`;
     }

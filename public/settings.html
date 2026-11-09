@@ -1051,6 +1051,7 @@
 
     document.getElementById('save-terms-btn').addEventListener('click', async () => {
       const msg = document.getElementById('save-terms-msg');
+      const lateRate = parseFloat(document.getElementById('late-interest-rate').value); // blank keeps the T&Cs rate
       const { error } = await supabaseClient
         .from('company_settings')
         .update({
@@ -1058,7 +1059,7 @@
           default_estimate_disclaimer: document.getElementById('estimate-disclaimer-text').value,
           payment_details_text: document.getElementById('payment-details-text').value,
           invoice_terms_text: document.getElementById('invoice-terms-text').value.trim() || null,
-          late_interest_rate_pct: Math.max(0, Math.min(100, parseFloat(document.getElementById('late-interest-rate').value) || 0)),
+          late_interest_rate_pct: Number.isFinite(lateRate) ? Math.max(0, Math.min(100, lateRate)) : 21,
           bank_name: document.getElementById('bank-name').value.trim(),
           bank_account_name: document.getElementById('bank-account-name').value.trim(),
           bank_bsb: document.getElementById('bank-bsb').value.trim(),

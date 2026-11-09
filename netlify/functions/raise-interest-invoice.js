@@ -35,7 +35,7 @@ exports.handler = async (event) => {
 
     const { data: inv, error: invErr } = await supabaseAdmin
       .from('invoices')
-      .select('id, project_id, invoice_number, due_date, paid_at, interest_enabled, interest_from, interest_of_invoice_id, interest_accrued, interest_days, interest_daily')
+      .select('id, project_id, bill_to_client_id, invoice_number, due_date, paid_at, interest_enabled, interest_from, interest_of_invoice_id, interest_accrued, interest_days, interest_daily')
       .eq('id', invoiceId)
       .maybeSingle();
     if (invErr) throw invErr;
@@ -65,22 +65,33 @@ exports.handler = async (event) => {
     const now = new Date().toISOString();
     const dueDate = computeDueDate(client?.payment_terms || 'cod', sydneyDay(now));
 
+    // The original's accrual restarts the day after this charge. Moved first, and only from the start this
+    // request read, so two people pressing Raise together cannot both charge the same days.
+    const periodStart = inv.interest_from || addDays(inv.due_date, 1);
+    let moveFrom = supabaseAdmin.from('invoices').update({ interest_from: addDays(toDate, 1) }).eq('id', inv.id);
+    moveFrom = inv.interest_from ? moveFrom.eq('interest_from', inv.interest_from) : moveFrom.is('interest_from', null);
+    const { data: moved, error: fromErr } = await moveFrom.select('id');
+    if (fromErr) throw fromErr;
+    if (!(moved || []).length) return bad('Interest on this invoice was just charged by someone else. Close and reopen the invoice.');
+
+    // the interest invoice bills whoever the original bills (a warranty job bills the manufacturer) and
+    // records the first day it covers in interest_from
     const { data: made, error: insErr } = await supabaseAdmin
       .from('invoices')
       .insert({
-        project_id: inv.project_id, cost_centre_id: null, client_id: null,
+        project_id: inv.project_id, cost_centre_id: null, client_id: null, bill_to_client_id: inv.bill_to_client_id || null,
         description, invoice_number: invoiceNumber,
         labour_amount: 0, material_amount: 0, stc_amount: 0, bstc_amount: 0, claim_percent: null,
-        interest_amount: amount, interest_of_invoice_id: inv.id,
+        interest_amount: amount, interest_of_invoice_id: inv.id, interest_from: periodStart,
         sent_at: now, due_date: dueDate, created_by: user.id,
       })
       .select('id, invoice_token')
       .single();
-    if (insErr) throw insErr;
-
-    // the original's accrual restarts the day after this charge
-    const { error: fromErr } = await supabaseAdmin.from('invoices').update({ interest_from: addDays(toDate, 1) }).eq('id', inv.id);
-    if (fromErr) throw fromErr;
+    if (insErr) {
+      // nothing was charged: give the original its days back
+      await supabaseAdmin.from('invoices').update({ interest_from: inv.interest_from }).eq('id', inv.id);
+      throw insErr;
+    }
 
     await logInvoiceEvents(supabaseAdmin, [
       { invoiceId: inv.id, kind: 'interest_charged', actorId: user.id, detail: `${moneyText(amount)} for ${days} day${days === 1 ? '' : 's'} to ${longDate(toDate)}, invoiced as ${invoiceNumber}` },

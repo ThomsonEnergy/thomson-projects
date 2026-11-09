@@ -296,7 +296,7 @@
         : '';
       // interest accruing on an overdue invoice (item 66): shown while it is unpaid; it is invoiced separately
       const interestNote = interestAccrued > 0 && !isPaid
-        ? `Interest at ${Number(inv.interest_rate_pct) || 21}% per annum accrues daily on this overdue amount: ${money(interestAccrued)} to today (${Number(inv.interest_days) || 0} days, ${money(Number(inv.interest_daily) || 0)} a day). It is invoiced separately.`
+        ? `Interest at ${Number(inv.interest_rate_pct) || 21}% per annum accrues daily on this overdue amount: ${money(interestAccrued)} to today (${Number(inv.interest_days) || 0} day${Number(inv.interest_days) === 1 ? '' : 's'}, ${money(Number(inv.interest_daily) || 0)} a day). It is invoiced separately.`
         : '';
       const finalHtml = `
         <div class="inv-final">

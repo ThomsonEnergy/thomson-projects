@@ -7,8 +7,9 @@
 --
 --  * company_settings.late_interest_rate_pct: the rate (Settings > Payment Terms & T&Cs).
 --  * invoices.interest_enabled, interest_from (accrual start; null means the day after due_date; moved to
---    the day after the last charge), interest_of_invoice_id and interest_amount (on an interest invoice:
---    which invoice it charges and how much, GST free).
+--    the day after the last charge, or to tomorrow when interest is waived), interest_of_invoice_id and
+--    interest_amount (on an interest invoice: which invoice it charges and how much, GST free; its own
+--    interest_from is the first day it covers).
 --  * interest_days(invoices), interest_daily(invoices), interest_accrued(invoices): computed columns, the
 --    one rule every page reads (the Invoices page, the panel, the client's invoice page, the reminder).
 --    The accrual stops at the payment date.
@@ -51,11 +52,10 @@ returns numeric language sql stable security invoker set search_path = public as
   select case when not i.interest_enabled then 0 else
     round(public.get_invoice_balance_due(i.id) * (select coalesce(late_interest_rate_pct, 21) from company_settings where id = 1) / 100 / 365, 2) end;
 $$;
--- What has accrued: simple interest, the daily figure times the days.
+-- What has accrued: the daily figure (to the cent) times the days, so the sum a client checks adds up.
 create or replace function public.interest_accrued(i public.invoices)
 returns numeric language sql stable security invoker set search_path = public as $$
-  select case when not i.interest_enabled then 0 else
-    round(public.get_invoice_balance_due(i.id) * (select coalesce(late_interest_rate_pct, 21) from company_settings where id = 1) / 100 / 365 * public.interest_days(i), 2) end;
+  select public.interest_daily(i) * public.interest_days(i);
 $$;
 revoke execute on function public.interest_days(public.invoices) from public, anon;
 revoke execute on function public.interest_daily(public.invoices) from public, anon;
@@ -224,6 +224,7 @@ begin
     into v_previous
     from invoices i
     where i.id <> v_invoice.id
+      and i.interest_of_invoice_id is null -- an interest invoice (item 66) is not a claim on the job
       and coalesce(i.project_id, (select cc.project_id from cost_centres cc where cc.id = i.cost_centre_id)) = v_project_id
       and i.created_at < v_invoice.created_at;
     -- Claims invoiced before the job came across from ServiceM8 (cost_centres.imported_claims) come first.
