@@ -44,7 +44,7 @@
 
   <div class="wrap">
     <h1>Ops manager</h1>
-    <p class="subtitle">The background workers report here. What needs you is at the top; the 5am digest is pushed to your phone. The manager can look things up and line up approvals, but cannot deploy, change permissions, move money, push to Xero or send email.</p>
+    <p class="subtitle">The background workers report here. What needs you is at the top, one line per kind; the 5am digest pushes to your phone only when something is new. The manager can look things up and line up approvals, but cannot deploy, change permissions, move money, push to Xero or send email.</p>
 
     <div class="card">
       <h2>Ask the manager</h2>
@@ -74,16 +74,22 @@
 
     <div class="card">
       <h2>What they did</h2>
+      <p class="subtitle" style="margin:-4px 0 8px;">Each worker's latest run in the last 7 days, and how often it failed. The email sync and Postie run many times an hour, so they show here only when they fail.</p>
       <div id="op-runs"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=128"></script>
+  <script src="/js/supabase-client.js?v=129"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const esc = (s) => escapeHtml(s == null ? '' : String(s));
     const when = (iso) => iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : 'never';
     let labels = {};
+    const QUIET_AGENTS = ['sync-gmail', 'mailbox-work']; // run many times an hour: shown only when they fail
+    const RUN_COLS = 'agent, status, summary, started_at, input_tokens, output_tokens';
+    const FAIL_LIMIT = 500;
+    const weekAgo = () => new Date(Date.now() - 7 * 86400000).toISOString();
+    const NOT_QUIET = `(ops-digest,${QUIET_AGENTS.join(',')})`;
 
     function workerState(b) {
       if (!b.last_ok_at) return b.last_error_at ? 'bad' : 'idle';
@@ -92,22 +98,30 @@
     }
 
     async function load() {
-      const [bills, tasks, beats, runs, digest, sups, prices, checks, stIssues, lows] = await Promise.all([
-        supabaseClient.from('supplier_bill_inbox').select('id, status, extracted, supplier_id, match_reason, error, email_from, created_at').in('status', ['to_check', 'failed']).order('created_at').limit(50),
+      const since = weekAgo();
+      const res = await Promise.all([
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'to_check'),
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'to_check').eq('match_confidence', 'confident'),
+        supabaseClient.from('supplier_bill_inbox').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
         supabaseClient.from('agent_tasks').select('*').eq('status', 'open').order('created_at'),
         supabaseClient.from('agent_heartbeats').select('*').order('label'),
-        supabaseClient.from('agent_runs').select('*').neq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(40),
+        // What they did: the email sync and Postie only when they failed (item 54)
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'ok').not('agent', 'in', NOT_QUIET).gte('started_at', since).order('started_at', { ascending: false }).limit(300),
         supabaseClient.from('agent_runs').select('*').eq('agent', 'ops-digest').order('started_at', { ascending: false }).limit(1),
-        supabaseClient.from('suppliers').select('id, name'),
         supabaseClient.from('price_changes').select('id', { count: 'exact', head: true }).eq('status', 'waiting'),
         supabaseClient.from('supplier_bills').select('check_status, approved_for_payment').eq('paid', false).in('check_status', ['matches', 'resolved', 'problems']),
         supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues'),
-        supabaseClient.from('stock_low_flags').select('id, location_type, materials(name)').is('cleared_at', null).order('created_at').limit(50),
+        supabaseClient.from('stock_low_flags').select('id, location_type, materials(name)', { count: 'exact' }).is('cleared_at', null).order('created_at').limit(3),
+        // failures, the frequent workers apart so one failing all day cannot crowd out the rest
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').not('agent', 'in', NOT_QUIET).gte('started_at', since).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
+        supabaseClient.from('agent_runs').select(RUN_COLS).eq('status', 'failed').in('agent', QUIET_AGENTS).gte('started_at', since).order('started_at', { ascending: false }).limit(FAIL_LIMIT),
+        supabaseClient.from('supplier_bills').select('id', { count: 'exact', head: true }).eq('paid', false).eq('check_status', 'queried').not('query_reply_at', 'is', null),
+        supabaseClient.from('supplier_statements').select('id', { count: 'exact', head: true }).eq('status', 'issues').not('query_reply_at', 'is', null),
       ]);
-      const err = [bills, tasks, beats, runs, digest].find(r => r.error);
+      const err = res.find(r => r.error);
       if (err) { document.getElementById('op-needs').innerHTML = `<div class="error-box">${esc(err.error.message)}</div>`; return; }
+      const [nCheckQ, nSureQ, nFailedQ, tasks, beats, runs, digest, prices, checks, stIssues, lows, otherFails, quietFails, billReplies, stReplies] = res;
       labels = Object.fromEntries((beats.data || []).map(b => [b.agent, b.label]));
-      const supplierName = Object.fromEntries((sups.data || []).map(s => [s.id, s.name]));
 
       // Needs me
       const items = [];
@@ -115,27 +129,27 @@
           <div class="op-head"><strong>${esc(t.title)}</strong><span class="op-pill bad">${esc(labels[t.agent] || t.agent)}</span></div>
           ${t.body ? `<div class="op-meta">${esc(t.body)}</div>` : ''}<div class="op-meta">Since ${when(t.created_at)}</div>
           <div class="op-actions"><button type="button" class="op-done">Done</button><button type="button" class="secondary op-dismiss">Dismiss</button></div></div>`));
-      (bills.data || []).forEach(b => {
-        const ex = b.extracted || {};
-        const who = supplierName[b.supplier_id] || ex.supplier || b.email_from || 'Unknown supplier';
-        items.push(`<div class="op-item">
-          <div class="op-head"><strong>${b.status === 'failed' ? 'Bill could not be read' : 'Emailed bill to check'}: ${esc(who)}${ex.bill_number ? ' ' + esc(ex.bill_number) : ''}</strong>${ex.total != null ? `<span>${money(ex.total)}</span>` : ''}</div>
-          <div class="op-meta">${esc(b.status === 'failed' ? (b.error || '') : (b.match_reason || ''))}</div>
-          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/supplier-bills.html">Open Emailed bills</a></div></div>`);
-      });
+      // everything else is one line per kind with a count and a button (item 54)
+      const line = (title, meta, href, button) => items.push(`<div class="op-item"><div class="op-head"><strong>${title}</strong></div>
+          ${meta ? `<div class="op-meta">${meta}</div>` : ''}<div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="${href}">${button}</a></div></div>`);
+      const nCheck = nCheckQ.count || 0, nSure = nSureQ.count || 0, nFailed = nFailedQ.count || 0;
+      if (nCheck || nFailed) line(`Emailed bills: ${[nCheck ? nCheck + ' to check' : '', nFailed ? nFailed + ' could not be read' : ''].filter(Boolean).join(', ')}`,
+        nSure ? `${nSure} ${nSure === 1 ? 'is a sure PO match' : 'are sure PO matches'}: "Line up the sure bills" above does those.` : '', '/supplier-bills.html', 'Open Emailed bills');
       const chk = checks.data || [];
       const nApprove = chk.filter(b => ['matches', 'resolved'].includes(b.check_status) && !b.approved_for_payment).length;
       const nProblems = chk.filter(b => b.check_status === 'problems').length;
-      const nSt = (stIssues.count || 0);
-      if (nProblems || nApprove || nSt) items.push(`<div class="op-item"><div class="op-head"><strong>Bill checks: ${[nProblems ? nProblems + ' not matching the PO' : '', nApprove ? nApprove + ' to approve' : '', nSt ? nSt + ' statement' + (nSt === 1 ? '' : 's') + ' not reconciling' : ''].filter(Boolean).join(', ')}</strong></div>
-          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/supplier-checks.html${nProblems ? '?tab=problems' : (nSt ? '?tab=statements' : '')}">Open Bill checks</a></div></div>`);
-      if (prices.count) items.push(`<div class="op-item"><div class="op-head"><strong>${prices.count} price list change${prices.count === 1 ? '' : 's'} to check</strong></div>
-          <div class="op-meta">Big price moves, first-time matches and items that look replaced.</div>
-          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/price-lists.html">Open Price lists</a></div></div>`);
-      const lowRows = lows.data || [];
-      if (lowRows.length) items.push(`<div class="op-item"><div class="op-head"><strong>${lowRows.length} stock item${lowRows.length === 1 ? '' : 's'} running low</strong></div>
-          <div class="op-meta">${esc(lowRows.map(l => `${(l.materials && l.materials.name) || 'Item'} (${l.location_type === 'vehicle' ? 'van' : 'Warehouse'})`).join(', '))}</div>
-          <div class="op-actions"><a class="btn secondary" style="display:inline-flex;" href="/stock.html">Open Stock</a></div></div>`);
+      if (nProblems || nApprove) line(`Bill checks: ${[nProblems ? nProblems + ' not matching the PO' : '', nApprove ? nApprove + ' to approve' : ''].filter(Boolean).join(', ')}`,
+        '', `/supplier-checks.html${nProblems ? '?tab=problems' : ''}`, 'Open Bill checks');
+      const nReplies = (billReplies.count || 0) + (stReplies.count || 0);
+      if (nReplies) line(`Supplier replies: ${nReplies} to read`, 'A supplier answered one of our queries about a bill or statement.', `/supplier-checks.html${billReplies.count ? '' : '?tab=statements'}`, 'Open Bill checks');
+      const nSt = stIssues.count || 0;
+      if (nSt) line(`Statements: ${nSt} not reconciling`, '', '/supplier-checks.html?tab=statements', 'Open Statements');
+      if (prices.count) line(`Price lists: ${prices.count} change${prices.count === 1 ? '' : 's'} to check`, 'Big price moves, first-time matches and items that look replaced.', '/price-lists.html', 'Open Price lists');
+      const nLow = lows.count || 0;
+      if (nLow) {
+        const names = (lows.data || []).map(l => `${(l.materials && l.materials.name) || 'Item'} (${l.location_type === 'vehicle' ? 'van' : 'Warehouse'})`);
+        line(`Stock low: ${nLow} item${nLow === 1 ? '' : 's'}`, esc(names.join(', ') + (nLow > names.length ? ` and ${nLow - names.length} more` : '')), '/stock.html', 'Open Stock');
+      }
       const needsEl = document.getElementById('op-needs');
       needsEl.innerHTML = items.length ? items.join('') : '<p class="subtitle">Nothing needs you.</p>';
       needsEl.querySelectorAll('[data-task]').forEach(el => {
@@ -156,21 +170,38 @@
         ? `<div class="op-meta">${when(d.started_at)}</div><div class="op-digest" style="margin-top:6px;">${esc(d.summary)}</div>`
         : '<p class="subtitle">The first digest arrives at 5am.</p>';
 
-      // Workers
-      const beatRows = beats.data || [];
+      // Workers: one line when they are all working, broken ones listed, Show all for the rest (item 54)
+      const beatRows = (beats.data || []).map(b => ({ ...b, st: workerState(b) }));
       const STATE_TEXT = { ok: 'Working', bad: 'Not working', idle: 'Not run yet' };
-      document.getElementById('op-workers').innerHTML = beatRows.length ? beatRows.map(b => {
-        const st = workerState(b);
-        return `<div class="op-item"><div class="op-head"><strong>${esc(b.label)}</strong><span class="op-pill ${st}">${STATE_TEXT[st]}</span></div>
+      const workerHtml = (b) => `<div class="op-item"><div class="op-head"><strong>${esc(b.label)}</strong><span class="op-pill ${b.st}">${STATE_TEXT[b.st]}</span></div>
           <div class="op-meta">Last worked ${when(b.last_ok_at)}${b.last_error_at ? ` · last failed ${when(b.last_error_at)}: ${esc(b.last_error)}` : ''}</div></div>`;
-      }).join('') : '<p class="subtitle">No worker has reported yet. They start reporting within a few minutes of going live.</p>';
+      const broken = beatRows.filter(b => b.st === 'bad');
+      const nIdle = beatRows.filter(b => b.st === 'idle').length;
+      const nOk = beatRows.length - broken.length - nIdle;
+      const workersEl = document.getElementById('op-workers');
+      const open = workersEl.querySelector('details')?.open ? 'open' : ''; // stays open across the minute reload
+      workersEl.innerHTML = !beatRows.length ? '<p class="subtitle">No worker has reported yet. They start reporting within a few minutes of going live.</p>'
+        : (broken.length ? broken.map(workerHtml).join('') : `<p class="subtitle" style="margin:0;">${nIdle ? `${nOk} workers working, ${nIdle} not run yet.` : `All ${nOk} workers working.`}</p>`)
+          + `<details ${open} style="margin-top:8px;"><summary style="font-size:13px; cursor:pointer;">Show all</summary>${beatRows.filter(b => b.st !== 'bad').map(workerHtml).join('')}</details>`;
 
       // Runs
-      const runRows = runs.data || [];
-      document.getElementById('op-runs').innerHTML = runRows.length ? runRows.map(r => `<div class="op-item">
-          <div class="op-head"><span><strong>${esc(labels[r.agent] || r.agent)}</strong> ${r.status === 'failed' ? '<span class="op-pill bad">Failed</span>' : ''}</span><span class="op-meta" style="margin:0;">${when(r.started_at)}</span></div>
-          <div class="op-meta">${esc(r.summary)}${r.input_tokens || r.output_tokens ? ` · AI ${(r.input_tokens + r.output_tokens).toLocaleString('en-AU')} tokens` : ''}</div></div>`).join('')
-        : '<p class="subtitle">Nothing yet.</p>';
+      // one line per worker: its latest run, and how often it failed in the last 7 days
+      const fails = [...(otherFails.data || []), ...(quietFails.data || [])];
+      const capped = new Set([otherFails, quietFails].filter(q => (q.data || []).length >= FAIL_LIMIT).flatMap(q => q.data.map(r => r.agent)));
+      const byAgent = {};
+      [...(runs.data || []), ...fails].forEach(r => {
+        const a = byAgent[r.agent] || (byAgent[r.agent] = { latest: r, fails: 0, lastFail: null });
+        if (r.started_at > a.latest.started_at) a.latest = r;
+        if (r.status !== 'failed') return;
+        a.fails += 1;
+        if (!a.lastFail || r.started_at > a.lastFail.started_at) a.lastFail = r;
+      });
+      const runRows = Object.values(byAgent).sort((x, y) => (y.latest.started_at > x.latest.started_at ? 1 : -1)).slice(0, 20);
+      document.getElementById('op-runs').innerHTML = runRows.length ? runRows.map(({ latest: r, fails: n, lastFail: f }) => `<div class="op-item">
+          <div class="op-head"><span><strong>${esc(labels[r.agent] || r.agent)}</strong> ${n ? `<span class="op-pill bad">Failed ${n === 1 ? 'once' : n + (capped.has(r.agent) ? '+' : '') + ' times'} in 7 days</span>` : ''}</span><span class="op-meta" style="margin:0;">${when(r.started_at)}</span></div>
+          <div class="op-meta">${esc(r.summary)}${r.input_tokens || r.output_tokens ? ` · AI ${(r.input_tokens + r.output_tokens).toLocaleString('en-AU')} tokens` : ''}</div>
+          ${f && f !== r ? `<div class="op-meta">Last failed ${when(f.started_at)}: ${esc(f.summary)}</div>` : ''}</div>`).join('')
+        : '<p class="subtitle">Nothing in the last 7 days.</p>';
     }
 
     (async function () {
@@ -192,7 +223,7 @@
         else alert('The assistant is still loading. Try again in a second.');
       }));
       await load();
-      setInterval(load, 60000);
+      setInterval(() => { if (!document.hidden) load(); }, 60000);
     })();
   </script>
 </body>
