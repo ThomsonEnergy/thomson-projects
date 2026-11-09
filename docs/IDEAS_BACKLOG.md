@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 9 Nov 2026 (items 61 and 65 live, items 62 to 64 planned)
+Last updated 9 Nov 2026 (items 61, 63 and 64 live, items 62 and 65 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -41,8 +41,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 59 | Invoice actual costs: rate per clocked person, AI invoice notes from the installers' notes, terms note in Settings | LIVE 6 Nov 2026 (spec A22), migration 20261130010000 | N | None |
 | 61 | Invoices page as the accounts desk: status in plain words, a history of who did what and when on every invoice, email, reminder, push, edit and credit note from the list | LIVE 9 Nov 2026 (spec A28), migration 20261130030000, PR 316 | N | Day one: an unpaid invoice sent before today another way shows Not sent until Sent another way is pressed once |
 | 62 | Pipeline moves done by the database: task gate, handover check and all-paid check as triggers, no-quote invoices move to Awaiting Payment, board quote columns for quotes only, 9 jobs put back in the right column | Planned 9 Nov 2026, waiting on yes | N | None |
-| 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | Planned 9 Nov 2026, waiting on the owner's yes | N | None |
-| 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | Planned 9 Nov 2026, waiting on the owner's yes | N | Item 63 first (same panel) |
+| 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
+| 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
 | 65 | Jobs page in stage folders: a tab per pipeline stage above the jobs table, counts on each, All and Archived, like the Quotes page tabs | LIVE 9 Nov 2026 (spec A6), PR into `main` | N | None |
 
 ## High lead time, start now
@@ -1304,7 +1304,7 @@ Touches: `timesheets.html`, migration 20261130020000.
 
 Touches: one migration (`job_tasks_sync_stage`, `projects_stage_rules`, `invoices_sync_complete`, `project_handover_ready`, the 11 job moves), `public/js/supabase-client.js` (delete two functions, clock-out message, `?v=` bump on every page), `public/project.html`, `public/tasks.html`, `public/my-day.html`, `public/js/assets.js`, `public/dashboard.html`, `netlify/functions/create-invoice.js` (the stage block only), `docs/PROJECT_SPEC.md` A6. Overlaps: PR 316 (item 61, open) touches `create-invoice.js`, `project.html` and both webhooks; build this after 316 merges, or in the same chat; no unmerged branches on `staging`; nothing waiting on yes touches these. Kind: bug fix (jobs not moving is wrong on live) into `main`, then `main` into `staging`; migration yes; money no (stage only), stock no, RLS no, payroll no. Size: medium (a morning). Test on staging: admin@staging.test, the six Done means clicks; no keys needed. Best model: Fable 5.1, effort xhigh, because it is a migration with triggers on the live jobs table plus code in one go.
 
-## 63. One-off items on a do-and-charge invoice (planned 9 Nov 2026, waiting on the owner's yes)
+## 63. One-off items on a do-and-charge invoice (owner's yes 9 Nov 2026, built the same day straight to `main`; spec A22)
 
 Owner, 9 Nov 2026: when creating an invoice, something used on the job is sometimes not in Stock and does not need adding to Stock (bought for this job only). Today the only ways onto the invoice are a Stock material, a prebuild or a PO line received to the job.
 
@@ -1316,7 +1316,7 @@ Done means (staging, admin@staging.test, a do-and-charge job): (1) Invoice actua
 
 Touches: `public/js/project-invoice-actuals.js` (the button, the row, the payload; `?v=` bump in `project.html`), `netlify/functions/_shared/invoice-items.js` (kind `custom`), `netlify/functions/create-invoice.js` (accepts it), one migration (the kind check), `docs/PROJECT_SPEC.md` A22. Overlaps: item 64 (same panel, build 63 first in the same chat); item 62 touches `create-invoice.js` too (its stage move), different lines. Kind: feature (into `staging`, a weekday); migration yes (a check constraint); money yes (what the client is charged, typed by a person, checked on the server), stock no, RLS no, payroll no. Size: small (under a morning). Test on staging: admin@staging.test, J9002 or a new no-quote job, the four clicks above. Best model: Opus 5.5, effort high, because it is a known shape (one more item kind through the same pricing path) with a one-line migration.
 
-## 64. Edit a do-and-charge invoice with its lines before it reaches Xero (planned 9 Nov 2026, waiting on the owner's yes)
+## 64. Edit a do-and-charge invoice with its lines before it reaches Xero (owner's yes 9 Nov 2026, built the same day straight to `main`; spec A22)
 
 Owner, 9 Nov 2026: an invoice is created, then it turns out not all the POs were in. Once the POs are received, the choice today is a second invoice, or Edit on the first, which shows only the numbers per stage, not the shifts and materials the create panel showed. Wanted: Edit on an unpushed do-and-charge invoice reopens the full lines and the newly arrived materials, and saves into the same invoice.
 

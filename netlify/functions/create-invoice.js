@@ -312,6 +312,7 @@ exports.handler = async (event) => {
           const { data: usage, error: usageErr } = await supabaseAdmin.from('job_material_usage').insert({
             project_id: projectId, cost_centre_id: c.cost_centre_id, material_id: item.material_id,
             quantity: item.quantity, unit_cost: item.unit_cost, source: 'from_stock', created_by: user.id,
+            invoice_id: insertedInvoice.id, // this invoice made the row: an edit may resize or put it back (item 64)
           }).select('id').single();
           if (usageErr) throw usageErr;
           usageId = usage.id;

@@ -32,6 +32,12 @@
 // come back flagged so the panel can show them greyed with the tick off.
 // The top-level fields are the whole job's totals (with the first cost
 // centre's id), which is all the warranty close-out panel needs.
+//
+// Edit mode (item 64): with invoiceId, the shifts and materials billed on THAT invoice count as not
+// yet billed (so they come back as lines, ticked) and the answer carries `invoice`: its claims and
+// its line items, so the panel can show the invoice as it is and save into it (update-invoice-lines.js).
+// `openInvoices` lists the job's do-and-charge invoices not yet in Xero or paid, so the create panel
+// can offer "Add to SI123 instead" of making a second invoice.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { entryHours, entryCentreIds } = require('./_shared/compute-labour-cost');
@@ -52,9 +58,20 @@ exports.handler = async (event) => {
   const { supabaseAdmin } = auth;
 
   try {
-    const { projectId } = JSON.parse(event.body || '{}');
+    const { projectId, invoiceId } = JSON.parse(event.body || '{}');
     if (!projectId) {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId is required' }) };
+    }
+    let editInvoice = null;
+    if (invoiceId) {
+      const { data: inv, error: invErr } = await supabaseAdmin.from('invoices')
+        .select('id, invoice_number, description, sent_at, due_date, notes, xero_invoice_id, paid_at, invoice_claims(cost_centre_id, labour_amount, material_amount, stc_amount, bstc_amount), invoice_line_items(id, cost_centre_id, kind, material_id, prebuild_id, job_material_usage_id, staff_id, rate_tier_id, time_entry_ids, description, quantity, unit_cost, unit_price, labour_amount, material_amount, sort_order)')
+        .eq('id', invoiceId).eq('project_id', projectId).maybeSingle();
+      if (invErr) throw invErr;
+      if (!inv) return { statusCode: 400, body: JSON.stringify({ error: 'That invoice is not on this job.' }) };
+      if (inv.xero_invoice_id) return { statusCode: 400, body: JSON.stringify({ error: 'This invoice is in Xero. Changes go through a credit note.' }) };
+      if (inv.paid_at) return { statusCode: 400, body: JSON.stringify({ error: 'This invoice is paid and cannot be edited.' }) };
+      editInvoice = inv;
     }
 
     const { data: centres } = await supabaseAdmin
@@ -73,7 +90,7 @@ exports.handler = async (event) => {
       // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
       // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
       supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost, source, billable, material_id, created_at, materials(name), purchase_order_line_items(description, purchase_orders(po_number))').eq('project_id', projectId).order('created_at'),
-      supabaseAdmin.from('invoice_line_items').select('cost_centre_id, kind, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id)').eq('invoices.project_id', projectId),
+      supabaseAdmin.from('invoice_line_items').select('invoice_id, cost_centre_id, kind, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id)').eq('invoices.project_id', projectId),
       supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
       supabaseAdmin.from('public_holidays').select('holiday_date'),
       supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate').order('sort_order'),
@@ -92,7 +109,9 @@ exports.handler = async (event) => {
       sellRateByProfile[p.id] = tier ? rateAt(tier.sell_rate, rateCard.labourFactor) : 0;
     });
     const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
-    const billedEntries = new Set((invItems || []).flatMap(i => i.time_entry_ids || []));
+    // the invoice being edited does not count: its shifts and materials come back as lines to keep or drop
+    const otherItems = (invItems || []).filter(i => !invoiceId || i.invoice_id !== invoiceId);
+    const billedEntries = new Set(otherItems.flatMap(i => i.time_entry_ids || []));
 
     const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0, labourLines: [], materialLines: [] }]));
     (entries || []).forEach(e => {
@@ -131,7 +150,7 @@ exports.handler = async (event) => {
     // Materials not yet on an invoice, one line each (item 41): a PO line received to the job
     // or a Stock draw, at cost and at cost plus the cost centre's markup. A line marked not
     // billable stays in the list (greyed, tick to bill it) but out of the bulk total.
-    const usageOnInvoices = new Set((invItems || []).map(i => i.job_material_usage_id).filter(Boolean));
+    const usageOnInvoices = new Set(otherItems.map(i => i.job_material_usage_id).filter(Boolean));
     (usage || []).filter(u => !usageOnInvoices.has(u.id)).forEach(u => {
       const b = byCentre[centreOf(u.cost_centre_id)];
       const billable = u.billable !== false;
@@ -170,6 +189,10 @@ exports.handler = async (event) => {
       };
     });
     const sum = (k) => r2(centreRows.reduce((s, c) => s + c[k], 0));
+    // do-and-charge invoices on this job that can still be added to (item 64)
+    const { data: openInvoices } = await supabaseAdmin.from('invoices')
+      .select('id, invoice_number, sent_at, invoice_line_items(id)')
+      .eq('project_id', projectId).is('xero_invoice_id', null).is('paid_at', null).order('sent_at', { ascending: false });
 
     return {
       statusCode: 200,
@@ -186,6 +209,8 @@ exports.handler = async (event) => {
         // percentOff: the commercial agreement's reduction, which create-invoice.js adds as its own line
         rateCard: { name: rateCard.name, percent: rateCard.percent, percentOff: rateCard.percentOff },
         rules: RULES,
+        invoice: editInvoice,
+        openInvoices: (openInvoices || []).filter(i => (i.invoice_line_items || []).length && i.id !== invoiceId).map(i => ({ id: i.id, invoiceNumber: i.invoice_number, sentAt: i.sent_at })),
       }),
     };
   } catch (err) {
