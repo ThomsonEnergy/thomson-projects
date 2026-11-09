@@ -116,14 +116,23 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   }));
   if (importedClaims.some(c => !(c.amount >= 0))) throw new Error('A ServiceM8 claim has a bad amount');
   if (importedClaims.length && Math.abs(r2(importedClaims.reduce((t, c) => t + c.amount, 0)) - invoiced) > 0.01) throw new Error('The ServiceM8 claims do not add up to the invoiced figure');
-  // ServiceM8's STC rebate lines, kept for staff to enter by hand.
+  // ServiceM8's STC rebate lines: kept as the list the STCs tab offers for Formbay, and set as the
+  // job's STC and BSTC credits (hot water STCs are STCs too) so they come off the invoice.
   const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
     type: ['pv', 'bstc', 'swh'].includes(x.type) ? x.type : 'pv',
     count: Math.round(n(x.count)), price: r2(x.price), total: r2(x.total), label: str(x.label, 200),
   }));
   if (stcs.some(x => !(x.count >= 0) || !(x.price >= 0))) throw new Error('Bad STC figures');
+  const creditOf = (types) => {
+    const list = stcs.filter(x => types.includes(x.type));
+    const qty = list.reduce((t, x) => t + x.count, 0);
+    const total = r2(list.reduce((t, x) => t + x.total, 0));
+    return qty > 0 ? { qty, total, price: r2(total / qty) } : null;
+  };
+  const stcCredit = creditOf(['pv', 'swh']);
+  const bstcCredit = creditOf(['bstc']);
   const stcNote = stcs.length
-    ? `\n\nSTCs in ServiceM8, NOT applied to this job yet: ${stcsText(stcs)}.\nEnter them on the job's STCs tab (+ Add STCs) and set the stage's STC credit in Edit stages.`
+    ? `\n\nSTCs in ServiceM8, applied as credits: ${stcsText(stcs)}.\nThey come off the invoice as the job's STC and BSTC credits; add them on the STCs tab (+ Add STCs) to track them with Formbay.`
     : '';
   if (Number.isNaN(quoted) || quoted < 0 || !(invoiced >= 0)) throw new Error('Value and invoiced must be numbers, 0 or more');
   if (invoiced > quoted + 0.01) throw new Error(`Invoiced ($${invoiced.toFixed(2)}) is more than the job value ($${quoted.toFixed(2)})`);
@@ -152,6 +161,8 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       sow_text: str(row.description) || null,
       notes: (str(row.notesText, 100000) + stcNote).trim() || null,
       sm8_stcs: stcs.length ? stcs : null,
+      ...(stcCredit ? { stc_quantity: stcCredit.qty, stc_price_per_certificate: stcCredit.price, stc_total: stcCredit.total } : {}),
+      ...(bstcCredit ? { bstc_quantity: bstcCredit.qty, bstc_price_per_certificate: bstcCredit.price, bstc_total: bstcCredit.total } : {}),
       client_id: client.id,
       client_name: client.name,
       client_email: client.email || str(row.clientEmail, 300) || null,
@@ -194,8 +205,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       quoted_amount: quoted,
       invoiced_amount: invoiced,
       imported_claims: importedClaims,
-      // STCs are not applied here - staff enter them on the job (STCs tab
-      // and this stage's STC credit) from projects.sm8_stcs / the notes.
+      // STCs are the job's credits (projects.stc_total and bstc_total above), not this stage's.
     }).select('id').single();
     if (ccErr) throw ccErr;
 
