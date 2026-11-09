@@ -43,8 +43,6 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 62 | Pipeline moves done by the database: task gate, handover check and all-paid check as triggers, no-quote invoices move to Awaiting Payment, board quote columns for quotes only, 9 jobs put back in the right column | Planned 9 Nov 2026, waiting on yes | N | None |
 | 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
 | 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
-| 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | Planned 9 Nov 2026, waiting on the owner's yes | N | None |
-| 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | Planned 9 Nov 2026, waiting on the owner's yes | N | Item 63 first (same panel) |
 | 65 | Jobs page in stage folders: a tab per pipeline stage above the jobs table, counts on each, All and Archived, like the Quotes page tabs | LIVE 9 Nov 2026 (spec A6), PR into `main` | N | None |
 
 ## High lead time, start now
