@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 9 Nov 2026 (items 61, 63, 64 and 66 built, items 62 and 65 planned)
+Last updated 9 Nov 2026 (items 61, 63 and 64 live, item 66 on staging, items 62 and 65 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -44,7 +44,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
 | 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
 | 65 | Jobs page in stage folders: a tab per pipeline stage above the jobs table, counts on each, All and Archived, like the Quotes page tabs | LIVE 9 Nov 2026 (spec A6), PR into `main` | N | None |
-| 66 | Late payment interest per invoice: Charge interest toggle, the accrual shown daily, reminders quote it, a separate GST free interest invoice to Xero, waive or chase | Built 9 Nov 2026 (spec A22 and H), migration 20261130050000, PR pending | N | Xero: check the Interest charged account (270) in Settings > Xero Mapping |
+| 66 | Late payment interest per invoice: Charge interest toggle, the accrual shown daily, reminders quote it, a separate GST free interest invoice to Xero, waive or chase | Built 9 Nov 2026 (spec A22 and H), migration 20261130050000, PR 331 on staging the same day, live at the next release | N | Xero: check the Interest charged account (270) in Settings > Xero Mapping |
 
 ## High lead time, start now
 
@@ -1365,7 +1365,7 @@ To decide before building: whether the quotes will keep being written in simPRO 
 
 Touches (way 1): new `public/simpro-import.html` (copied from `sm8-import.html`, the review table and Make job), new `netlify/functions/simpro-import-extract.js` (admin, Claude reads the file), new `agents/prompts/simpro-quote.js` (the reading prompt), `netlify/functions/_shared/sm8-import.js` (the job-from-lines part moved to `_shared/job-from-lines.js` so both imports share it; `sm8-import-jobs.js` keeps working), `public/settings.html` (one link under Admin, no inline code), one migration (`projects.simpro_quote_number`, a column and an index, so a re-run skips a quote already brought across), `docs/PROJECT_SPEC.md` (A27 gains a simPRO paragraph). Way 2 adds `netlify/functions/simpro-import-preview.js` and `simpro-import-lines.js` and the `simpro` key in Settings > API Keys. Overlaps: none (no unmerged branch or open PR touches `sm8-import.html` or `_shared/sm8-import.js`; `settings.html` gains one link only). Kind: feature (into `staging`); migration yes (one column); money no (a job's quoted figure is set, nothing is invoiced), stock no, RLS no, payroll no. Size: medium (a morning for way 1; way 2 a day once the simPRO key exists). Test on staging: admin@staging.test, the five clicks above; needs the Anthropic key on staging (already there for the invoice reader). Best model: Opus 5.5, effort high, because it is a feature build that reuses an existing import path and an existing AI reader; nothing touches money or RLS.
 
-## 66. Late payment interest per invoice (owner's yes 9 Nov 2026, built the same day)
+## 66. Late payment interest per invoice (owner's yes 9 Nov 2026, built the same day, PR 331 on staging)
 
 Owner, 9 Nov 2026: a toggle on the invoice so that, when it is turned on for that invoice, the interest accrued shows and the overdue reminder carries the interest charge; worked out so it reconciles cleanly in Xero even though it accrues daily and a client may pay a day or two after the notice; if they pay without the interest, either turn it off or chase the interest on its own. Per invoice, never for everyone.
 
