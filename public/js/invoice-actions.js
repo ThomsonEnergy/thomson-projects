@@ -8,7 +8,8 @@
 //   emailInvoiceToClient(invoiceId, project, { btn, msgEl, reminder, invoice, status, onSent })  the email
 //                                                window, filled in; invoice and status save a read when known
 //   pushInvoiceToXero(invoiceId)                 resolves to the server's answer, throws on failure
-//   openEditInvoicePanel(invoice, project, onDone)
+//   openEditInvoicePanel(invoice, project, onDone)  the per-stage numbers (a quoted claim); a do-and-charge invoice
+//                                                with line items opens the Invoice actual costs panel instead (item 64)
 //   openIssueCreditNotePanel(invoice, project, onDone)
 //   pushCreditNoteToXero(creditNoteId)           throws on failure
 //   recordInvoiceEvent(invoiceId, kind, detail)  one history line written by the browser (edit, notes, sent
@@ -19,7 +20,7 @@
 // js/invoice-notes.js when Notes is pressed.
 
 const INVOICE_PANEL_PROJECT = 'projects(id, name, job_number, quote_number, client_name, client_email, client_id, clients(client_type))';
-const INVOICE_PANEL_SELECT = `*, balance_due, cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_events(*, actor:profiles(full_name))`;
+const INVOICE_PANEL_SELECT = `*, balance_due, cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_line_items(id), invoice_events(*, actor:profiles(full_name))`;
 const INVOICE_BTN = 'font-size:12px; padding:6px 10px;';
 const loadInvoiceNotes = () => loadJsOnce('/js/invoice-notes.js?v=4', () => typeof openInvoiceNotesPanel === 'function');
 
@@ -163,7 +164,11 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     on('#ip-remind', (e) => emailInvoiceToClient(inv.id, project, { btn: e.currentTarget, msgEl: msg, invoice: inv, status, reminder: true, onSent: () => afterChange(false) }));
     const pushBtn = card.querySelector('#ip-push');
     if (pushBtn) pushBtn.addEventListener('click', call(pushBtn, 'Pushing...', async () => { const data = await pushInvoiceToXero(inv.id); showToast(`Pushed ${data.invoiceNumber} to Xero`); }, true));
-    on('#ip-edit', () => openEditInvoicePanel(inv, project, () => afterChange(true)));
+    // A do-and-charge invoice (it has line items) reopens the Invoice actual costs panel with its lines (item 64);
+    // a quoted claim keeps the per-stage numbers panel.
+    on('#ip-edit', () => ((inv.invoice_line_items || []).length
+      ? loadInvoiceActuals().then(() => openInvoiceActualCostsPanel(project, { invoice: inv, onDone: () => afterChange(true) })).catch(fail)
+      : openEditInvoicePanel(inv, project, () => afterChange(true))));
     on('#ip-credit', () => openIssueCreditNotePanel(inv, project, () => afterChange(true)));
     on('#ip-notes', () => loadInvoiceNotes().then(() => openInvoiceNotesPanel(inv, project, () => afterChange(false))).catch(fail));
     on('#ip-pdf', () => openPdfViewer(inv.pdf_path, `Invoice ${inv.invoice_number}`, project ? { projectId: project.id, folder: 'Marked up' } : {}));
