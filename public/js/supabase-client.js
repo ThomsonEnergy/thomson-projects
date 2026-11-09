@@ -7131,8 +7131,8 @@ const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=10
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([
   loadJsOnce('/js/email-compose.js?v=11', () => typeof openEmailComposer === 'function'),
-  loadJsOnce('/js/invoice-status.js?v=2', () => typeof invoiceStatus === 'function'),
-  loadJsOnce('/js/invoice-actions.js?v=3', () => typeof openInvoicePanel === 'function'),
+  loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=4', () => typeof openInvoicePanel === 'function'),
 ]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
