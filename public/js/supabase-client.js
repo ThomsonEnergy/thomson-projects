@@ -6638,11 +6638,54 @@ function poTotalAmount(po) {
   return items.length ? items.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0) : Number(po.amount) || 0;
 }
 
+// "J7040 Smith" from a projects row (name, job_number).
+function poJobRef(p) { return `${p.job_number ? 'J' + p.job_number + ' ' : ''}${p.name || ''}`.trim() || 'a job'; }
+
+// Where a received line sits, naming the job: "J7068 Shipping container", "Warehouse", "Vehicle".
+// Lines carry destination_job (the job's name and number) when the loader asked for it.
+function poLinePlace(li) {
+  if (li.destination_type === 'job' && li.destination_job) return poJobRef(li.destination_job);
+  return poPlaceLabel(li.destination_type);
+}
+
+// What a PO means to one job: the lines on that job, what they cost, and where the rest went.
+// A job PO with a line moved to another job, the Warehouse or a van shows each job only its
+// share, so two jobs never both look like they carry the whole PO (PO2006, 9 Nov 2026).
+// whole: every line is this job's (the usual case), so the row reads as the plain PO.
+function poJobShare(po, projectId) {
+  const items = po.purchase_order_line_items || [];
+  const own = po.project_id === projectId;
+  const here = items.filter(li => li.received
+    ? li.destination_type === 'job' && li.destination_job_id === projectId
+    : own && !poLineIsTool(li, po));
+  const away = items.filter(li => !here.includes(li));
+  if (own && !away.length) return { amount: poTotalAmount(po), whole: true, progress: '', note: '' };
+  const amount = here.reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+  // the count is this job's lines only: "6 of 6 received" here, "1 of 1 received" on the other job
+  const received = here.filter(li => li.received).length;
+  const backordered = here.filter(li => !li.received && li.is_backordered).length;
+  const progress = `${received} of ${here.length} received${backordered ? `, ${backordered} back ordered` : ''}`;
+  let note;
+  if (own) {
+    // the job's own PO: say where the other lines went, one count per place
+    const byPlace = {};
+    away.forEach(li => {
+      const place = poLineIsTool(li, po) ? 'the Tools register' : !li.received ? 'nowhere yet'
+        : li.destination_type === 'job' ? poLinePlace(li) : li.destination_type === 'vehicle' ? 'a vehicle' : 'the Warehouse';
+      byPlace[place] = (byPlace[place] || 0) + 1;
+    });
+    note = Object.entries(byPlace).map(([place, n]) => `${n} line${n === 1 ? '' : 's'} moved to ${place}`).join(', ');
+  } else {
+    note = `Moved here from ${poWhereLabel(po)}`;
+  }
+  return { amount, whole: false, progress, note: `<span class="badge draft">${escapeHtml(note)}</span>` };
+}
+
 // Where the PO is going: "J7040 Smith", "Stock", "Van 2" or "Tools in Van 2".
 function poWhereLabel(po) {
   const veh = po.fleet_vehicles ? (po.fleet_vehicles.vehicle_name || po.fleet_vehicles.rego) : null;
   if (po.po_kind === 'tools') return 'Tools' + (veh ? ' in ' + veh : '');
-  if (po.project_id) return po.projects ? `${po.projects.job_number ? 'J' + po.projects.job_number + ' ' : ''}${po.projects.name || ''}`.trim() : 'Job';
+  if (po.project_id) return po.projects ? poJobRef(po.projects) : 'Job';
   if (po.vehicle_id) return veh || 'Vehicle';
   return 'Stock';
 }
@@ -6673,20 +6716,21 @@ function poWhereHref(po) {
 function poBillNeedsDecision(b) { return !!b && !b.paid && b.check_status === 'problems'; }
 
 // One short row per PO for the lists (Purchase Orders page, the job page). Tap it to open the PO.
-function renderPoRow(po, { showWhere = true, note = '' } = {}) {
+// progress, total and totalNote replace the whole-PO figures when the list shows one job's share (poJobShare).
+function renderPoRow(po, { showWhere = true, note = '', progress = '', total = null, totalNote = '' } = {}) {
   const c = poLineCounts(po);
   const decide = (po.supplier_bills || []).filter(poBillNeedsDecision).length;
   const chipCls = po.closed_at ? 'accepted' : po.status === 'received' ? 'sent' : po.status === 'part_received' ? 'info' : 'draft';
-  const progress = c.total
+  progress = progress || (c.total
     ? `${c.received} of ${c.total} received${c.backordered ? `, ${c.backordered} back ordered` : ''}`
-    : (po.po_type === 'open' && !po.closed_at ? 'Lines come from the invoice' : 'No lines yet');
+    : (po.po_type === 'open' && !po.closed_at ? 'Lines come from the invoice' : 'No lines yet'));
   return `<a class="po-row" href="/purchase-order.html?id=${encodeURIComponent(po.id)}" data-po-id="${escapeHtml(po.id)}">
     <div class="po-row-main">
       <div class="po-row-title"><strong>${escapeHtml(po.po_number || 'PO')}</strong> <span class="po-row-supplier">${escapeHtml(po.suppliers?.name || po.supplier_name || 'Unknown supplier')}</span></div>
       <div class="po-row-sub">${showWhere ? `<span class="badge draft">${escapeHtml(poWhereLabel(po))}</span>` : ''}<span class="subtitle">${escapeHtml(progress)}</span>${note}</div>
     </div>
     <div class="po-row-side">
-      <span class="po-row-total">${money(poTotalAmount(po))}</span>
+      <span class="po-row-total">${money(total == null ? poTotalAmount(po) : total)}${totalNote ? ` <span class="subtitle" style="font-size:12px; font-weight:400; white-space:nowrap;">${escapeHtml(totalNote)}</span>` : ''}</span>
       <span class="badge ${chipCls}">${poStatusLabel(po)}</span>
       ${decide ? '<span class="badge red">Bill needs a decision</span>' : ''}
     </div>
@@ -6728,7 +6772,7 @@ function renderPoTickLines(po, canEdit) {
     const tickable = canEdit && open && !li.received;
     const eta = li.backorder_eta ? ', ETA ' + new Date(li.backorder_eta + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '';
     let state = '';
-    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${poPlaceLabel(li.destination_type)}</span>`;
+    if (li.received) state = ` &middot; <span style="color:var(--green);">Received to ${escapeHtml(poLinePlace(li))}</span>`;
     else if (li.is_backordered) state = ` &middot; <span style="color:var(--amber);">Back ordered${escapeHtml(eta)}</span>`;
     const needsPrice = po.stock_source && !(Number(li.unit_cost) > 0) ? ' <span class="badge draft" style="color:var(--red);" title="Added from site without a price. Price it on the Stock page and this line takes the price.">Needs a price</span>' : '';
     const toolChip = tool ? ` <span class="badge draft" title="Goes to the Tools register, not the job or stock">${li.tool_kind === 'perishable' ? 'Perishable' : 'Tool'}</span>`
@@ -6926,7 +6970,7 @@ function showPoCreatedPanel(newPo, supplierName, { onDone } = {}) {
 async function loadPurchaseOrderFull(poId) {
   const { data, error } = await supabaseClient
     .from('purchase_orders')
-    .select('*, purchase_order_line_items(*), suppliers(name, contact_email), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego)')
+    .select('*, purchase_order_line_items(*, destination_job:projects!destination_job_id(name, job_number)), suppliers(name, contact_email), projects(name, job_number), fleet_vehicles!vehicle_id(vehicle_name, rego)')
     .eq('id', poId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
