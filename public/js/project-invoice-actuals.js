@@ -139,15 +139,19 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
       // kind material: a line with a usage row shows in materialRows above; one without (never made today) is a one-off
       if (l.kind === 'material' && !l.job_material_usage_id) items.push({ kind: 'custom', lineId: l.id, name: l.description, quantity: Number(l.quantity) || 0, unitPrice: Number(l.unit_price) || 0, unitCost: Number(l.unit_cost) || 0 });
     });
+    let bulkOnly = false;
     if (edit) {
       // materials billed as one amount on this invoice (made in Bulk mode): what the stage's claim holds
-      // beyond its lines, kept as a one-amount row
+      // beyond its lines, kept as a one-amount row. The job's usage rows were covered by that amount, so
+      // they are not offered as itemised lines here (that would bill them twice): the amount is typed over.
       const claim = (edit.invoice_claims || []).find(k => k.cost_centre_id === c.costCentreId);
       const linesMaterial = mine.reduce((s, l) => s + (Number(l.material_amount) || 0), 0);
       material = claim ? r2(Math.max(0, (Number(claim.material_amount) || 0) - linesMaterial)) : 0;
+      bulkOnly = material > 0.004;
     }
+    const rows = bulkOnly ? materialRows.filter(m => m.onInvoice) : materialRows;
     const include = edit ? mine.length > 0 || material > 0.004 : (unbilledHours > 0 || material > 0.004 || materialRows.some(m => m.billable));
-    return { ...c, unbilledHours, material, materialRows, items, labourRows: invoiceRows, less, include };
+    return { ...c, unbilledHours, material, bulkOnly, materialRows: rows, items, labourRows: invoiceRows, less, include };
   });
   // Nothing accrued anywhere yet (e.g. invoicing straight from a prebuild): start with every cost centre ticked.
   if (!centres.some(c => c.include)) centres.forEach(c => { c.include = true; });
@@ -193,20 +197,22 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
     if (!min) return;
     const byDay = new Map();
     centres.forEach(c => c.labourRows.forEach((r) => {
-      if (r.source !== 'shift' || !r.dateKey || !r.billable) return;
+      if ((r.source !== 'shift' && r.source !== 'invoice') || !r.dateKey || !r.billable) return;
       const k = `${r.staffId}|${r.dateKey}`;
-      if (!byDay.has(k)) byDay.set(k, { total: 0, first: r });
-      byDay.get(k).total += r.hours;
+      if (!byDay.has(k)) byDay.set(k, { total: 0, first: null });
+      const day = byDay.get(k);
+      day.total += r.hours;
+      if (r.source === 'shift' && !day.first) day.first = r; // rows already on the invoice were rounded when they were made
     }));
     byDay.forEach(({ total, first }) => {
-      if (total > 0 && total < min) { first.hours = r2(first.hours + (min - total)); first.minTag = true; }
+      if (first && total > 0 && total < min) { first.hours = r2(first.hours + (min - total)); first.minTag = true; }
     });
   }
   buildLabourRows();
 
   const rowDescription = (r) => {
     if (r.source === 'added') return `${r.tierName}${r.note ? `: ${r.note}` : ''}`;
-    if (r.source === 'invoice' && !r.dateKey) return r.description || r.staffName;
+    if (r.source === 'invoice') return r.description || r.staffName;
     const who = `${r.staffName}${r.tierName ? ` (${r.tierName}${r.bandLabel ? `, ${r.bandLabel}` : ''})` : ''}`;
     if (!r.dateKey) return who;
     return `${dateText(r.dateKey)}, ${r.start} to ${r.end}: ${who}${r.minTag ? ` (min. ${rules.minimumHours} hrs)` : ''}`;
@@ -404,10 +410,11 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
               <div><label style="margin-top:0;">Materials (one amount)</label><input type="number" step="0.01" inputmode="decimal" class="ia-material" value="${c.material}" /></div>
             </div>
             <p class="subtitle" style="font-size:12px; margin:4px 0 0;">${c.materialRows.filter(m => m.billable).length} costed line${c.materialRows.filter(m => m.billable).length === 1 ? '' : 's'} are billed as this one amount; switch to Itemised to see them.</p>` : `
-            ${edit && c.material > 0.004 ? `
+            ${edit && c.bulkOnly ? `
             <div class="grid cols-2">
               <div><label style="margin-top:0;">Materials billed as one amount on this invoice</label><input type="number" step="0.01" inputmode="decimal" class="ia-material" value="${c.material}" /></div>
-            </div>` : ''}
+            </div>
+            <p class="subtitle" style="font-size:12px; margin:4px 0 8px;">This invoice billed the stage's materials as one amount, so its PO lines and Stock draws are not listed here (they would be billed twice). Change the amount to add what has arrived since.</p>` : ''}
             <div style="overflow-x:auto;">
               <table style="font-size:13px; min-width:620px;">
                 <thead><tr><th style="width:36px;">Bill</th><th>Item</th><th>From</th><th class="num" style="width:80px;">Qty</th><th class="num">Cost each</th><th class="num" style="width:100px;">Price each</th><th class="num">Total</th></tr></thead>
@@ -471,7 +478,8 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
           if (!t) return;
           tierOverride[r.staffId] = t;
           centres.forEach(cc => cc.labourRows.forEach((x) => {
-            if ((x.source === 'shift' || x.source === 'invoice') && x.staffId === r.staffId) { x.rateTierId = t.id; x.tierName = t.name; x.rate = r2(t.sellRate * (x.mult || 1)); }
+            if (x.source === 'shift' && x.staffId === r.staffId) { x.rateTierId = t.id; x.tierName = t.name; x.rate = r2(t.sellRate * (x.mult || 1)); }
+            if (x.source === 'invoice' && x.staffId === r.staffId) { x.rateTierId = t.id; x.tierName = t.name; } // its $/hr stays as saved
           }));
           renderCentres();
         });

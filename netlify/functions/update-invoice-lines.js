@@ -24,7 +24,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bad = (error) => ({ statusCode: 400, body: JSON.stringify({ ok: false, error }) });
 // What a line is, for counting what changed: the usage row, the shifts, the prebuild or the words.
 const lineKey = (l) => l.job_material_usage_id ? `u:${l.job_material_usage_id}`
-  : (l.time_entry_ids && l.time_entry_ids.length) ? `t:${[...l.time_entry_ids].sort().join(',')}`
+  : (l.time_entry_ids && l.time_entry_ids.length) ? `t:${[...l.time_entry_ids].sort().join(',')}:${l.description}`
   : l.prebuild_id ? `p:${l.prebuild_id}:${l.description}`
   : `d:${l.kind}:${l.description}`;
 const isServerLine = (l) => /^Commercial agreement \(/.test(l.description || '');
@@ -55,8 +55,14 @@ exports.handler = async (event) => {
     if (!invoice.project_id) return bad('This invoice has no job.');
     const projectId = invoice.project_id;
 
-    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, name, sort_order, markup_percent').eq('project_id', projectId);
+    const [{ data: allCentres }, { data: projectRow }] = await Promise.all([
+      supabaseAdmin.from('cost_centres').select('id, name, sort_order, markup_percent, quoted_amount').eq('project_id', projectId),
+      supabaseAdmin.from('projects').select('client_id').eq('id', projectId).maybeSingle(),
+    ]);
     const centreById = Object.fromEntries((allCentres || []).map(c => [c.id, c]));
+    // a quoted claim (no line items, a quoted total) is edited as per-stage numbers, not as lines
+    const projectTotal = (allCentres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
+    if (!(invoice.invoice_line_items || []).length && projectTotal > 0) return bad('This is a quoted claim: edit its amounts with the per-stage Edit, not as lines.');
     const wanted = claims.filter(c => c && c.costCentreId && ((Array.isArray(c.items) && c.items.length) || Number(c.materialAmount) > 0));
     if (wanted.some(c => !centreById[c.costCentreId])) return bad('A stage on this invoice does not belong to this job.');
     if (!wanted.length) return bad('An invoice needs at least one line. To take it off the job, issue a credit note or leave the invoice as it is.');
@@ -67,6 +73,7 @@ exports.handler = async (event) => {
 
     // priced exactly as on create
     const rateCard = await rateCardFor(supabaseAdmin, projectId);
+    let agreementTotal = 0;
     const pricedClaims = await Promise.all(wanted.map(async (c) => {
       const centre = centreById[c.costCentreId];
       const priced = await priceInvoiceItems(supabaseAdmin, c.items || [], centre.markup_percent ?? 45, rateCard.labourFactor);
@@ -74,6 +81,7 @@ exports.handler = async (event) => {
       if (agreement) {
         priced.rows.push(agreement);
         priced.labour = r2(priced.labour + agreement.labour_amount);
+        agreementTotal = r2(agreementTotal - agreement.labour_amount);
       }
       return { c, priced };
     }));
@@ -131,11 +139,25 @@ exports.handler = async (event) => {
     if (removed) words.push(`${removed} removed`);
     if (changed) words.push(`${changed} changed`);
 
+    // the note under the totals (item 48) and, on a no-quote job, the name (its stage names) follow the lines
+    let commercialAgreement = null;
+    if (agreementTotal > 0) {
+      const { data: agreementClient } = projectRow?.client_id
+        ? await supabaseAdmin.from('clients').select('agreement_sent_at').eq('id', projectRow.client_id).maybeSingle()
+        : { data: null };
+      commercialAgreement = { name: rateCard.name, percent_off: rateCard.percentOff, amount: agreementTotal, sent_at: agreementClient?.agreement_sent_at || null };
+    }
+    const description = projectTotal <= 0
+      ? payloadClaims.map(c => centreById[c.cost_centre_id]).sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0)).map(cc => cc?.name || 'Work').join(' + ').slice(0, 200)
+      : null;
+    const sentAtOk = sentAt && !Number.isNaN(Date.parse(sentAt));
     const payload = {
       actor_id: user.id,
       claims: payloadClaims,
       detail: words.join(', '),
-      ...(sentAt ? { sent_at: new Date(sentAt).toISOString() } : {}),
+      commercial_agreement: commercialAgreement,
+      ...(description ? { description } : {}),
+      ...(sentAtOk ? { sent_at: new Date(sentAt).toISOString() } : {}),
       ...(dueDate !== undefined ? { due_date: dueDate || null } : {}),
       ...(notes !== undefined ? { notes: String(notes || '').trim().slice(0, 2000) || null } : {}),
     };
