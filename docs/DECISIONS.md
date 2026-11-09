@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 10 Nov 2026
+
+- Bug fix (owner's yes 10 Nov 2026, into `main`): sales and finance logins saw "Not mapped" under every invoice's Xero breakdown because only admins could read `xero_account_mapping`. Migration 20261130070000 adds a read policy for pricing roles; writing stays admin only. Push to Xero was never affected.
+
 ## 9 Nov 2026
 
 - Built and live (owner's yes 9 Nov 2026, straight to main): item 67, every new claim invoice lists the stage's quoted lines on the client's invoice by itself (one tick to hide, or to show on an older one; J7011's SI3010 set on), migration 20261130060000; item 68, the client's invoice shows the late payment interest to today and a Total to pay today, Pay online charges that total fresh each day, and a card payment that includes interest raises the interest invoice by itself, paid and pushed to Xero when the original is there. Detail: `docs/PROJECT_SPEC.md` A22 and H, `docs/IDEAS_BACKLOG.md` items 67 and 68.
