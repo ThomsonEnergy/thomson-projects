@@ -2,8 +2,14 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 9 Nov 2026
+
+- Planned (waiting on yes): item 62, pipeline moves done by the database. A read-only check of production found 9 jobs in the wrong column because three stage checks only run in the browser (task gate, handover check, all-paid check) and no-quote invoices never count as final. Plan, findings and the job list in IDEAS_BACKLOG.md item 62.
+
 ## 8 Nov 2026
 
+- Owner (Sunday, "build and ship straight to main"): item 61, the Invoices page as the accounts desk. Invoices are created on the job but checked, sent, chased, pushed to Xero and corrected from the Invoices page, usually by an accounts person who was not on the job, so every invoice now carries its status in plain words and a history of who did what and when (`invoice_events`, migration 20261130030000, backfilled). One invoice panel serves both pages (`js/invoice-actions.js`, moved out of `project.html`); a reminder email is one click. Numbered 61 because another chat shipped item 60 (leave) the same day. Detail: `docs/PROJECT_SPEC.md` A28, `docs/IDEAS_BACKLOG.md` item 61.
+- Owner, 8 Nov 2026: an invoice's email goes out through the sender's Gmail (sales@ or their own inbox) and lands in three places: the job's Emails tab (tagged to the job, replies land there too), the job's Activity tab (one line) and the Inbox. Now also the invoice's own history.
 - LIVE (owner, Sunday: "ship straight to live"): item 60. Admin and Finance add leave for any staff member (approved now by default) and delete any leave on the Timesheets Leave card; leave already in Xero Payroll warns to delete it there too. Migration 20261130020000 (two RLS policies), production backup `backup_20261108.leave_requests`. See PROJECT_SPEC.md (Leave card) and IDEAS_BACKLOG.md item 60.
 - LIVE (owner: "bug, ship straight to main"): on a job or quote, the client name in the header is now a link that opens that client's card on the Clients page in a new tab (details, contacts, sites, payment terms, rate card, delete). Sales, finance and admin only, and only when the job is linked to a client. `public/project.html`, no migration.
 

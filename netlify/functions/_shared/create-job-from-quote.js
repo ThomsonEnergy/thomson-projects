@@ -26,6 +26,7 @@
 
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
+const { logInvoiceEvents } = require('./invoice-events');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 const { entryHours } = require('./compute-labour-cost');
@@ -44,7 +45,7 @@ function splitLabourMaterial(centre, amount) {
   return { labourAmount, materialAmount };
 }
 
-async function raiseDepositInvoice(supabaseAdmin, job, centres) {
+async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
   const depositPercent = Number(job.deposit_percent) || 0;
   const totalQuoted = centres.reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
   if (!(depositPercent > 0) || !(totalQuoted > 0)) return null;
@@ -125,6 +126,11 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres) {
     throw err;
   }
 
+  // approved online: the client lands on this invoice straight after accepting (quote.html), so it is sent
+  await logInvoiceEvents(supabaseAdmin, [
+    { invoiceId: insertedInvoice.id, kind: 'created', actorId: approvedBy, actorLabel: approvedBy ? null : 'the quote approval', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` },
+    approvedBy ? null : { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', actorLabel: 'the quote approval', detail: 'Shown to the client on the quote approval page' },
+  ]);
   return invoiceToken;
 }
 
@@ -413,7 +419,7 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   const { data: haveTasks } = retry ? await supabaseAdmin.from('job_tasks').select('id').eq('project_id', job.id).limit(1) : { data: [] };
   if (!(haveTasks || []).length) await createDefaultJobTasks(supabaseAdmin, job, newStages);
 
-  const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages);
+  const invoiceToken = await raiseDepositInvoice(supabaseAdmin, job, newStages, approvedBy);
   // No deposit invoice means nothing will ever fire the deposit-paid
   // webhook for this job - move it past that stage immediately instead
   // of leaving it stuck at 'quote_approved' forever.

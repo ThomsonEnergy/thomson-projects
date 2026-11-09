@@ -123,7 +123,8 @@ const emailSendNow = (payload) => emailPostFn('send-gmail', payload, 'The email 
 //         reviewRequest: {projectId, clientName, clientEmail} (shows "Ask for a review"),
 //         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId),
 //         mailbox: { id, address, kind } (send from My inbox instead of sales@), draftId (a saved draft: Save draft
-//         button, and the draft is cleared once sent), onDraftSaved() }
+//         button, and the draft is cleared once sent), onDraftSaved(),
+//         invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } (js/invoice-actions.js: the send goes in the invoice's history) }
 function openEmailComposer(opts) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
@@ -213,6 +214,7 @@ function openEmailComposer(opts) {
         attachments: [...chosen, ...uploaded].filter((o, i, all) => all.findIndex(x => x.bucket === o.bucket && x.path === o.path) === i).map(o => ({ bucket: o.bucket, path: o.path, name: o.name })),
         tagProjectId: opts.projectId || undefined, tagKind: opts.tagKind || 'client',
         mailboxId: opts.mailbox && !opts.replyToThreadId ? opts.mailbox.id : undefined, draftId: draftId || undefined,
+        invoiceEvent: opts.invoiceEvent || undefined, // an invoice's email or reminder: recorded in its history once sent (item 61)
       });
       overlay.remove();
       if (opts.onSent) await opts.onSent(data.threadId);
