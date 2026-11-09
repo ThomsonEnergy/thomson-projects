@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 9 Nov 2026 (item 61 live, items 62 to 65 planned)
+Last updated 9 Nov 2026 (items 61 and 65 live, items 62 to 64 planned)
 
 Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth: if something here is built, move it to the spec.
 
@@ -43,7 +43,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 62 | Pipeline moves done by the database: task gate, handover check and all-paid check as triggers, no-quote invoices move to Awaiting Payment, board quote columns for quotes only, 9 jobs put back in the right column | Planned 9 Nov 2026, waiting on yes | N | None |
 | 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | Planned 9 Nov 2026, waiting on the owner's yes | N | None |
 | 64 | Edit a do-and-charge invoice with its lines before Xero: the Invoice actual costs panel reopens the invoice's shifts, materials and items, plus what has arrived since, and saves into the same invoice | Planned 9 Nov 2026, waiting on the owner's yes | N | Item 63 first (same panel) |
-| 65 | Jobs page in stage folders: a tab per pipeline stage above the jobs table, counts on each, All and Archived, like the Quotes page tabs | Planned 9 Nov 2026, waiting on the owner's yes | N | None |
+| 65 | Jobs page in stage folders: a tab per pipeline stage above the jobs table, counts on each, All and Archived, like the Quotes page tabs | LIVE 9 Nov 2026 (spec A6), PR into `main` | N | None |
 
 ## High lead time, start now
 
@@ -1329,7 +1329,7 @@ Done means (staging, admin@staging.test, a do-and-charge job with two shifts and
 
 Touches: `public/js/project-invoice-actuals.js` (edit mode: load the invoice's lines, merge with the unbilled, Save calls the new function; `?v=` bump), `public/js/invoice-actions.js` (Edit on an invoice with line items opens the actuals panel; the numbers-only panel stays for quoted claims), `public/project.html` (the create panel's "Add to SI... instead"), `netlify/functions/update-invoice-lines.js` (new: pricing roles, prices the lines, calls the function), `netlify/functions/get-invoiceable-actuals.js` (also returns the lines already on a given invoice), `netlify/functions/_shared/invoice-items.js`, one migration (`edit_invoice_lines(...)`, security definer, `is_pricing_role()`, revoke from public and anon), `docs/PROJECT_SPEC.md` A22. Overlaps: item 63 (same panel, same chat, 63 first); item 62 (`create-invoice.js` stage move, different lines, and its triggers on `invoices.paid_at` do not fire on an edit); item 61 live (the invoice panel's Edit button is the door). Kind: feature (into `staging`); migration yes; money yes, stock yes (Stock items in and out), RLS no new table (one security definer function), payroll no; backup of `invoices`, `invoice_claims`, `invoice_line_items`, `job_material_usage` and `time_entries` before the production migration. Size: large (a day). Test on staging: admin@staging.test, the six clicks above; no outside keys needed (Xero push can stay unmade; a fake `xero_invoice_id` by SQL covers click 5). Best model: Fable 5.1, effort xhigh, because it moves money and stock in one database function and reopens the create panel on saved data.
 
-## 65. Jobs page in stage folders (planned 9 Nov 2026, waiting on the owner's yes)
+## 65. Jobs page in stage folders (owner's yes 9 Nov 2026, "build straight to main", LIVE the same day, spec A6)
 
 Owner, 9 Nov 2026: "On the job page have sub folders like quote do with the stage the job is in." The Quotes page sorts quotes into tabs (Active, Sent to Client, Approved, Declined, Archived) with a count on each. The Jobs page (`projects.html`) is one flat table of every job except archived, with a search box. On 9 Nov 2026 live has 69 jobs: 37 at Ready to Book, 12 at Job Not Complete, 8 at Client Handover, 5 at Awaiting Our Action, 2 at Awaiting Payment, 2 archived, and one each at Lead, Quote Sent, Awaiting Client Action, Job Booked and Ready to Invoice.
 
