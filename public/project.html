@@ -3376,7 +3376,7 @@
                 <div id="suggest-prebuilds-msg"></div>
                 <p style="margin:12px 0 0; font-size:15px;">Quoted total (ex GST): <strong id="total-display">$0.00</strong></p>
 
-                <div style="margin-top:18px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) || Number(project.stc_total) > 0 || Number(project.bstc_total) > 0 ? '' : 'display:none;'}" id="credits-card">
+                <div style="margin-top:18px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) || Number(project.stc_total) > 0 || Number(project.bstc_total) > 0 || (Array.isArray(project.sm8_stcs) && project.sm8_stcs.length) ? '' : 'display:none;'}" id="credits-card">
                   <label style="margin-top:0; font-weight:600;">STC and BSTC credits</label>
                   <p class="subtitle" style="margin:2px 0 10px;">Two lines on the proposal, claimed with the stage picked here (blank: the last stage). Ex GST; a company client sees GST added on the proposal and the invoice. BSTCs are approved and paid by Formbay separately, so they stay separate here and on the invoice.</p>
                   <div id="stc-credit-block">
@@ -4389,8 +4389,11 @@
                 </div>`;
               }).join('')}
 
-              ${pricingVisible && project.job_number ? centres.map((c, i) => {
-                const { stageInvoices, claimedTotal, quotedAmt, remaining, stcApplied, stcRemaining } = stageClaimSummary(c);
+              ${pricingVisible && project.job_number ? (() => { const credit = quoteCreditSummary(project); return centres.map((c, i) => {
+                const { stageInvoices, claimedTotal, quotedAmt, remaining } = stageClaimSummary(c);
+                // the job's credits show on the stage they are claimed with, the same figures the Invoice project panel offers
+                const creditLine = (label, id, total, applied, left) => c.id === id && total > 0
+                  ? `<p class="subtitle">${label} credit: ${money(total)} - on invoices so far: ${money(applied)}, still to come off: ${money(left)}.</p>` : '';
                 return `
                 <div class="card">
                   <h2>${costCentreNumber(project.job_number, i + 1)} ${escapeHtml(c.name)} - claims</h2>
@@ -4426,10 +4429,11 @@
                   ` : `<p class="subtitle">No claims raised yet.</p>`}
 
                   <p class="subtitle" style="margin-top:14px;">Claimed to date: <strong style="color:var(--text);">${money(claimedTotal)}</strong> of ${money(quotedAmt)}. Remaining: <strong style="color:var(--text);">${money(remaining)}</strong>.</p>
-                  ${c.stc_total > 0 ? `<p class="subtitle">STC entitlement: ${money(c.stc_total)} - applied so far: ${money(stcApplied)}, remaining: ${money(stcRemaining)}.</p>` : ''}
+                  ${creditLine('STC', credit.stcStageId, Number(project.stc_total) || 0, credit.stcApplied, credit.stcRemaining)}
+                  ${creditLine('BSTC', credit.bstcStageId, Number(project.bstc_total) || 0, credit.bstcApplied, credit.bstcRemaining)}
                   ${remaining > 0 ? `<button class="secondary create-invoice-btn" data-id="${c.id}" style="margin-top:6px;">Invoice next claim</button>` : ''}
                 </div>`;
-              }).join('') : ''}
+              }).join(''); })() : ''}
               `}
             </div>
 
@@ -5889,28 +5893,28 @@
     }
 
     // Jobs brought across from ServiceM8 (sm8-import-jobs.js) arrive with
-    // their STCs listed but not applied (projects.sm8_stcs). This lists them
-    // with an Add button that opens the normal STC form prefilled, and shows
-    // how much of their value is on the stages' STC credit so far (set in
-    // Edit stages). It drops away once every type has been recorded here.
+    // their STCs as the job's credits and listed in projects.sm8_stcs. This
+    // lists the ones not yet recorded here (for Formbay) with an Add button
+    // that opens the normal STC form prefilled, and warns when the job's
+    // credits are short of ServiceM8's. It drops away once both are done.
     function sm8StcsBox(project, centres) {
       const list = Array.isArray(project.sm8_stcs) ? project.sm8_stcs : [];
       if (!list.length) return '';
       const labels = { pv: 'solar STCs', bstc: 'battery STCs', swh: 'hot water STCs' };
       const pending = list.map((x, i) => ({ ...x, i, recorded: jobStcRows.some(r => r.stc_type === x.type) })).filter(x => !x.recorded);
       const sm8Total = list.reduce((s, x) => s + (Number(x.total) || 0), 0);
-      const stageCredit = (Number(project.stc_total) || 0) + (Number(project.bstc_total) || 0) || centres.reduce((s, c) => s + (Number(c.stc_total) || 0), 0);
-      const creditDone = stageCredit >= sm8Total - 0.01;
+      const jobCredit = (Number(project.stc_total) || 0) + (Number(project.bstc_total) || 0);
+      const creditDone = jobCredit >= sm8Total - 0.01;
       if (!pending.length && creditDone) return '';
       return `
         <div style="margin-bottom:12px; padding:12px 14px; border:1px solid var(--accent); border-radius:8px; background:var(--accent-dim);">
           <strong>STCs from ServiceM8 to enter</strong>
-          <p class="subtitle" style="margin:4px 0 8px;">This job came across from ServiceM8 #${escapeHtml(project.sm8_job_number || '')} without its STCs applied. Add each one here, and set the stage's STC credit in Edit stages.</p>
+          <p class="subtitle" style="margin:4px 0 8px;">This job came across from ServiceM8 #${escapeHtml(project.sm8_job_number || '')}. Add each one here to track it with Formbay.</p>
           ${pending.map(x => `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:6px;">
             <span>${x.count} ${labels[x.type] || 'STCs'} at ${money(x.price)} = ${money(x.total)}</span>
             <button type="button" class="secondary job-stc-sm8-add" data-i="${x.i}" style="font-size:12px; padding:4px 10px;">Add</button>
           </div>`).join('')}
-          <p class="subtitle" style="margin:8px 0 0;">Stage STC credit: ${money(stageCredit)} of ${money(sm8Total)}${creditDone ? ' - done' : ''}.</p>
+          <p class="subtitle" style="margin:8px 0 0;">STC and BSTC credits on the invoice: ${money(jobCredit)} of ${money(sm8Total)}${creditDone ? ' - done' : '. Set the rest on the Cost Centres tab: Edit stages, STC and BSTC credits'}.</p>
         </div>`;
     }
 

@@ -324,9 +324,9 @@ async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
 const isPartialInvoice = (m) => /partial\s*invoice/i.test(String(m.name || ''));
 const num = (v) => Number(v) || 0;
 // "STC Rebate", "BSTC rebate": the customer's STC credit, a negative,
-// GST-free line. Not imported as a line item or applied automatically:
-// staff enter STCs on the job the normal way (STCs tab and the stage's STC
-// credit), from the list kept in projects.sm8_stcs and the job's notes.
+// GST-free line. Not imported as a line item: the import sets them as the
+// job's STC and BSTC credits (they come off the invoice) and keeps the list
+// in projects.sm8_stcs for the STCs tab (Formbay tracking).
 const isStcRebate = (m) => /\bb?stcs?\b/i.test(String(m.name || '')) && num(m.price) * num(m.quantity) < 0;
 const stcTypeOf = (name) => (/\bbstc/i.test(name) ? 'bstc' : /\b(swh|hot\s*water)\b/i.test(name) ? 'swh' : 'pv');
 const STC_TYPE_LABELS = { pv: 'solar STCs', bstc: 'battery STCs', swh: 'hot water STCs' };
@@ -429,7 +429,7 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   if (active.length && Math.abs(expectedInc - num(job.totalIncGst)) > 1) {
     warnings.push(`Line items come to $${expectedInc.toFixed(2)} inc GST but ServiceM8's job total is $${num(job.totalIncGst).toFixed(2)} - check the value`);
   }
-  if (stcs.length) warnings.push(`STCs not applied: ${stcsText(stcs)}. They go in the job's notes - enter them on the job (STCs tab and the stage's STC credit) after importing`);
+  if (stcs.length) warnings.push(`STCs set as the job's credits: ${stcsText(stcs)}. Add them on the job's STCs tab after importing to track them with Formbay`);
   if (lines.length) {
     const { markupPercent } = stageFromLines(lines);
     if (markupPercent < 0 || markupPercent > 300) warnings.push(`Materials in ServiceM8 have ${markupPercent < 0 ? 'costs above their sell price' : 'little or no cost recorded'} (stage markup ${Math.round(markupPercent)}%) - profit on this job will look ${markupPercent < 0 ? 'low' : 'high'}`);
