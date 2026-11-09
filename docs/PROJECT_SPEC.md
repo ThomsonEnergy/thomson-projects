@@ -546,6 +546,7 @@ Direct Job (A3) plus do-and-charge invoicing (A22) covers most of it today. Stil
 ## PART H: Xero (live, real company)
 
 - **Interest charged (item 66, 9 Nov 2026):** a late payment interest invoice posts to Xero as one GST free line to the `interest` mapping in Settings > Xero Mapping (seeded 270 Interest Income, tax BAS excluded; change the account or tax type there). The original invoice is never changed in Xero: interest is always its own invoice, so both reconcile on their own.
+- **Who sees the mapping (10 Nov 2026):** every pricing role (admin, finance, sales) can read `xero_account_mapping`, so the "How it posts to Xero" breakdown shows the real accounts for all of them; only admins change it (Settings > Xero Mapping).
 - **Interest paid by card (item 68, 9 Nov 2026):** a Pay online payment that includes interest makes the interest invoice by itself, marked paid, and pushes it to Xero straight away when the original invoice is in Xero, so the Airwallex settlement matches the original plus the interest invoice. If the push fails the interest invoice shows Not in Xero and a history line says why: press Push to Xero on its row.
 
 - **H1. Connection:** Custom Connection (client_credentials), 30 minute tokens re-requested. Credentials in the `api_keys` table via `getIntegrationKey()` (xero_client_id, xero_client_secret, xero_webhook_key). Switched to the real Thomson Energy Australia company.
