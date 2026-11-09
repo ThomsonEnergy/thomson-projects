@@ -12,6 +12,7 @@ const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { advanceToActionOrReady, checkAndAdvanceComplete } = require('./_shared/advance-job-stage');
 const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { interestPaidOnline } = require('./_shared/interest-invoice');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -70,6 +71,11 @@ exports.handler = async (event) => {
           .eq('id', invoiceRow.id);
         await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceRow.id, kind: 'paid', actorLabel: 'the pay online link', detail: 'Paid by card through the pay online link' });
         await regenerateInvoicePdf(invoiceRow.id); // remake the PDF so it carries the PAID stamp
+        // The link charged the balance plus the interest to its day (item 68): the part above the balance
+        // becomes a paid interest invoice, pushed to Xero when the original is there, so the card settlement
+        // matches two Xero invoices. Nothing happens when Charge interest was off.
+        const interest = await interestPaidOnline(supabaseAdmin, invoiceRow.id, resource.amount);
+        if (interest) await regenerateInvoicePdf(interest.invoiceId);
 
         // Same deposit -> quote_approved advancement as xero-webhook.js -
         // see advance-job-stage.js for why this only moves a job that's

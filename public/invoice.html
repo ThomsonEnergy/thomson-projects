@@ -128,7 +128,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=129"></script>
+  <script src="/js/supabase-client.js?v=130"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -176,6 +176,10 @@
       // Balance due comes straight from the server (the same number the card payment charges),
       // never recalculated here, so the two can never drift apart.
       const balanceDue = Number(inv.balance_due);
+      // what clears the invoice today (item 68): the balance plus the interest to today, the figure Pay online charges
+      const interestDays = Number(inv.interest_days) || 0;
+      const interestRate = Number(inv.interest_rate_pct) || 21;
+      const totalToPay = Math.round((balanceDue + interestAccrued) * 100) / 100;
       const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - bstcAmount - balanceDue) * 100) / 100);
       const isPaid = !!inv.paid_at;
       const isDeposit = !!(inv.is_deposit || /^deposit$/i.test(inv.description || ''));
@@ -207,6 +211,13 @@
             // Labour lines (item 41) are hours at a rate per hour; a "Less" line (negative rate)
             // shows its amount only, like a lawyer's bill.
             const items = c.invoice_items || [];
+            // the stage's quoted lines (item 67): the same lines and prices as the quote, then the claim as the last line
+            const quoteLines = inv.show_quote_lines && !items.length ? (c.quote_lines || []) : [];
+            quoteLines.forEach((q) => {
+              const qty = Number(q.quantity) || 0, amt = Number(q.amount) || 0;
+              rows.push({ cells: [esc(q.description), q.item_type === 'labour' ? `${qty.toFixed(2)} hrs` : (qty ? qty.toFixed(2) : ''), money(qty ? amt / qty : amt), money(amt)], cls: ['', 'ctr', 'num', 'num'] });
+            });
+            if (quoteLines.length) rows.push({ cells: [`This claim: ${pct}% of this stage`, '', '', money(lab + mat)], cls: ['', 'ctr', 'num', 'num'] });
             items.forEach((it) => {
               if (it.kind === 'labour' && Number(it.unit_price) < 0) rows.push({ cells: [esc(it.description), '', '', money(Number(it.labour_amount) || 0)], cls: ['', 'ctr', 'num', 'num'] });
               else if (it.kind === 'labour') rows.push({ cells: [esc(it.description), `${(Number(it.quantity) || 0).toFixed(2)} hrs`, money(it.unit_price), money((Number(it.quantity) || 0) * (Number(it.unit_price) || 0))], cls: ['', 'ctr', 'num', 'num'] });
@@ -217,7 +228,7 @@
             // The claim itself is one line for the client (owner, 4 Nov 2026): the labour / materials
             // split stays on our side (Xero income lines, job costing), never on the invoice.
             const rest = Math.round((lab + mat - itemLab - itemMat) * 100) / 100;
-            if (rest > 0) rows.push(itemRow(c.cost_centre_name, rest));
+            if (rest > 0 && !quoteLines.length) rows.push(itemRow(c.cost_centre_name, rest));
             if (!rows.length) rows.push(itemRow(c.cost_centre_name, 0));
           }
           sections.push({ title: `${c.cost_centre_name}${partial ? ` - progress claim (${pct}% of this stage)` : ''}`, rows });
@@ -296,7 +307,7 @@
         : '';
       // interest accruing on an overdue invoice (item 66): shown while it is unpaid; it is invoiced separately
       const interestNote = interestAccrued > 0 && !isPaid
-        ? `Interest at ${Number(inv.interest_rate_pct) || 21}% per annum accrues daily on this overdue amount: ${money(interestAccrued)} to today (${Number(inv.interest_days) || 0} day${Number(inv.interest_days) === 1 ? '' : 's'}, ${money(Number(inv.interest_daily) || 0)} a day). It is invoiced separately.`
+        ? `Interest at ${interestRate}% per annum accrues daily on this overdue amount: ${money(interestAccrued)} to today (${interestDays} day${interestDays === 1 ? '' : 's'}, ${money(Number(inv.interest_daily) || 0)} a day). Paying online charges the total to pay today; the interest is invoiced separately.`
         : '';
       const finalHtml = `
         <div class="inv-final">
@@ -310,7 +321,7 @@
               ${bstcAmount > 0 ? `<div><span class="k">BSTC Credit (battery)${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(bstcAmount)}</span></div>` : ''}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
-              ${interestAccrued > 0 && !isPaid ? `<div><span class="k">Interest accrued to today</span><span class="v">${money(interestAccrued)}</span></div>` : ''}
+              ${interestAccrued > 0 && !isPaid ? `<div><span class="k">Late payment interest to ${esc(dateText(new Date()))} (${interestDays} day${interestDays === 1 ? '' : 's'} at ${interestRate}% pa, GST free)</span><span class="v">${money(interestAccrued)}</span></div><div><span class="k">Total to pay today</span><span class="v">${money(totalToPay)}</span></div>` : ''}
             </div>
           </div>
           <div class="inv-howto">
@@ -352,7 +363,8 @@
       const summaryHtml = isPrint ? '' : `
         <div class="doc-sum">
           <div class="ds-kicker">Tax invoice ${esc(invNo)}${isDeposit ? ' &middot; Deposit' : ''}</div>
-          <div class="ds-amount">${money(balanceDue)}</div>
+          <div class="ds-amount">${money(isPaid ? balanceDue : totalToPay)}</div>
+          ${interestAccrued > 0 && !isPaid ? `<div class="ds-due">includes ${money(interestAccrued)} late payment interest to today</div>` : ''}
           <div class="ds-due${isOverdue ? ' overdue' : ''}">${esc(dueText)}</div>
           ${isPaid ? '' : `
           <button type="button" id="sum-pay-btn" class="ds-pay" data-token="${esc(token)}">Pay online now</button>
