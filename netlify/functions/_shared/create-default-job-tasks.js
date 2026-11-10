@@ -61,7 +61,8 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
     });
   });
 
-  // Battery pre-job and handover tasks from the answers (template-job-tasks.js).
+  // Pre-job tasks from the solar answers, then the battery pre-job and handover tasks (template-job-tasks.js).
+  if (template === 'solar') tasksFor('solar', answers).forEach((t) => rows.push({ ...t, project_id: job.id }));
   if (withBattery) {
     tasksFor('battery', answers).forEach((t) => rows.push({ ...t, project_id: job.id }));
   }

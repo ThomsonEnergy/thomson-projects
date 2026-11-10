@@ -1,4 +1,4 @@
-// Default job tasks for the renovation and service work quote templates,
+// Default job tasks for the renovation, service work, solar and battery quote templates,
 // built from the answers saved on the quote (projects.template_answers -
 // question ids are defined in public/js/template-questions.js). Same shape
 // as the solar tasks in create-default-job-tasks.js: 'prejob' tasks are
@@ -40,6 +40,11 @@ function tasksFor(template, a) {
     rows.push(handover('Photograph the fault and the repair (before and after)'));
     rows.push(handover('Test and record results; issue a Certificate of Electrical Safety if required'));
     if (yes('repeat_issue')) rows.push(handover('Note the root cause and recommend any follow-up work to the client'));
+  }
+
+  // Solar (create-default-job-tasks.js adds the ordering and battery tasks next to these).
+  if (template === 'solar') {
+    if (yes('life_support')) rows.push(pre('Life support equipment on site: tell the network (DNSP) and the client in writing before any planned power-off'));
   }
 
   // Battery proposal, or Solar with Batteries as well (create-default-job-tasks.js adds these

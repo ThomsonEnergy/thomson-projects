@@ -5590,11 +5590,12 @@ function addPrebuildToStage(stageRow, prebuild, qty = 1) {
 // deposit and terms, plus the NETCC / CER / SAA rules for solar and battery quotes. Runs
 // check-solar-compliance (phase 'quote') and shows what is missing, with a button that turns the
 // gaps into job tasks. `taskType` is the job_tasks.task_type the created tasks get.
+// btnEl is optional: without one (a quote's step 5, which runs the check by itself) the result
+// area says Checking... while it runs.
 async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
-  btnEl.disabled = true;
-  const originalLabel = btnEl.textContent;
-  btnEl.textContent = 'Checking...';
-  resultEl.innerHTML = '';
+  const originalLabel = btnEl ? btnEl.textContent : '';
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Checking...'; }
+  resultEl.innerHTML = btnEl ? '' : '<p class="subtitle" style="margin:0;">Checking...</p>';
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
     const checkRes = await fetch('/.netlify/functions/check-solar-compliance', {
@@ -5653,8 +5654,7 @@ async function runComplianceCheck(projectId, phase, taskType, btnEl, resultEl) {
   } catch (err) {
     resultEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
   } finally {
-    btnEl.disabled = false;
-    btnEl.textContent = originalLabel;
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = originalLabel; }
   }
 }
 

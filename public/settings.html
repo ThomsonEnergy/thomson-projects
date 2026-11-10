@@ -58,7 +58,6 @@
         <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
-        <button class="settings-tab" data-panel="photos">Photo Categories</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
         <button class="settings-tab" data-panel="onboarding-docs" data-admin-only="1">Onboarding Documents</button>
         <button class="settings-tab" data-panel="sm8-import" data-admin-only="1">ServiceM8 Import</button>
@@ -143,16 +142,8 @@
           </div>
 
           <div class="card">
-            <h2>Cover page photo</h2>
-            <p class="subtitle" style="margin-bottom:10px;">One fixed background photo, used on the title page of every generated quote/invoice PDF - client name, job details and your logo are overlaid on top at generation time. Upload something high quality but not enormous; it's resized automatically either way.</p>
-            <div id="cover-photo-preview" style="margin-bottom:12px;"></div>
-            <input type="file" id="cover-photo-file" accept="image/*" />
-            <div id="cover-photo-msg"></div>
-          </div>
-
-          <div class="card">
             <h2>Portfolio photos (shown on the quote's own page when a client opens their link)</h2>
-            <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs. These appear as a header banner on the client-facing quote page itself (not the generated PDF's title page - see Cover page photo above), picked to match the job's category.</p>
+            <p class="subtitle" style="margin-bottom:10px;">Upload photos of previous jobs and tag each Electrical, Solar or General. A proposal's inside pages use the photos tagged for its type: New Build, Renovation and Service Work use Electrical, Solar and Battery use Solar, Quick Estimate uses General.</p>
             <div id="portfolio-thumbs" style="margin-bottom:10px;"></div>
             <input type="file" id="portfolio-file" accept="image/*" multiple />
             <div id="portfolio-msg"></div>
@@ -406,10 +397,6 @@
                 <input id="default-markup" type="number" step="0.1" placeholder="45" />
               </div>
               <div>
-                <label>Default deposit %</label>
-                <input id="default-deposit" type="number" step="0.1" placeholder="10" />
-              </div>
-              <div>
                 <label>Quotes and variations valid for (days)</label>
                 <input id="quote-valid-days" type="number" step="1" min="1" placeholder="30" />
               </div>
@@ -592,17 +579,6 @@
           </div>
           <button id="save-terms-btn">Save terms</button>
           <div id="save-terms-msg"></div>
-        </div>
-
-        <!-- Photo Categories -->
-        <div class="settings-panel" id="panel-photos">
-          <div class="card">
-            <div class="empty-state">
-              <div class="empty-icon">&#128247;</div>
-              <h2>Tagged where the photos live</h2>
-              <p>Electrical / Solar / General categories are set per-photo under <strong>Company Details &gt; Portfolio photos</strong>. Each proposal template pulls cover photos from the matching category automatically - New Build uses Electrical, Solar Proposal uses Solar, and Quick Estimate / Time &amp; Materials use General.</p>
-            </div>
-          </div>
         </div>
 
         <!-- Users & Roles -->
@@ -842,14 +818,13 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=130"></script>
+  <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let portfolioPhotos = [];
     let xeroMappingLoaded = false;
     let logoUrl = '';
-    let coverPhotoUrl = '';
 
     // --- Tab switching ---
     document.querySelectorAll('.settings-tab').forEach(btn => {
@@ -885,12 +860,6 @@
         : `<p class="subtitle" style="margin:0;">No logo uploaded yet.</p>`;
     }
 
-    function renderCoverPhotoPreview() {
-      document.getElementById('cover-photo-preview').innerHTML = coverPhotoUrl
-        ? `<img src="${supaImageVariant(coverPhotoUrl, 400, 70)}" style="max-height:140px; max-width:260px; border-radius:8px; object-fit:cover;" />`
-        : `<p class="subtitle" style="margin:0;">No cover photo uploaded yet - the title page prints plain white/black text until one is set.</p>`;
-    }
-
     async function loadSettings() {
       const { data, error } = await supabaseClient.from('company_settings').select('*').eq('id', 1).single();
       if (error) {
@@ -899,9 +868,7 @@
       }
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
-      coverPhotoUrl = data.cover_photo_url || '';
       renderLogoPreview();
-      renderCoverPhotoPreview();
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
@@ -926,7 +893,6 @@
       document.getElementById('tagline').value = data.tagline || '';
       document.getElementById('google-review-url').value = data.google_review_url || '';
       document.getElementById('default-markup').value = data.default_markup_percent ?? 45;
-      document.getElementById('default-deposit').value = data.default_deposit_percent ?? 10;
       document.getElementById('quote-valid-days').value = data.quote_valid_days ?? 30;
       document.getElementById('auto-decline-expired').checked = data.auto_decline_expired !== false;
       document.getElementById('routing-reply-mode').value = data.routing_reply_mode || 'draft';
@@ -989,22 +955,6 @@
       }
     });
 
-    document.getElementById('cover-photo-file').addEventListener('change', async () => {
-      const fileInput = document.getElementById('cover-photo-file');
-      const msg = document.getElementById('cover-photo-msg');
-      if (!fileInput.files.length) return;
-      msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-      try {
-        const [url] = await uploadPhotos(fileInput.files, 'cover-photo');
-        coverPhotoUrl = url;
-        renderCoverPhotoPreview();
-        fileInput.value = '';
-        msg.innerHTML = `<div class="success-box">Uploaded. Click "Save company details" below to keep this.</div>`;
-      } catch (err) {
-        msg.innerHTML = `<div class="error-box">${err.message}</div>`;
-      }
-    });
-
     document.getElementById('portfolio-file').addEventListener('change', async () => {
       const fileInput = document.getElementById('portfolio-file');
       const msg = document.getElementById('portfolio-msg');
@@ -1028,7 +978,6 @@
         .update({
           portfolio_photos: portfolioPhotos,
           logo_url: logoUrl,
-          cover_photo_url: coverPhotoUrl,
           tagline: document.getElementById('tagline').value.trim(),
           google_review_url: document.getElementById('google-review-url').value.trim() || null,
           company_name: document.getElementById('company-name').value.trim(),
@@ -1077,7 +1026,6 @@
         .from('company_settings')
         .update({
           default_markup_percent: parseFloat(document.getElementById('default-markup').value) || 45,
-          default_deposit_percent: parseFloat(document.getElementById('default-deposit').value) || 10,
           quote_valid_days: Math.max(1, parseInt(document.getElementById('quote-valid-days').value, 10) || 30),
           auto_decline_expired: document.getElementById('auto-decline-expired').checked,
         })

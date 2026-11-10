@@ -125,7 +125,7 @@ exports.handler = async (event) => {
     // Stock / prebuild items added on the invoice are extra on top, so only the typed claim is limited.
     // Estimates and time-and-materials jobs bill actuals, which can run past the estimate: not limited.
     const { data: jobForCap } = await supabaseAdmin.from('projects').select('proposal_template, stc_total, bstc_total, client_id').eq('id', projectId).maybeSingle();
-    const capped = !['quick_estimate', 'time_and_materials', 'direct_job'].includes(jobForCap?.proposal_template);
+    const capped = !['quick_estimate', 'direct_job'].includes(jobForCap?.proposal_template);
     for (const { c } of (capped ? pricedClaims : [])) {
       const centre = (allCentres || []).find(cc => cc.id === c.costCentreId);
       const quoted = Number(centre?.quoted_amount) || 0;

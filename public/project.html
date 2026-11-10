@@ -30,8 +30,8 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=130"></script>
-  <script src="/js/template-questions.js?v=3"></script>
+  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/template-questions.js?v=4"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
@@ -352,33 +352,6 @@
     let currentTemplate = 'new_build';
     let templateAnswers = {};
 
-    const TEMPLATE_INFO = {
-      new_build: {
-        note: 'Multi-stage project with a deposit and full scope of works.',
-        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
-      },
-      solar: {
-        note: 'Asks the solar questions (grid, existing system, roof, switchboard, supply) and tick Batteries as well to add the battery set. Pylon design on the cover. STC credit per stage.',
-        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true, showStc: true,
-      },
-      battery: {
-        note: 'Battery system proposal. Asks the battery questions (usable kWh, backup, location to AS/NZS 5139, CEC list, VPP, federal discount) and checks the SAA and Clean Energy Regulator rules before sending. Battery pages on the proposal.',
-        photoCategory: 'solar', singleStage: false, showDeposit: true, showPylon: true, showStc: true,
-      },
-      renovation: {
-        note: 'Multi-stage renovation with a deposit. Asks reno-specific questions (asbestos, switchboard, approvals, occupancy) that set up the pre-work and handover tasks.',
-        photoCategory: 'electrical', singleStage: false, showDeposit: true, showPylon: false,
-      },
-      service_work: {
-        note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts, and sets up the pre-visit and sign-off tasks.',
-        photoCategory: 'electrical', singleStage: true, showDeposit: true, showPylon: false,
-      },
-      quick_estimate: {
-        note: 'Single cost centre, no deposit. Clearly labelled "Estimate only" on the client page - invoiced from actual hours and materials, not this figure.',
-        photoCategory: 'general', singleStage: true, showDeposit: false, showPylon: false,
-      },
-    };
-
     function renumberEditStages() {
       document.querySelectorAll('#cc-rows .cc-row').forEach((row, i) => {
         const label = row.querySelector('.cc-number');
@@ -486,15 +459,22 @@
         </div>`;
     }
 
+    // The client sees the deposit first, then these stages (quote.html), so the two make 100%. An older
+    // quote whose stages start with their own deposit row, or make 100% alone, counts those instead.
     function refreshMilestoneTotal() {
-      const total = [...document.querySelectorAll('.milestone-percent')].reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
-      const rowCount = document.querySelectorAll('.milestone-row').length;
+      const rows = [...document.querySelectorAll('.milestone-row')];
       const note = document.getElementById('milestone-total-note');
       if (!note) return;
-      if (!rowCount) { note.textContent = ''; return; }
+      if (!rows.length) { note.textContent = ''; return; }
+      const stages = rows.reduce((s, r) => s + (parseFloat(r.querySelector('.milestone-percent').value) || 0), 0);
+      // a deposit row of their own, or stages that make 100% alone: the proposal adds no deposit row
+      const ownDeposit = isDepositMilestone({ label: rows[0].querySelector('.milestone-label').value }) || Math.round(stages) === 100;
+      const deposit = ownDeposit ? 0 : (parseFloat((document.getElementById('p-deposit') || {}).value) || 0);
+      const total = Math.round((stages + deposit) * 100) / 100;
+      const sum = deposit ? `Deposit ${deposit}% + stages ${stages}% = ${total}%` : `Total: ${total}%`;
       note.innerHTML = Math.round(total) === 100
-        ? `Total: ${total}% - looks right.`
-        : `<span style="color:var(--red);">Total: ${total}% - should add up to 100%.</span>`;
+        ? `${sum}, looks right.`
+        : `<span style="color:var(--red);">${sum}, should add up to 100%.</span>`;
     }
 
     function wireMilestoneRows() {
@@ -548,9 +528,10 @@
       lineItems = [], photoGroups = [],
     } = {}) {
       const rowsEl = document.getElementById('cc-rows');
-      const defaultMarkup = markup_percent != null ? markup_percent : markupOr45(document.getElementById('default-markup').value);
-      const defaultStcPrice = stc_price_per_certificate ?? (parseFloat(document.getElementById('default-stc-price').value) || 35);
-      const defaultStcZone = Number(stc_zone_rating ?? (parseFloat(document.getElementById('default-stc-zone').value) || 1.382));
+      // a new stage's markup: the job editor's Default markup box, else Settings > Default markup (the quote steps)
+      const defaultMarkup = markup_percent != null ? markup_percent : markupOr45(document.getElementById('default-markup')?.value ?? companySettings.default_markup_percent);
+      const defaultStcPrice = stc_price_per_certificate ?? 35;
+      const defaultStcZone = Number(stc_zone_rating ?? 1.382);
       const defaultStcKw = stc_system_kw ?? pylonKw ?? '';
       const defaultStcYear = stc_install_year || new Date().getFullYear();
       const div = document.createElement('div');
@@ -741,11 +722,13 @@
       const pylon = pylonSystemSummary(lastPylonData).replace(/·/g, ',');
       if (pylon) lines.push(`System (Pylon): ${pylon}`);
       const pick = (id, label) => { if (a[id]) lines.push(`${label}: ${a[id]}`); };
-      pick('grid_type', 'Grid'); pick('existing_system', 'Existing system'); pick('existing_system_detail', 'Existing system details');
-      pick('phases', 'Supply'); pick('roof_type', 'Roof'); pick('export_limit', 'Export limit'); pick('daily_usage', 'Daily use');
+      pick('grid_type', 'Grid'); pick('existing_pv', 'Existing system');
+      if (!a.existing_pv) pick('existing_system_detail', 'Existing system'); // older quotes (before item 70)
+      pick('phases', 'Supply'); pick('roof_type', 'Roof'); pick('export_limit', 'Export limit');
       if (quoteHasBattery(currentTemplate, a)) {
-        pick('battery_kwh_wanted', 'Battery usable kWh'); pick('backup_needs', 'Backup'); pick('coupling', 'Coupling');
-        pick('battery_location', 'Battery location'); pick('existing_pv', 'Existing PV');
+        const kwh = parseFloat((document.getElementById('bc-battery-kwh') || {}).value);
+        if (kwh > 0) lines.push(`Battery usable kWh: ${kwh}`);
+        pick('backup_needs', 'Backup'); pick('coupling', 'Coupling'); pick('battery_location', 'Battery location');
         if (a.vpp_capable) lines.push(`VPP capable: ${a.vpp_capable}`);
       }
       pick('fault', 'Request'); pick('deadline', 'Deadline');
@@ -825,13 +808,6 @@
           <p class="subtitle" style="margin-bottom:10px;"><strong>All amounts ex GST.</strong> Enter labour and materials ex GST; GST is added once at the end of the quote.</p>
           <div class="grid cols-3" style="margin-bottom:16px;">
             <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
-            <div class="stc-only" style="display:none;"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
-            <div class="stc-only" style="display:none;">
-              <label style="margin-top:0">Default STC zone</label>
-              <select id="default-stc-zone">
-                ${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}
-              </select>
-            </div>
           </div>
           <div id="cc-rows"></div>
           <button type="button" class="secondary" id="add-row">+ Add stage</button>
@@ -851,7 +827,7 @@
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         render(project, true);
@@ -1072,7 +1048,7 @@
       // The battery quoted: the box when it has a number, else the quote's battery lines. Never the
       // "Usable kWh the customer asked for" answer.
       function typedBatteryKwh() {
-        const el = byId('bc-battery-kwh') || byId('q-battery-kwh');
+        const el = byId('bc-battery-kwh');
         if (el) { const v = numOrNull(el.value.trim()); return v != null && v > 0 ? v : null; }
         return Number(project.battery_kwh) > 0 ? Number(project.battery_kwh) : null;
       }
@@ -1087,7 +1063,7 @@
         return (el && parseFloat(el.value)) || Number(project.stc_zone_rating) || 1.382;
       }
       function typedPrice(which) {
-        const el = byId(`bc-${which}-price`) || byId(`ri-${which}-price`);
+        const el = byId(`bc-${which}-price`);
         if (el) return numOrNull(el.value.trim());
         const v = (project.roi_inputs || {})[`${which}_price`];
         return v == null ? null : Number(v);
@@ -1193,7 +1169,8 @@
         });
         const useBattery = byId('bill-use-battery');
         if (useBattery) useBattery.addEventListener('click', () => {
-          ['bc-battery-kwh', 'q-battery-kwh'].forEach(id => { const el = byId(id); if (el) el.value = s.batteryKwh; });
+          const kwhEl = byId('bc-battery-kwh');
+          if (kwhEl) kwhEl.value = s.batteryKwh;
           autosave('battery_kwh', () => ({ battery_kwh: s.batteryKwh }), 0);
           showToast(`Quoting a ${s.batteryKwh} kWh battery. Saved.`);
           scheduleRender(0);
@@ -1207,7 +1184,7 @@
         out.innerHTML = `
           <div style="margin-top:12px; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px;">
             <label style="margin-top:0; font-weight:600;">What we are quoting</label>
-            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">The estimate runs on these, not on the recommendation. The battery and the two prices are the same boxes as on step 3.</p>
+            <p class="subtitle" style="margin:2px 0 8px; font-size:12px;">The estimate runs on these, not on the recommendation. They save themselves as you type.</p>
             <div class="grid cols-4">
               <div id="bc-solar-wrap"><label style="margin-top:0; font-size:12px;">Solar</label><div style="padding:6px 0;"><strong id="bc-solar-kw">-</strong> <a href="#q-stc-kw" id="bc-goto-solar" class="link-quiet" style="font-size:12px;">change on step 3</a></div></div>
               <div id="bc-battery-wrap"><label style="margin-top:0; font-size:12px;">Battery (usable kWh)</label><input id="bc-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" /></div>
@@ -1224,18 +1201,14 @@
           el.scrollIntoView({ block: 'center', behavior: 'smooth' });
           el.focus();
         });
-        // the battery and the two prices are mirrored with step 3's boxes and save themselves
-        const mirror = (aId, bId, onChange) => {
-          const a = byId(aId), b = byId(bId);
-          [[a, b], [b, a]].forEach(([el, other]) => { if (el) el.addEventListener('input', () => { if (other) other.value = el.value; onChange(); }); });
-        };
-        mirror('bc-battery-kwh', 'q-battery-kwh', () => {
+        // the battery and the two prices save themselves
+        byId('bc-battery-kwh').addEventListener('input', () => {
           autosave('battery_kwh', () => ({ battery_kwh: nonNeg(val('bc-battery-kwh'), 'The battery kWh') }));
           scheduleRender();
         });
         const savePrices = () => { autosave('roi_inputs', () => ({ roi_inputs: readRoiInputs(true) }), 900); scheduleRender(); };
-        mirror('bc-solar-price', 'ri-solar-price', savePrices);
-        mirror('bc-battery-price', 'ri-battery-price', savePrices);
+        byId('bc-solar-price').addEventListener('input', savePrices);
+        byId('bc-battery-price').addEventListener('input', savePrices);
       }
       // Labels, hints and the "not saved on step 3" warning, refreshed with the estimate.
       function refreshQuoting() {
@@ -1255,7 +1228,6 @@
         byId('bc-battery-kwh').placeholder = lines ? `${lines} (from the line items)` : 'e.g. 13.5';
         byId('bc-solar-price').placeholder = d.solar != null ? `${d.solar} (the rest)` : 'blank: one price';
         byId('bc-battery-price').placeholder = d.battery != null ? `${d.battery} (battery stage)` : 'blank: one price';
-        [['q-battery-kwh', 'bc-battery-kwh'], ['ri-solar-price', 'bc-solar-price'], ['ri-battery-price', 'bc-battery-price']].forEach(([a, b]) => { const el = byId(a); if (el) el.placeholder = byId(b).placeholder; });
         const notes = [];
         if (hasBattery && !typedBatteryKwh()) notes.push(lines ? `Battery blank: ${lines} kWh from the battery lines on the quote.` : 'Battery blank and no battery kWh in the line items: type the battery\'s usable kWh.');
         if (both) notes.push(typedPrice('solar') == null && typedPrice('battery') == null
@@ -1722,19 +1694,15 @@
           </div>`;
       }
 
-      // ----- the proposal switch (same as step 3's tick), saves itself -----
+      // ----- the proposal switch, saves itself -----
       const showRoi = byId('bill-show-roi');
-      const step3Roi = byId('p-show-roi');
-      const setShowRoi = (on, from) => {
-        if (showRoi && from !== showRoi) showRoi.checked = on;
-        if (step3Roi && from !== step3Roi) step3Roi.checked = on;
+      if (showRoi) showRoi.addEventListener('change', () => {
+        const on = showRoi.checked;
         autosave('show_roi', () => ({ show_roi: on }), 0);
         project.show_roi = on;
         showToast(on ? 'The savings page will show on the proposal.' : 'The savings page is taken off the proposal.');
         scheduleRender(0);
-      };
-      if (showRoi) showRoi.addEventListener('change', () => setShowRoi(showRoi.checked, showRoi));
-      if (step3Roi) step3Roi.addEventListener('change', () => setShowRoi(step3Roi.checked, step3Roi));
+      });
 
       // ----- anything else that changes the estimate -----
       qEl.addEventListener('change', () => { renderRecommend(); scheduleRender(); });
@@ -1822,8 +1790,9 @@
       document.getElementById('generate-scope-btn').addEventListener('click', async () => {
         const btn = document.getElementById('generate-scope-btn');
         const msg = document.getElementById('generate-msg');
-        const brief = document.getElementById('p-brief').value.trim();
-        // The step-by-step quote view has no name box (only the full edit form does), so fall back to the saved name.
+        // The Quote and client card's Internal notes go to the AI with the brief.
+        const notes = (document.getElementById('p-notes')?.value ?? project.notes ?? '').trim();
+        const brief = [document.getElementById('p-brief').value.trim(), notes ? `Internal notes:\n${notes}` : ''].filter(Boolean).join('\n\n');
         const projectName = (document.getElementById('p-name')?.value ?? project.name ?? '').trim();
         const rows = [...document.querySelectorAll('#cc-rows .cc-row')];
         const stageNames = rows.map(r => r.dataset.name).filter(Boolean);
@@ -1832,7 +1801,7 @@
         const customerGets = customerGetsLines().join('\n');
         const withBattery = quoteHasBattery(currentTemplate, templateAnswers);
         if (!brief && !answersText) { msg.innerHTML = `<div class="error-box">Add a few notes first, or answer the pre-quote questions.</div>`; return; }
-        if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first (Cost Centres tab; a name is enough, the AI fills in the rest).</div>`; return; }
+        if (stageNames.length === 0) { msg.innerHTML = `<div class="error-box">Add at least one stage first (step 3 Pricing; a name is enough, the AI fills in the rest).</div>`; return; }
 
         btn.disabled = true;
         msg.innerHTML = '';
@@ -1859,7 +1828,9 @@
           const updatedDescriptions = Object.fromEntries(rows.map(r => [r.dataset.name, r.querySelector('.cc-desc').value]));
 
           btn.textContent = 'Writing scope of works...';
-          const sowStyle = document.querySelector('input[name="sow-style"]:checked').value;
+          // numbered and structured for a company client (builders), story-flowing for a homeowner
+          const { data: clientRow } = project.client_id ? await supabaseClient.from('clients').select('client_type').eq('id', project.client_id).maybeSingle() : { data: null };
+          const sowStyle = clientRow?.client_type === 'company' ? 'structured' : 'story';
           const sowRes = await fetch('/.netlify/functions/generate-sow', {
             method: 'POST', headers: aiHeaders,
             body: JSON.stringify({
@@ -1905,6 +1876,8 @@
       });
       wireMilestoneRows();
       refreshMilestoneTotal();
+      const depositEl = document.getElementById('p-deposit');
+      if (depositEl) depositEl.addEventListener('input', refreshMilestoneTotal);
       document.getElementById('add-milestone-btn').addEventListener('click', () => {
         document.getElementById('milestone-rows').insertAdjacentHTML('beforeend', milestoneRowHtml());
         wireMilestoneRows();
@@ -1982,13 +1955,16 @@
     }
 
     // Ready to send check and the documents-to-gather checklist.
+    // Step 5's ready-to-send result: worked out when the quote opens and again after a step is saved,
+    // so nobody has to press a button to see it (the email button runs the same check on send).
+    function refreshReadyCheck(project) {
+      const resultEl = document.getElementById('compliance-check-result');
+      if (!resultEl) return;
+      runComplianceCheck(project.id, 'quote', 'quote', null, resultEl);
+    }
+
     function wireComplianceCard(project) {
-      const complianceBtn = document.getElementById('compliance-check-btn');
-      if (complianceBtn) {
-        complianceBtn.addEventListener('click', () => runComplianceCheck(
-          project.id, 'quote', 'quote', complianceBtn, document.getElementById('compliance-check-result')
-        ));
-      }
+      refreshReadyCheck(project);
       if (document.getElementById('quote-doc-checklist')) loadQuoteComplianceChecklist(project);
     }
 
@@ -2053,20 +2029,6 @@
         console.error('wireEditForm failed:', err);
         alert('The editor loaded but hit an error setting up: ' + friendlyError(err));
       }
-    }
-
-    // A completed (or booked) site inspection for this quote or its lead: its answers are the
-    // best source for the pre-quote questions, so link it from the card.
-    async function showSiteInspectionNote(project) {
-      const el = document.getElementById('site-inspection-note');
-      if (!el) return;
-      let q = supabaseClient.from('site_inspections').select('id, status, completed_at').order('created_at', { ascending: false }).limit(1);
-      q = project.lead_id ? q.or(`project_id.eq.${project.id},lead_id.eq.${project.lead_id}`) : q.eq('project_id', project.id);
-      const { data } = await q;
-      const insp = data && data[0];
-      if (!insp) return;
-      const done = insp.status === 'completed';
-      el.innerHTML = `<p class="subtitle" style="margin:0 0 8px;">Site inspection: <span class="badge ${done ? 'accepted' : 'sent'}">${escapeHtml(insp.status.replace('_', ' '))}</span>${done && insp.completed_at ? ' on ' + new Date(insp.completed_at).toLocaleDateString('en-AU') : ''} &middot; <a class="link-quiet" href="/site-inspection.html?id=${insp.id}" target="_blank">open the checklist &rarr;</a>${done ? ' and copy what it found into the answers below.' : ''}</p>`;
     }
 
     // Presents the choice - quick note vs full signed Variation - for a set
@@ -3214,7 +3176,7 @@
       const answers = project.template_answers || {};
       const quoted = (centres || []).reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
       return {
-        1: !!answers.info_source && missingRequiredAnswers(project.proposal_template, answers).length === 0,
+        1: missingRequiredAnswers(project.proposal_template, answers).length === 0,
         2: project.site_visit_decision === 'not_needed' || (project.site_visit_decision === 'needed' && !!project.site_visit_done),
         3: quoted > 0,
         4: !!(project.sow_text || '').trim(),
@@ -3293,11 +3255,11 @@
                   <div>
                     <label style="margin-top:0">Proposal type</label>
                     <select id="qs1-template">
-                      ${['new_build', 'solar', 'battery', 'quick_estimate', 'renovation', 'service_work'].map(t => `<option value="${t}" ${t === template ? 'selected' : ''}>${{ new_build: 'New Build', solar: 'Solar Proposal', battery: 'Battery Proposal', quick_estimate: 'Quick Estimate', renovation: 'Renovation', service_work: 'Service Work' }[t]}</option>`).join('')}
+                      ${Object.keys(TEMPLATE_INFO).map(t => `<option value="${t}" ${t === template ? 'selected' : ''}>${TEMPLATE_INFO[t].label}</option>`).join('')}
                     </select>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new type takes effect on Save answers, with its deposit and payment stages.</p>
                   </div>
                 </div>
-                <div id="site-inspection-note"></div>
                 <div class="grid cols-2" id="template-questions"></div>
                 <div id="bill-card" style="margin-top:14px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
                   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -3365,11 +3327,7 @@
                 </div>
 
                 <label style="margin-top:0; font-weight:600;">Stages / cost centres</label>
-                <div class="grid cols-3" style="margin:6px 0 12px;">
-                  <div><label style="margin-top:0">Default markup %</label><input id="default-markup" type="number" step="1" value="45" /></div>
-                  <div class="stc-only" style="display:none;"><label style="margin-top:0">Default $ per STC</label><input id="default-stc-price" type="number" step="0.01" value="35" /></div>
-                  <div class="stc-only" style="display:none;"><label style="margin-top:0">Default STC zone</label><select id="default-stc-zone">${STC_ZONES.map(z => `<option value="${z.rating}" ${z.rating === 1.382 ? 'selected' : ''}>${z.label}</option>`).join('')}</select></div>
-                </div>
+                <p class="subtitle" style="margin:2px 0 10px; font-size:12px;">A new stage starts at the markup in Settings.</p>
                 <div id="cc-rows"></div>
                 <button type="button" class="secondary" id="add-row">+ Add stage</button>
                 <button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
@@ -3406,41 +3364,26 @@
                     </div>
                     <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-weight:400;"><input type="checkbox" id="q-bstc-none" style="width:auto;" ${project.bstc_not_claimed ? 'checked' : ''} /> No BSTC on this quote on purpose (the ready-to-send check then passes without a count)</label>
                   </div>
-                  <div id="quoted-sizes-block" style="margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border);">
-                    <label style="margin-top:0;">What we are quoting (drives the savings estimate)</label>
-                    <p class="subtitle" style="margin:2px 0 6px; font-size:12px;">The solar size is the System size (kW) above. The battery and the two prices are the same boxes as on the bill card on step 1 and save themselves as you type; the estimate the customer sees is there.</p>
-                    <div class="grid cols-4">
-                      <div><label style="margin-top:0; font-size:12px;">Battery quoted (usable kWh)</label><input id="q-battery-kwh" type="number" step="0.1" inputmode="decimal" min="0" value="${project.battery_kwh ?? ''}" placeholder="${roiBatteryKwhFromLines(centres) ? `${roiBatteryKwhFromLines(centres)} from the line items` : 'e.g. 13.5'}" /></div>
-                      <div><label style="margin-top:0; font-size:12px;">Solar price (inc GST, after STC)</label><input id="ri-solar-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.solar_price != null) ? project.roi_inputs.solar_price : ''}" placeholder="blank: the rest of the total" /></div>
-                      <div><label style="margin-top:0; font-size:12px;">Battery price (inc GST, after BSTC)</label><input id="ri-battery-price" type="number" step="1" inputmode="decimal" min="0" value="${(project.roi_inputs && project.roi_inputs.battery_price != null) ? project.roi_inputs.battery_price : ''}" placeholder="blank: the battery stage" /></div>
-                    </div>
-                    <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Battery blank: the kWh is read off the battery lines on the quote. Prices blank: the battery is its stage less the BSTC and the solar is everything else, so the two add up to the total and each gets its own payback.</p>
-                  </div>
                 </div>
 
                 <div id="deposit-card" style="margin-top:18px; ${info.showDeposit ? '' : 'display:none;'}">
                   <label style="margin-top:0; font-weight:600;">Payment schedule</label>
                   <div style="max-width:160px;"><label style="margin-top:6px;">Deposit %</label><input id="p-deposit" type="number" step="1" value="${project.deposit_percent ?? 10}" /></div>
                   <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400; cursor:pointer;"><input type="checkbox" id="p-breakdown" style="width:auto; margin:0;" ${project.show_investment_breakdown ? 'checked' : ''} /> Show investment breakdown (a page after the Investment summary listing each stage's items, prebuilds by their client description, no item prices)</label>
-                  <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-weight:400; cursor:pointer; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}"><input type="checkbox" id="p-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal (a "Your savings" page from the electricity bill read on step 1: generation, use, bills before and after, payback, 10 and 25 year savings)</label>
                   <div style="margin-top:12px;">
-                    <label style="margin-top:0">Custom milestones (optional)</label>
-                    <p class="subtitle" style="margin-bottom:8px;">Replaces the schedule shown to the client with your own named stages. Doesn't change what's invoiced when the quote's approved - that's still the Deposit % above.</p>
+                    <label style="margin-top:0">Payment stages after the deposit (optional)</label>
+                    <p class="subtitle" style="margin-bottom:8px;">The client's payment schedule is the deposit, then these stages; the deposit and the stages add up to 100%. Without stages, each priced stage is due on completion. What is invoiced on approval is the Deposit %.</p>
                     <div id="milestone-rows"></div>
                     <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
                     <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
                   </div>
-                </div>
-                <div id="estimate-disclaimer-card" style="margin-top:14px; ${template === 'quick_estimate' ? '' : 'display:none;'}">
-                  <label style="margin-top:0; font-weight:600;">Estimate wording</label>
-                  <textarea id="p-estimate-disclaimer" style="min-height:70px;">${escapeHtml(project.estimate_disclaimer_text || '')}</textarea>
                 </div>
                 <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
                 <div id="qs3-msg"></div>
               </div>
 
               <div class="card" id="qstep-4">
-                ${stepHead(4, 'Scope of works', 'Built from the answers, the Pylon equipment and the stages. The AI writes the scope from that plus your notes; run it again any time the answers or stages change.')}
+                ${stepHead(4, 'Scope of works', 'Built from the answers, the Pylon equipment and the stages. The AI writes the scope from that plus your notes and the Internal notes, numbered for a company client and story-flowing for a homeowner; run it again any time the answers or stages change.')}
                 <label style="margin-top:0; font-weight:600;">What the customer gets</label>
                 <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
 
@@ -3450,11 +3393,6 @@
                 <div id="sow-doc-list" style="margin-bottom:8px;"></div>
                 <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
                 <div id="sow-doc-msg"></div>
-                <label style="margin-top:12px;">Scope of works style</label>
-                <div style="display:flex; gap:16px; margin-bottom:4px; flex-wrap:wrap;">
-                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="story" checked style="width:auto;" /> Story-flowing (residential homeowners)</label>
-                  <label style="display:flex; align-items:center; gap:6px; margin-top:0; font-weight:400;"><input type="radio" name="sow-style" value="structured" style="width:auto;" /> Structured &amp; numbered (commercial builders)</label>
-                </div>
                 <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
                 <div id="generate-msg"></div>
 
@@ -3462,8 +3400,6 @@
                 <p class="subtitle" style="margin:2px 0 6px;">Shown as its own section in the proposal, above the pricing table.</p>
                 <textarea id="p-sow" style="min-height:240px;" placeholder="Paste your scope of works here, or generate it above...">${escapeHtml(project.sow_text || '')}</textarea>
 
-                <label style="margin-top:14px;">Proposal subtitle (optional)</label>
-                <input id="p-subtitle" placeholder="e.g. Grid-Connected Solar Photovoltaic System" value="${escapeHtml(project.proposal_subtitle || '')}" />
 
                 <label style="margin-top:14px; font-weight:600;">What it will look like</label>
                 <p class="subtitle" style="margin:2px 0 6px;">Reference photos, renders, or similar completed jobs.</p>
@@ -3478,9 +3414,8 @@
               </div>
 
               <div class="card" id="qstep-5">
-                ${stepHead(5, 'Send', 'The ready-to-send check runs here and again when you email the quote or move it to Quote Sent. Admin and Finance can send anyway with a reason.')}
-                <button type="button" class="secondary" id="compliance-check-btn">Check now</button>
-                <div id="compliance-check-result" style="margin-top:12px;"></div>
+                ${stepHead(5, 'Send', 'The ready-to-send check updates itself after each save and runs again when you email the quote or move it to Quote Sent. Admin and Finance can send anyway with a reason.')}
+                <div id="compliance-check-result"></div>
                 <div id="roi-status"></div>
                 <div style="margin-top:16px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
                   <label style="margin-top:0; font-weight:600;">Documents to gather from the customer</label>
@@ -3493,9 +3428,9 @@
                   <input readonly value="${quoteUrl}" style="margin-bottom:10px;" onclick="this.select()" />
                   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                     <button type="button" id="email-quote-btn">Email quote to client</button>
-                    ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : ''}
-                    <button type="button" class="secondary" id="generate-quote-pdf-btn" style="${project.quote_pdf_path ? 'font-size:12px; padding:6px 10px;' : ''}">${project.quote_pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
-                    ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Generated ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
+                    ${project.quote_pdf_path ? `<button type="button" class="secondary" id="view-quote-pdf-btn">View PDF</button>` : '<span class="subtitle" style="font-size:12px;">The PDF is made when the pricing is saved.</span>'}
+                    ${project.quote_pdf_error ? `<button type="button" class="secondary" id="generate-quote-pdf-btn" style="font-size:12px; padding:6px 10px;">Try the PDF again</button>` : ''}
+                    ${project.quote_pdf_generated_at ? `<span class="subtitle" style="font-size:11px;">Made ${new Date(project.quote_pdf_generated_at).toLocaleString('en-AU')}</span>` : ''}
                   </div>
                   <div id="quote-pdf-msg">${project.quote_pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">${escapeHtml(project.quote_pdf_error)}</div>` : ''}</div>
                   ${project.status === 'sent' ? `<p class="subtitle" style="margin-top:10px;">Sent${project.sent_at ? ' ' + new Date(project.sent_at).toLocaleDateString('en-AU') : ''}${project.valid_until ? ', valid until ' + new Date(project.valid_until + 'T00:00:00').toLocaleDateString('en-AU') : ''}.</p>` : ''}
@@ -3606,7 +3541,7 @@
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         currentTemplate = project.proposal_template || 'new_build';
@@ -3623,6 +3558,12 @@
         await wireQuoteClientCard(project);
 
         // ----- step 1: pre-quote information -----
+        // A Solar quote that already carries a battery (typed, in the lines or in the Pylon design) starts at
+        // Batteries as well: Yes, saved with the answers.
+        if (currentTemplate === 'solar' && !templateAnswers.with_battery &&
+          (Number(project.battery_kwh) > 0 || roiBatteryKwhFromLines(centres) > 0 || ((project.pylon_data || {}).storage_types || []).length)) {
+          templateAnswers = { ...templateAnswers, with_battery: 'Yes' };
+        }
         const qEl = document.getElementById('template-questions');
         renderTemplateQuestions(qEl, currentTemplate, templateAnswers);
         const showMissing = () => {
@@ -3649,7 +3590,6 @@
           const billCard = document.getElementById('bill-card');
           if (billCard) billCard.style.display = ['solar', 'battery'].includes(currentTemplate) ? '' : 'none';
         });
-        showSiteInspectionNote(project);
         wireBillCard(project, qEl, showMissing, refreshBar);
         document.getElementById('qs1-save').addEventListener('click', async () => {
           const btn = document.getElementById('qs1-save');
@@ -3658,23 +3598,51 @@
             const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
             // blanked answers drop out
             Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; });
-            const changedTemplate = currentTemplate !== (project.proposal_template || 'new_build');
+            const prevTemplate = project.proposal_template || 'new_build';
+            const changedTemplate = currentTemplate !== prevTemplate;
             const fields = { template_answers: answers, proposal_template: currentTemplate };
+            let newMilestones = null;
             if (changedTemplate) {
-              // A new proposal type gets that type's cover photos (Settings > portfolio photos).
-              const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
+              // A new proposal type gets that type's photos (Settings > portfolio photos), its deposit and
+              // payment stages where the quote still has the old type's defaults, and the estimate wording.
+              const [{ data: settings }, { data: milestones, error: msReadErr }] = await Promise.all([
+                supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single(),
+                supabaseClient.from('payment_milestones').select('label, percent').eq('project_id', project.id).order('sort_order'),
+              ]);
+              if (msReadErr) throw msReadErr;
               const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
               fields.cover_photos = ((settings && settings.portfolio_photos) || []).filter(ph => (ph.category || 'general') === wantCategory);
+              const pay = paymentDefaultsOnTypeChange(prevTemplate, currentTemplate, { deposit_percent: project.deposit_percent, milestones: milestones || [] });
+              if ('deposit_percent' in pay) fields.deposit_percent = pay.deposit_percent;
+              if (pay.milestones) newMilestones = pay.milestones;
+              if (currentTemplate === 'quick_estimate' && !(project.estimate_disclaimer_text || '').trim()) fields.estimate_disclaimer_text = companySettings.default_estimate_disclaimer || '';
             }
             const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
             if (error) throw error;
+            if (newMilestones) {
+              const { error: delErr } = await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
+              if (delErr) throw delErr;
+              if (newMilestones.length) {
+                const { error: insErr } = await supabaseClient.from('payment_milestones').insert(newMilestones.map((m, i) => ({ label: m.label, percent: m.percent, sort_order: i, project_id: project.id })));
+                if (insErr) throw insErr;
+              }
+            }
             project.template_answers = answers;
             templateAnswers = answers;
             showToast('Answers saved.');
-            if (changedTemplate) { project.proposal_template = currentTemplate; const refreshed = await loadProject(); if (refreshed) render(refreshed, true); return; }
+            if (changedTemplate) {
+              project.proposal_template = currentTemplate;
+              const refreshed = await loadProject();
+              if (refreshed) {
+                render(refreshed, true);
+                if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
+              }
+              return;
+            }
             const h = document.getElementById('qstep-1-head');
             if (h) h.innerHTML = `${quoteStepTicks(project, centres)[1] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}1. Pre-quote information`;
             refreshBar();
+            refreshReadyCheck(project);
           } catch (err) {
             say('qs1-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
           } finally { busy(btn, false, 'Save answers'); }
@@ -3685,6 +3653,15 @@
         async function refreshInspectionArea() {
           const insp = await findLinkedSiteInspection(project);
           project.site_visit_done = !!(insp && insp.status === 'completed');
+          // an inspection booked for this quote or its lead means a visit is needed: say so without a click
+          if (insp && !project.site_visit_decision) {
+            const { error: svErr } = await supabaseClient.from('projects').update({ site_visit_decision: 'needed', needs_site_visit: true }).eq('id', project.id);
+            if (!svErr) {
+              project.site_visit_decision = 'needed'; project.needs_site_visit = true;
+              const radio = document.querySelector('input[name="qs2-decision"][value="needed"]');
+              if (radio) radio.checked = true;
+            }
+          }
           const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || project.site_visit_decision;
           if (insp) {
             inspArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>${insp.status === 'completed' ? ' <span class="subtitle">Copy what it found into the pre-quote answers above.</span>' : ''}`;
@@ -3796,10 +3773,8 @@
             const fields = {
               deposit_percent: parseFloat(document.getElementById('p-deposit').value) || 0,
               show_investment_breakdown: document.getElementById('p-breakdown').checked,
-              show_roi: document.getElementById('p-show-roi').checked,
               pylon_link: document.getElementById('p-pylon-link').value.trim(),
               pylon_project_id: document.getElementById('p-pylon-id').value.trim(),
-              estimate_disclaimer_text: document.getElementById('p-estimate-disclaimer').value,
               stc_quantity: num('q-stc-qty'), stc_system_kw: num('q-stc-kw'), stc_zone_rating: num('q-stc-zone') || 1.382,
               stc_install_year: parseInt(document.getElementById('q-stc-year').value, 10) || null,
               stc_price_per_certificate: num('q-stc-price'), stc_total: num('q-stc-total') || 0,
@@ -3807,13 +3782,9 @@
               bstc_quantity: num('q-bstc-qty'), bstc_price_per_certificate: num('q-bstc-price'), bstc_total: num('q-bstc-total') || 0,
               bstc_cost_centre_id: document.getElementById('q-bstc-stage').value || null,
               bstc_not_claimed: document.getElementById('q-bstc-none').checked,
-              battery_kwh: num('q-battery-kwh'),
-              roi_inputs: { ...(project.roi_inputs || {}), solar_price: num('ri-solar-price'), battery_price: num('ri-battery-price') },
             };
             const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
             if (error) throw error;
-            project.roi_inputs = fields.roi_inputs;
-            project.battery_kwh = fields.battery_kwh;
 
             await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
             const milestonesPayload = readMilestones();
@@ -3844,7 +3815,6 @@
             const fields = {
               sow_text: document.getElementById('p-sow').value,
               sow_brief: document.getElementById('p-brief').value.trim(),
-              proposal_subtitle: document.getElementById('p-subtitle').value.trim(),
               terms_text: document.getElementById('p-terms').value,
               reference_photos: referencePhotos.map(url => ({ url })),
               sow_documents: sowDocs,
@@ -3858,6 +3828,7 @@
             const h = document.getElementById('qstep-4-head');
             if (h) h.innerHTML = `${fields.sow_text.trim() ? '<span style="color:var(--green);">&#10003;</span> ' : ''}4. Scope of works`;
             refreshBar();
+            refreshReadyCheck(project);
             say('qs4-msg', '');
           } catch (err) {
             say('qs4-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
@@ -4056,7 +4027,7 @@
                 <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
               </div>
               ` : ''}
-              ${!editMode && (project.notes || Object.keys(project.template_answers || {}).length) ? `
+              ${!editMode && !isStepQuote && (project.notes || Object.keys(project.template_answers || {}).length) ? `
               <div class="card">
                 ${project.notes ? `
                   <h2>Notes</h2>
@@ -4597,11 +4568,12 @@
 
             <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-details">
               ${`
-              ${Object.keys(project.template_answers || {}).length ? `
+              ${!isStepQuote && Object.keys(project.template_answers || {}).length ? `
               <div class="card">
                 <h2>Pre-quote information</h2>
                 ${templateAnswersSummaryHtml(project.proposal_template, project.template_answers)}
               </div>` : ''}
+              ${isStepQuote ? '' : `
               <div class="card">
                 <h2>Notes</h2>
                 <p class="subtitle" style="margin-bottom:8px;">Background/context that sticks around regardless of how the job progresses - e.g. what a lead originally asked for. Not shown to the client.</p>
@@ -4616,9 +4588,9 @@
                 </label>
                 <div id="proj-needs-visit-msg"></div>
                 <div id="proj-inspection-area" style="margin-top:10px;"></div>
-              </div>
+              </div>`}
 
-              ${!['time_and_materials', 'direct_job'].includes(project.proposal_template) && !isStepQuote ? `
+              ${project.proposal_template !== 'direct_job' && !isStepQuote ? `
               <div class="card">
                 <h2>Client quote link</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Share this link with the client, or email them the quote directly.</p>
@@ -5014,14 +4986,15 @@
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
           generateQuotePdfBtn.disabled = false;
-          generateQuotePdfBtn.textContent = project.quote_pdf_path ? 'Regenerate' : 'Generate PDF';
+          generateQuotePdfBtn.textContent = generateQuotePdfBtn.closest('#panel-quote') ? 'Try the PDF again' : (project.quote_pdf_path ? 'Regenerate' : 'Generate PDF');
           return;
         }
-        // Redraw with View PDF and stay on Details (used to call loadProject() and show nothing).
+        // Redraw with View PDF and stay on the tab the button was on (the quote's step 5, or a job's Details).
+        const onTab = generateQuotePdfBtn.closest('#panel-quote') ? 'quote' : 'details';
         const refreshed = await loadProject();
         if (!refreshed) return;
         render(refreshed, pricingVisible);
-        document.querySelector('#job-tabs .settings-tab[data-panel="details"]')?.click();
+        document.querySelector(`#job-tabs .settings-tab[data-panel="${onTab}"]`)?.click();
         const m = document.getElementById('quote-pdf-msg');
         if (m) m.innerHTML = '<div class="success-box" style="margin-top:8px; font-size:12px;">PDF ready.</div>';
       });
