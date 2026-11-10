@@ -1,0 +1,418 @@
+{
+ "project": {
+  "id": "00000000-0000-4000-c000-0000000000f1",
+  "name": "12 Example Rd - solar and battery",
+  "status": "draft",
+  "expired": false,
+  "sent_at": null,
+  "show_roi": true,
+  "sow_text": "Supply and install a solar and battery system.\n\nSOLAR\nPanels on the tile roof, wired to the inverters.\n\nBATTERY\nBatteries in the battery room with AS/NZS 5139 clearances.",
+  "stc_total": 7490,
+  "bstc_total": 6090,
+  "created_at": "2026-11-06T03:39:07.800355+00:00",
+  "job_number": null,
+  "pylon_data": {
+   "summary": {
+    "dc_output_kw": 31.04
+   },
+   "module_types": [
+    {
+     "quantity": 64,
+     "description": "WINAICO WBC Series Ultra Black"
+    }
+   ],
+   "storage_types": [
+    {
+     "quantity": 6,
+     "description": "Sigenergy SigenStor BAT 10.0"
+    }
+   ],
+   "inverter_types": [
+    {
+     "quantity": 2,
+     "description": "Sigenergy Sigen Energy Controller SigenStor EC 15.0 TP AU (AS4777-2 2020)"
+    }
+   ]
+  },
+  "pylon_link": "https://app.getpylon.com/proposals/EXAMPLE123",
+  "roi_inputs": {
+   "alt": {
+    "name": "",
+    "tariff": "flat",
+    "enabled": false
+   },
+   "current": {},
+   "solar_price": null,
+   "plan_options": [
+    {
+     "notes": {
+      "conditions": [
+       "Connection fee (GST incl) for standard move in requests during business hours. Fees may vary. See Additional Fee Information for details. $0"
+      ],
+      "eligibility": [
+       "Net metered Solar system: You have solar panels and your solar system is net metered."
+      ]
+     },
+     "adjust": {
+      "annual_fees": 0,
+      "percent_of_use": 0,
+      "percent_of_bill": 0
+     },
+     "plan_id": "RED636152MRE14@EME",
+     "roi_plan": {
+      "peak": 45.1,
+      "other": "off_peak",
+      "supply": 192.01,
+      "tariff": "tou",
+      "feed_in": 5,
+      "windows": [
+       {
+        "band": "peak",
+        "days": "weekdays",
+        "hours": "16:00-20:00",
+        "months": ""
+       },
+       {
+        "band": "off_peak",
+        "days": "all",
+        "hours": "22:00-07:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekends",
+        "hours": "07:00-22:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "07:00-16:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "20:00-22:00",
+        "months": ""
+       }
+      ],
+      "off_peak": 13.04,
+      "shoulder": 26.84
+     },
+     "brand_name": "Red Energy",
+     "fetched_at": "2026-10-24T20:48:54.711+00:00",
+     "display_name": "Living Energy Solar Saver",
+     "last_updated": "2026-06-30T22:28:50.358+00:00"
+    },
+    {
+     "notes": {
+      "conditions": [
+       "Connection fee (GST incl) for standard move in requests during business hours. Fees may vary. See Additional Fee Information for details. $0"
+      ],
+      "eligibility": [
+       "Net metered Solar system: You have solar panels and your solar system is net metered."
+      ]
+     },
+     "adjust": {
+      "annual_fees": 0,
+      "percent_of_use": 0,
+      "percent_of_bill": 0
+     },
+     "plan_id": "ORI123456MRE9@EME",
+     "roi_plan": {
+      "peak": 45.1,
+      "other": "off_peak",
+      "supply": 192.01,
+      "tariff": "tou",
+      "feed_in": 3,
+      "windows": [
+       {
+        "band": "peak",
+        "days": "weekdays",
+        "hours": "16:00-20:00",
+        "months": ""
+       },
+       {
+        "band": "off_peak",
+        "days": "all",
+        "hours": "22:00-07:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekends",
+        "hours": "07:00-22:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "07:00-16:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "20:00-22:00",
+        "months": ""
+       }
+      ],
+      "off_peak": 13.04,
+      "shoulder": 26.84
+     },
+     "brand_name": "Origin Energy",
+     "fetched_at": "2026-10-24T20:48:54.711+00:00",
+     "display_name": "Origin Go Variable with a very long plan name that wraps",
+     "last_updated": "2026-06-30T22:28:50.358+00:00"
+    },
+    {
+     "notes": {
+      "conditions": [
+       "Connection fee (GST incl) for standard move in requests during business hours. Fees may vary. See Additional Fee Information for details. $0"
+      ],
+      "eligibility": [
+       "Net metered Solar system: You have solar panels and your solar system is net metered."
+      ]
+     },
+     "adjust": {
+      "annual_fees": 0,
+      "percent_of_use": 0,
+      "percent_of_bill": 0
+     },
+     "plan_id": "AGL998877MRE2@EME",
+     "roi_plan": {
+      "peak": 45.1,
+      "other": "off_peak",
+      "supply": 170,
+      "tariff": "tou",
+      "feed_in": 4,
+      "windows": [
+       {
+        "band": "peak",
+        "days": "weekdays",
+        "hours": "16:00-20:00",
+        "months": ""
+       },
+       {
+        "band": "off_peak",
+        "days": "all",
+        "hours": "22:00-07:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekends",
+        "hours": "07:00-22:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "07:00-16:00",
+        "months": ""
+       },
+       {
+        "band": "shoulder",
+        "days": "weekdays",
+        "hours": "20:00-22:00",
+        "months": ""
+       }
+      ],
+      "off_peak": 13.04,
+      "shoulder": 26.84
+     },
+     "brand_name": "AGL",
+     "fetched_at": "2026-10-24T20:48:54.711+00:00",
+     "display_name": "Solar Savers",
+     "last_updated": "2026-06-30T22:28:50.358+00:00"
+    }
+   ],
+   "battery_price": null
+  },
+  "terms_text": "1. Acceptance\n\nFixture terms, shortened.\n\n2. Payment\n\nFixture terms, shortened.",
+  "approved_at": null,
+  "battery_kwh": 90,
+  "client_name": "Sam Example",
+  "declined_at": null,
+  "quote_token": "fixture",
+  "valid_until": null,
+  "bill_reading": {
+   "peak_kwh": null,
+   "retailer": "Origin",
+   "total_kwh": 7401.174,
+   "tou_other": null,
+   "bill_total": 2402.81,
+   "tariff_type": "flat",
+   "usage_rates": {
+    "general": 32.263,
+    "controlled_load": 21.109
+   },
+   "billing_days": 92,
+   "off_peak_kwh": null,
+   "shoulder_kwh": null,
+   "tou_schedule": null,
+   "solar_soak_kwh": null,
+   "solar_export_kwh": 1.926,
+   "daily_average_kwh": 80.45,
+   "feed_in_c_per_kwh": 4,
+   "controlled_load_kwh": 0,
+   "usage_rate_c_per_kwh": 32.263,
+   "supply_charge_c_per_day": 131.131
+  },
+  "cover_photos": [],
+  "quote_number": 9900,
+  "stc_quantity": 214,
+  "approval_note": null,
+  "bstc_quantity": 174,
+  "stc_system_kw": 31.04,
+  "client_address": "12 Example Rd, Testville QLD 4000",
+  "approval_method": null,
+  "deposit_percent": 10,
+  "stc_zone_rating": 1.382,
+  "reference_photos": [],
+  "proposal_subtitle": "",
+  "proposal_template": "solar",
+  "client_office_address": "12 Example Rd, Testville QLD 4000",
+  "accepted_signed_by_name": null,
+  "estimate_disclaimer_text": "",
+  "show_investment_breakdown": false,
+  "accepted_signature_data_url": null
+ },
+ "agreement": null,
+ "client_type": "individual",
+ "prepared_by": "Test Staff",
+ "roi_answers": {
+  "existing_pv": "1kw",
+  "export_limit": "5 kW",
+  "with_battery": "Yes",
+  "existing_system": "Existing solar",
+  "battery_kwh_wanted": "56",
+  "existing_system_detail": "to be removed"
+ },
+ "cost_centres": [
+  {
+   "id": "c1",
+   "name": "Battery and Inverters",
+   "stc_total": 8190,
+   "line_items": [
+    {
+     "amount": 9135,
+     "quantity": 2,
+     "item_type": "material",
+     "description": "Sigenergy 15kW SigenStor Three Phase Controller"
+    },
+    {
+     "amount": 585.8,
+     "quantity": 2,
+     "item_type": "material",
+     "description": "SIGENERGY SigenStor Installation Kit for Ground-Mount"
+    },
+    {
+     "amount": 1245.55,
+     "quantity": 1,
+     "item_type": "material",
+     "description": "SIGENERGY Sigen Gateway Home TP AU"
+    },
+    {
+     "amount": 34075,
+     "quantity": 10,
+     "item_type": "material",
+     "description": "Sigenergy 9kWh SigenStor Battery with LED"
+    },
+    {
+     "amount": 2454.6,
+     "quantity": 20,
+     "item_type": "labour",
+     "description": "Licensed Electrical Specialist"
+    }
+   ],
+   "sort_order": 0,
+   "description": "Supply and install 2x Sigenergy SigenStor EC 15.0 TP three-phase inverters and 6x SigenStor BAT 10.0 batteries (56kWh usable).",
+   "is_variation": false,
+   "photo_groups": [],
+   "quoted_amount": 47495.95
+  },
+  {
+   "id": "c2",
+   "name": "Switchboard and Backup",
+   "stc_total": 8190,
+   "line_items": [
+    {
+     "amount": 2472.627,
+     "quantity": 60,
+     "item_type": null,
+     "description": "INVERTER - SUPPLY AND INSTALL NEW 3 PHASE SUBMAINS IN CONDUIT (per Meter)"
+    },
+    {
+     "amount": 3890.5456,
+     "quantity": 160,
+     "item_type": null,
+     "description": "SUPPLY AND INSTALL NEW SOLAR DC CIRCUIT (PER METRE)"
+    },
+    {
+     "amount": 41.21045,
+     "quantity": 1,
+     "item_type": null,
+     "description": "GENERATOR - SUPPLY AND INSTALL NEW 3 PHASE SUBMAINS IN CONDUIT (per Meter)"
+    }
+   ],
+   "sort_order": 1,
+   "description": "Run DC, AC and communication cabling.",
+   "is_variation": false,
+   "photo_groups": [],
+   "quoted_amount": 6404.38
+  },
+  {
+   "id": "c3",
+   "name": "Solar Panel Install",
+   "stc_total": 8190,
+   "line_items": [
+    {
+     "amount": 2822.8,
+     "quantity": 40,
+     "item_type": null,
+     "description": "SUPPLY AND INSTALL NEW TILE FEET"
+    },
+    {
+     "amount": 23200,
+     "quantity": 64,
+     "item_type": "material",
+     "description": "Winaico BDX 485w Solar panel"
+    },
+    {
+     "amount": 9818.4,
+     "quantity": 80,
+     "item_type": "labour",
+     "description": "Licensed Electrical Specialist"
+    }
+   ],
+   "sort_order": 2,
+   "description": "Remove the existing solar system and install 64x WINAICO panels (31.04kW).",
+   "is_variation": false,
+   "photo_groups": [],
+   "quoted_amount": 35841.2
+  }
+ ],
+ "rate_card_name": null,
+ "schedule_of_rates": null,
+ "payment_milestones": [
+  {
+   "label": "Deposit, due on acceptance",
+   "percent": 10
+  },
+  {
+   "label": "On ordering materials",
+   "percent": 40
+  },
+  {
+   "label": "On installation complete",
+   "percent": 30
+  },
+  {
+   "label": "On commissioning and handover",
+   "percent": 20
+  }
+ ],
+ "client_office_address": "12 Example Rd, Testville QLD 4000"
+}

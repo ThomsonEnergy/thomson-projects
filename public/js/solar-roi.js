@@ -777,6 +777,24 @@ function roiComparePlans(argsIn) {
   return { current: { plan: current, ...currentCost }, rows, withSystem: solar > 0 || battery > 0 };
 }
 
+// The plan list staff pick from: one group per retailer, in the order of its cheapest plan for this
+// home, so a retailer with many near-identical plans cannot fill the list. rows are roiComparePlans
+// rows (cheapest with the system first); brandOf(key) and nameOf(key) name the retailer and the plan.
+// Returns [{ brand, best, more }]: `more` is that retailer's other plans, the cheapest of each name.
+function roiPlansByRetailer(rows, brandOf, nameOf) {
+  const groups = new Map();
+  (rows || []).forEach(r => {
+    const brand = String(brandOf(r.key) || 'Other').trim();
+    const name = String(nameOf(r.key) || '').trim();
+    const g = groups.get(brand);
+    if (!g) { groups.set(brand, { brand, best: r, more: [], names: new Set([name]) }); return; }
+    if (g.names.has(name)) return; // a dearer variant of a plan already listed
+    g.names.add(name);
+    g.more.push(r);
+  });
+  return [...groups.values()].map(g => ({ brand: g.brand, best: g.best, more: g.more }));
+}
+
 // What the customer is told wherever plan options are shown: a suggestion to help their own research,
 // not a recommendation (owner's words, 23 Oct 2026).
 const ROI_PLAN_DISCLAIMER = 'These are other electricity plans published for your area, shown only as a suggestion to help you research your options. Thomson Energy does not endorse any retailer, cannot connect you with a retailer or switch your plan for you, and receives no payment or commission from any retailer. The rates are an online estimate taken from each retailer\'s published plan on Energy Made Easy (the government\'s comparison site) on the date shown, and we cannot promise them. Check the current rates, eligibility and conditions with the retailer before you decide.';
@@ -1099,5 +1117,5 @@ function roiAssumptionsText(est) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, ROI_NOT_PAID_OFF, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiBillGst, roiIncGstArgs, roiPaybackText, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, ROI_NOT_PAID_OFF, roiComparePlans, roiPlansByRetailer, billMetrics, suggestSizes, existingSolarKw, roiBillGst, roiIncGstArgs, roiPaybackText, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiScheduleStripHtml, roiBatteryKwhFromLines, roiDefaultPrices, roiPricesFor, roiEstimate, roiGaps, roiChecks, roiPresentation, roiWorkingRows, roiChartsHtml, roiAssumptionsText };
 }

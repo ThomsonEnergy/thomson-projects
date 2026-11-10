@@ -32,7 +32,7 @@
 
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/template-questions.js?v=4"></script>
-  <script src="/js/solar-roi.js?v=13"></script>
+  <script src="/js/solar-roi.js?v=14"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1550,6 +1550,7 @@
       // when a retailer later edits the plan. Always a suggestion: the disclaimer goes wherever they show.
       let planOptions = Array.isArray((project.roi_inputs || {}).plan_options) ? project.roi_inputs.plan_options.slice() : [];
       let planResults = null; // { candidates, uncostable, fetchedNote }
+      const planOpenBrands = new Set(); // retailers whose other plans are showing in the list
       // NSW and QLD networks only: Thomson Energy is licensed there, not in the ACT (docs/BUSINESS_FACTS.md)
       const NETWORK_KEYS = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Ergon Energy'];
       const networkOf = (name) => {
@@ -1645,7 +1646,9 @@
           candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));
-        const top = res.rows.slice(0, 10);
+        // one row per retailer (its cheapest plan for this home), so one retailer's many plans cannot fill the list
+        const retailers = roiPlansByRetailer(res.rows, (key) => byId2[key].brand_name, (key) => byId2[key].display_name);
+        const top = retailers.slice(0, 10);
         const chosenIds = new Set(planOptions.map(o => o.plan_id));
         const diff = (n) => (n === 0 ? 'same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`);
         const things = (p) => [...((p.notes || {}).eligibility || []), ...((p.notes || {}).conditions || [])].slice(0, 3).join('; ');
@@ -1655,15 +1658,24 @@
             const wholesale = planResults.uncostable.filter(isWholesale).length;
             const other = planResults.uncostable.length - wholesale;
             return `${other ? `, ${other} left out (demand charges, or rates that could not be read)` : ''}${wholesale ? `, ${wholesale} wholesale-price plans sold here not listed (we don't do estimates for wholesale rates)` : ''}`;
-          })()}. Cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
+          })()}. ${retailers.length} retailers, each one's cheapest plan for this home, cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
           <div style="overflow-x:auto;"><table style="font-size:12.5px; min-width:640px;">
             <thead><tr><th>Show</th><th style="text-align:left;">Retailer and plan</th><th>Yearly bill now</th><th>With the system</th><th>Vs current plan</th><th>Feed-in</th><th style="text-align:left;">Things to check</th></tr></thead>
-            <tbody>${top.map(r => { const p = byId2[r.key]; return `<tr>
+            <tbody>${top.map(g => {
+              const row = (r, extra) => { const p = byId2[r.key]; return `<tr${extra ? ' style="background:var(--surface-2);"' : ''}>
               <td><input type="checkbox" class="bc-plan-pick" data-id="${escapeHtml(r.key)}" style="width:auto;" ${chosenIds.has(r.key) ? 'checked' : ''} /></td>
               <td>${escapeHtml(p.brand_name || '')}: ${escapeHtml(p.display_name || '')}<br><span class="subtitle" style="font-size:11px;">${escapeHtml(r.key)}</span></td>
               <td>${money(r.billNow)}</td><td><strong>${money(r.billAfter)}</strong></td><td>${diff(r.vsCurrentAfter)}</td><td>${r.feedIn} c</td>
-              <td style="font-size:11.5px;">${escapeHtml(things(p) || '-')}</td></tr>`; }).join('')}</tbody>
+              <td style="font-size:11.5px;">${escapeHtml(things(p) || '-')}</td></tr>`; };
+              const open = planOpenBrands.has(g.brand);
+              const moreRow = g.more.length ? `<tr><td></td><td colspan="6" style="padding-top:0;"><button type="button" class="link-quiet bc-plan-more" data-brand="${escapeHtml(g.brand)}" style="background:none; border:none; padding:0; font-size:12px; cursor:pointer;">${open ? 'Hide' : `${g.more.length} more`} from ${escapeHtml(g.brand)}</button></td></tr>` : '';
+              return row(g.best) + moreRow + (open ? g.more.slice(0, 8).map(r => row(r, true)).join('') : '');
+            }).join('')}</tbody>
           </table></div>`;
+        el.querySelectorAll('.bc-plan-more').forEach(b => b.addEventListener('click', () => {
+          if (planOpenBrands.has(b.dataset.brand)) planOpenBrands.delete(b.dataset.brand); else planOpenBrands.add(b.dataset.brand);
+          renderPlanResults();
+        }));
         el.querySelectorAll('.bc-plan-pick').forEach(cb => cb.addEventListener('change', () => {
           const p = byId2[cb.dataset.id];
           if (cb.checked) {
@@ -3318,7 +3330,7 @@
                   <p class="subtitle" style="margin:2px 0 8px;">Create the design in Pylon, paste the proposal link, and pull the equipment list so the quote names real panels, inverters and batteries.</p>
                   <button type="button" class="secondary" id="pylon-create-btn" style="margin-bottom:6px;">Create job in Pylon &rarr;</button>
                   <div id="pylon-create-msg"></div>
-                  <label style="margin-top:10px;">Pylon proposal link</label>
+                  <label style="margin-top:10px;">Pylon proposal link (puts the View interactive design button on the proposal's Your system page)</label>
                   <input id="p-pylon-link" placeholder="https://app.getpylon.com/..." value="${escapeHtml(project.pylon_link || '')}" />
                   <div class="grid cols-3" style="margin-top:10px;">
                     <div style="grid-column: span 2;"><label>Pylon project ID (optional, for pulling system data)</label><input id="p-pylon-id" placeholder="Requires a Pylon API key set up under Settings > API Keys" value="${escapeHtml(project.pylon_project_id || '')}" /></div>
@@ -3418,6 +3430,7 @@
                 ${stepHead(5, 'Send', 'The ready-to-send check updates itself after each save and runs again when you email the quote or move it to Quote Sent. Admin and Finance can send anyway with a reason.')}
                 <div id="compliance-check-result"></div>
                 <div id="roi-status"></div>
+                ${info.showPylon && !safePylonLink(project.pylon_link) ? `<p style="margin:10px 0 0; font-size:13px; color:var(--amber, #92400e);">No Pylon link on step 3, so the proposal has no View interactive design button. Paste the Pylon proposal link there and it shows on the Your system page.</p>` : ''}
                 <div style="margin-top:16px; ${['solar', 'battery'].includes(template) ? '' : 'display:none;'}">
                   <label style="margin-top:0; font-weight:600;">Documents to gather from the customer</label>
                   <p class="subtitle" style="margin:2px 0 8px;">Work through these with the customer - answers and photos save as you go.</p>
