@@ -2,6 +2,11 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 11 Nov 2026
+
+- Planned (waiting on yes): item 72, the proposal's savings and plan pages (bug). Found on Q1014: the savings table cannot split across sheets, the plan options table is wider than the sheet, the plan finder lists the 10 cheapest plans so one retailer fills it, and the savings maths ignores the export limit, counts an existing system that is being removed, mixes two bases and tells the customer 5 of its 20 guesses. Pylon on the proposal needs a pasted link and a scope of works to show its button. Plan, findings and footer: `docs/IDEAS_BACKLOG.md` item 72.
+- Planned (waiting on yes): item 73, proposal pictures. A title picture per proposal type and an About picture in Settings (the old Cover page photo box never reached the proposal), pictures with captions on the Your system page, AI tags on every job picture with search, recent installs offered on the quote, an editor to place equipment on a site picture. One migration. Plan and footer: `docs/IDEAS_BACKLOG.md` item 73.
+
 ## 10 Nov 2026
 
 - LIVE (owner: "yes build, that's correct money", bug fix into `main`): item 71, ServiceM8 deposits come across as paid claims. J7016 fixed on production (deposit $3,123.92 ex GST paid 28 Sep 2026 as claim "4809 deposit", invoiced to date to match, quoted $6,620.87 to $8,092.83 to match ServiceM8; backup `backup_20261110.j7016_cost_centres`; its line items still add up to the old figure). The import now reads a paid job's ServiceM8 payments and brings each across as a paid claim, the claims card shows them paid, and the review screen lists deposits missing on jobs already in the app ("Deposits to add", tick and Import adds them). Owner to do once: Settings > Import from ServiceM8 > Deposits to add. Detail: `docs/PROJECT_SPEC.md` (ServiceM8 import), `docs/IDEAS_BACKLOG.md` item 71.
