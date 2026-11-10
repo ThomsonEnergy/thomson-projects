@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 10 Nov 2026
 
+- Planned (waiting on yes): item 70, a simpler quote form. Two read-only passes found 12 pre-quote questions nothing reads, 4 figures typed twice, 6 dead boxes, Pre-quote information shown three times, a type change that never applies its deposit and milestones, lead attachments and notes that never reach the AI, and `time_and_materials` branches with 0 rows. Plan, findings and the plan footer: `docs/IDEAS_BACKLOG.md` item 70.
 - Bug fix (owner's yes 10 Nov 2026, into `main`): sales and finance logins saw "Not mapped" under every invoice's Xero breakdown because only admins could read `xero_account_mapping`. Migration 20261130070000 adds a read policy for pricing roles; writing stays admin only. Push to Xero was never affected.
 
 ## 9 Nov 2026
