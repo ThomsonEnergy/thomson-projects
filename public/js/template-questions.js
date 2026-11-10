@@ -78,6 +78,23 @@ const TEMPLATE_QUESTIONS = {
   ],
 };
 
+// Questions taken off the form (item 70). Answers already given to them stay on the quote and the
+// job and still show on the job, My Day and to the AI, under these labels.
+const RETIRED_QUESTION_LABELS = {
+  info_date: 'When', info_by: 'Who spoke to the client', info_notes: 'What the client asked for',
+  existing_system: 'Existing solar or battery to tie into', existing_system_detail: 'Existing system details',
+  roof_condition: 'Roof condition', storeys: 'Storeys', switchboard_type: 'Existing switchboard',
+  daily_usage: 'Daily use (kWh)', shading: 'Shading', access: 'Access notes',
+  battery_kwh_wanted: 'Usable kWh the customer asked for', distance_to_board: 'Distance to the switchboard (m)',
+  walls_open: 'Wall and ceiling access',
+};
+
+// Answers to retired questions this quote still carries, as { label, value }.
+function earlierAnswers(answers) {
+  answers = answers || {};
+  return Object.keys(RETIRED_QUESTION_LABELS).filter(id => String(answers[id] ?? '').trim()).map(id => ({ label: RETIRED_QUESTION_LABELS[id], value: answers[id] }));
+}
+
 const TEMPLATE_QUESTION_TITLES = {
   solar: 'Solar questions',
   battery: 'Battery questions',
@@ -169,6 +186,7 @@ function templateAnswersSummaryHtml(template, answers) {
       rows.push(`<tr><td>${q.label.replace(/</g, '&lt;')}</td><td>${String(answers[q.id]).replace(/</g, '&lt;')}</td></tr>`);
     });
   });
+  earlierAnswers(answers).forEach(a => rows.push(`<tr><td>${a.label.replace(/</g, '&lt;')}</td><td>${String(a.value).replace(/</g, '&lt;')}</td></tr>`));
   return rows.length ? `<table><tbody>${rows.join('')}</tbody></table>` : `<p class="subtitle">No answers recorded yet.</p>`;
 }
 
@@ -179,6 +197,7 @@ function templateAnswersText(template, answers) {
   questionGroupsForQuote(template, answers).forEach(g => {
     g.questions.filter(q => answers[q.id]).forEach(q => lines.push(`${q.label}: ${answers[q.id]}`));
   });
+  earlierAnswers(answers).forEach(a => lines.push(`${a.label}: ${a.value}`));
   return lines.join('\n');
 }
 

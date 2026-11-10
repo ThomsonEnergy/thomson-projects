@@ -145,7 +145,7 @@ exports.handler = async (event) => {
       const pick = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex'].find(o => d.includes(o.toLowerCase().split(' ')[0]));
       filled.dnsp = pick || 'Other';
     }
-    if (!str(answers.existing_pv) && !str(answers.existing_system) && metrics.hasSolarAlready) filled.existing_pv = 'Existing solar (the bill shows exports)';
+    if (project.proposal_template === 'solar' && !str(answers.existing_pv) && !str(answers.existing_system) && metrics.hasSolarAlready) filled.existing_pv = 'Existing solar (the bill shows exports)';
     const newAnswers = { ...answers, ...filled };
 
     const { error: upErr } = await supabaseAdmin.from('projects').update({ bill_reading: reading, template_answers: newAnswers }).eq('id', projectId);

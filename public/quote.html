@@ -866,7 +866,9 @@
       // own deposit row shows that row instead (item 70 took the deposit row out of the defaults).
       const milestones = data.payment_milestones || [];
       const depositRowHtml = `<tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount * 1.1)}</td></tr>`;
-      const ownDepositRow = milestones.length && /^deposit\b/i.test(String(milestones[0].label || '').trim());
+      // stages that add up to 100% on their own are a whole schedule already (older quotes): no deposit row on top
+      const ownDepositRow = milestones.length && (/^deposit\b/i.test(String(milestones[0].label || '').trim())
+        || Math.round(milestones.reduce((t, m) => t + (Number(m.percent) || 0), 0)) === 100);
       const milestoneRowsHtml = milestones.length
         ? (ownDepositRow || !(depositPercent > 0) ? '' : depositRowHtml) + milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(baseTotal * 1.1 * (Number(m.percent) / 100))}</td></tr>`).join('')
         : `

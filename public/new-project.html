@@ -304,7 +304,6 @@
           reference_photos: [], cover_photos: coverPhotos,
           proposal_template: currentTemplate,
           template_answers: startingAnswers({ fromLead: !!prefillLeadId, fromEmail: !!prefillEmailThreadId }),
-          sow_documents: await copyLeadAttachments(prefillLeadAttachments),
           estimate_disclaimer_text: currentTemplate === 'quick_estimate'
             ? (companySettings.default_estimate_disclaimer || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.')
             : '',
@@ -318,6 +317,17 @@
         const projectId = project.id;
         if (prefillLeadId) await supabaseClient.from('leads').update({ status: 'converted' }).eq('id', prefillLeadId);
         if (prefillEmailThreadId) { try { await emailTagThreadToProject(prefillEmailThreadId, projectId, 'client', 'Quote created from this email'); } catch (e) { console.error('Could not tag the email to the quote:', e); } }
+
+        // the lead's files, once the quote exists; any that could not be copied are named in the quote's activity
+        if (prefillLeadAttachments.length) {
+          const docs = await copyLeadAttachments(prefillLeadAttachments);
+          if (docs.length) {
+            const { error: docErr } = await supabaseClient.from('projects').update({ sow_documents: docs }).eq('id', projectId);
+            if (docErr) console.error('Lead files not saved on the quote:', docErr.message);
+          }
+          const missed = prefillLeadAttachments.length - docs.length;
+          if (missed) await logActivity('project', projectId, 'lead_files_missed', `${missed} file${missed === 1 ? '' : 's'} sent with the lead could not be added to the scope of works documents: open the lead to get ${missed === 1 ? 'it' : 'them'}.`);
+        }
 
         if (payDefaults.milestones.length) {
           const { error: msErr } = await supabaseClient.from('payment_milestones').insert(payDefaults.milestones.map((m, i) => ({ label: m.label, percent: m.percent, sort_order: i, project_id: projectId })));

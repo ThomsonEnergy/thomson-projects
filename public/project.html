@@ -460,14 +460,15 @@
     }
 
     // The client sees the deposit first, then these stages (quote.html), so the two make 100%. An older
-    // quote whose stages start with their own deposit row counts that row instead.
+    // quote whose stages start with their own deposit row, or make 100% alone, counts those instead.
     function refreshMilestoneTotal() {
       const rows = [...document.querySelectorAll('.milestone-row')];
       const note = document.getElementById('milestone-total-note');
       if (!note) return;
       if (!rows.length) { note.textContent = ''; return; }
       const stages = rows.reduce((s, r) => s + (parseFloat(r.querySelector('.milestone-percent').value) || 0), 0);
-      const ownDeposit = isDepositMilestone({ label: rows[0].querySelector('.milestone-label').value });
+      // a deposit row of their own, or stages that make 100% alone: the proposal adds no deposit row
+      const ownDeposit = isDepositMilestone({ label: rows[0].querySelector('.milestone-label').value }) || Math.round(stages) === 100;
       const deposit = ownDeposit ? 0 : (parseFloat((document.getElementById('p-deposit') || {}).value) || 0);
       const total = Math.round((stages + deposit) * 100) / 100;
       const sum = deposit ? `Deposit ${deposit}% + stages ${stages}% = ${total}%` : `Total: ${total}%`;
@@ -826,7 +827,7 @@
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         render(project, true);
@@ -2030,8 +2031,6 @@
       }
     }
 
-    // A completed (or booked) site inspection for this quote or its lead: its answers are the
-    // best source for the pre-quote questions, so link it from the card.
     // Presents the choice - quick note vs full signed Variation - for a set
     // of stage $ changes on an already-approved job. Resolves to a
     // ready-to-insert variations row, or undefined if the user backs out
@@ -3542,7 +3541,7 @@
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         currentTemplate = project.proposal_template || 'new_build';
@@ -3631,7 +3630,15 @@
             project.template_answers = answers;
             templateAnswers = answers;
             showToast('Answers saved.');
-            if (changedTemplate) { project.proposal_template = currentTemplate; const refreshed = await loadProject(); if (refreshed) render(refreshed, true); return; }
+            if (changedTemplate) {
+              project.proposal_template = currentTemplate;
+              const refreshed = await loadProject();
+              if (refreshed) {
+                render(refreshed, true);
+                if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
+              }
+              return;
+            }
             const h = document.getElementById('qstep-1-head');
             if (h) h.innerHTML = `${quoteStepTicks(project, centres)[1] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}1. Pre-quote information`;
             refreshBar();
