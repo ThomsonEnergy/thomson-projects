@@ -18,8 +18,12 @@
 //     matching rate tier), materials at ServiceM8 cost, and the stage
 //     markup that makes them sell for exactly the ServiceM8 value
 //     (stageFromLines), so labour and materials split properly for Xero
-//   * invoiced_amount = the Completed ServiceM8 claims, so "Invoice
-//     project" only bills what ServiceM8 hasn't already billed
+//   * invoiced_amount = the Completed ServiceM8 claims plus the deposits
+//     paid on the job, kept on the stage as imported_claims (a deposit with
+//     paid and method), so "Invoice project" only bills what ServiceM8
+//     hasn't already billed or taken
+// A job already in the app is not made again; a deposit it is missing is
+// added to its first stage as a paid claim (item 71).
 // A "quoted" job is a normal quoted job (new_build); "do_and_charge" is a
 // Direct Job, invoiced from actual time and materials logged in the app.
 // Also the ServiceM8 notes (projects.notes) and sm8_job_uuid /
@@ -83,6 +87,27 @@ async function resolveClient(supabaseAdmin, row) {
   return created;
 }
 
+// A job brought across earlier: the paid claims (deposits) in this run that are not on any of
+// its stages yet go onto its first stage, and its invoiced figure moves up by the same amount.
+// Matched by claim number, so pressing Import twice adds nothing twice.
+async function addMissingDeposits(supabaseAdmin, project, claims) {
+  const paid = claims.filter(c => c.paid);
+  if (!paid.length || !project.job_number) return { added: [] };
+  const { data: stages, error } = await supabaseAdmin.from('cost_centres').select('id, invoiced_amount, imported_claims').eq('project_id', project.id).order('sort_order');
+  if (error) throw error;
+  if (!stages || !stages.length) return { added: [] };
+  const have = new Set(stages.flatMap(s => (Array.isArray(s.imported_claims) ? s.imported_claims : []).map(c => String(c.number))));
+  const missing = paid.filter(c => !have.has(String(c.number)));
+  if (!missing.length) return { added: [] };
+  const first = stages[0];
+  const { error: upErr } = await supabaseAdmin.from('cost_centres').update({
+    imported_claims: [...(Array.isArray(first.imported_claims) ? first.imported_claims : []), ...missing],
+    invoiced_amount: r2(Number(first.invoiced_amount || 0) + missing.reduce((t, c) => t + c.amount, 0)),
+  }).eq('id', first.id);
+  if (upErr) throw upErr;
+  return { added: missing.map(c => ({ number: c.number, amount: c.amount })) };
+}
+
 async function importRow(supabaseAdmin, userId, row, tierIds) {
   const sm8JobUuid = str(row.sm8JobUuid, 100);
   if (!sm8JobUuid) throw new Error('Missing ServiceM8 job id');
@@ -113,9 +138,18 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   const importedClaims = isQuote ? [] : (Array.isArray(s.claims) ? s.claims : []).slice(0, 50).map(c => ({
     number: str(c.number, 50) || '?', amount: r2(c.amount), source: 'servicem8',
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(c.date || '')) ? c.date : null,
+    // a deposit, or an invoice paid in ServiceM8: the payment date and method
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(c.paid || '')) ? { paid: c.paid, method: str(c.method, 50) || 'ServiceM8' } : {}),
   }));
   if (importedClaims.some(c => !(c.amount >= 0))) throw new Error('A ServiceM8 claim has a bad amount');
   if (importedClaims.length && Math.abs(r2(importedClaims.reduce((t, c) => t + c.amount, 0)) - invoiced) > 0.01) throw new Error('The ServiceM8 claims do not add up to the invoiced figure');
+
+  // Already in the app from an earlier run: only a deposit it is missing is added.
+  const { data: priorJob, error: priorErr } = await supabaseAdmin.from('projects').select('id, job_number, quote_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
+  if (priorErr) throw priorErr;
+  if (priorJob) {
+    return { skipped: true, projectId: priorJob.id, jobNumber: priorJob.job_number, quoteNumber: priorJob.quote_number, ...(await addMissingDeposits(supabaseAdmin, priorJob, importedClaims)) };
+  }
   // ServiceM8's STC rebate lines: kept as the list the STCs tab offers for Formbay, and set as the
   // job's STC and BSTC credits (hot water STCs are STCs too) so they come off the invoice.
   const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({

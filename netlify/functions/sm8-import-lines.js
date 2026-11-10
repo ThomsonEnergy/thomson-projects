@@ -1,12 +1,15 @@
 // POST /.netlify/functions/sm8-import-lines
-// Body: { jobs: [{ uuid, number, totalIncGst, claims: [{ number, status }] }] }
+// Body: { jobs: [{ uuid, number, totalIncGst, invoiceSent, paymentAmount, paymentsOnly, claims: [{ number, status }] }] }
 // Admin only. Second half of the ServiceM8 import dry run: after
 // sm8-import-preview.js lists the open jobs, the review screen sends them
 // here a few at a time for their line items (two ServiceM8 calls per job,
 // too many to do in one call for every job). Returns, per job, the
 // prebuild groups and line items it would get, invoiced to date from the
-// Completed claims, and any warnings - see buildJobStage in
-// _shared/sm8-import.js. Read-only, here and in ServiceM8.
+// Completed claims and the deposits paid on the job (ServiceM8 payments,
+// one more call for a job with a payment), and any warnings - see
+// buildJobStage in _shared/sm8-import.js. A job already in the app sends
+// paymentsOnly and gets back just the deposits (item 71). Read-only, here
+// and in ServiceM8.
 
 const { requireAdmin } = require('./_shared/require-admin');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
