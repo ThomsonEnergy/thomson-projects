@@ -542,4 +542,4 @@ async function loadSm8JobLines(apiKey, jobs, tierNames) {
   return out;
 }
 
-module.exports = { stcsText, loadSm8OpenJobs, loadSm8JobLines, buildJobStage, depositsFrom, stageFromLines, sm8GetAll, SM8_BASE };
+module.exports = { stcsText, loadSm8OpenJobs, loadSm8JobLines, buildJobStage, stageFromLines, sm8GetAll, SM8_BASE };
