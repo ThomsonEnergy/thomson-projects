@@ -200,7 +200,7 @@ function rulesFor(phase, ctx) {
   if (phase === 'quote') {
     const rules = [...GENERAL_QUOTE_RULES];
     if (template === 'solar') rules.push(...SOLAR_QUOTE_RULES);
-    if (template === 'battery') rules.push(SOLAR_QUOTE_RULES[2]); // a deposit applies to a battery quote too; its certificates are the BSTC rule
+    if (template === 'battery') rules.push(SOLAR_QUOTE_RULES.find((r) => r.id === 'deposit_and_price_set')); // a deposit applies to a battery quote too; its certificates are the BSTC rule
     if (withBattery) rules.push(...BATTERY_QUOTE_RULES);
     return rules;
   }

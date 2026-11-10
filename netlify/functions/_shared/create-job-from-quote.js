@@ -49,7 +49,7 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
   const depositPercent = Number(job.deposit_percent) || 0;
   const totalQuoted = centres.reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
   if (!(depositPercent > 0) || !(totalQuoted > 0)) return null;
-  if (job.proposal_template === 'quick_estimate' || job.proposal_template === 'time_and_materials') return null;
+  if (job.proposal_template === 'quick_estimate') return null;
 
   const depositTotal = Math.round(totalQuoted * (depositPercent / 100) * 100) / 100;
   const claimRows = centres
@@ -267,6 +267,8 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
         cover_photos: quote.cover_photos,
         proposal_template: quote.proposal_template,
         template_answers: quote.template_answers,
+        // The NMI from step 1 (typed, or read off the bill) so the job and its handover check do not ask again.
+        nmi: quote.nmi || String((quote.template_answers || {}).nmi || (quote.bill_reading || {}).nmi || '').trim().slice(0, 11) || null,
         // The proposal's savings and investment pages, the scope brief and documents, and the site visit
         // answer go with the job, so the job's quote PDF (rebuilt on every stage save) still shows what the
         // client approved (bug review F3).

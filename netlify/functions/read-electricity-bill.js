@@ -138,7 +138,6 @@ exports.handler = async (event) => {
     const filled = {};
     const str = (v) => (v == null ? '' : String(v).trim());
     if (!str(answers.nmi) && str(extracted.nmi)) filled.nmi = str(extracted.nmi).slice(0, 11);
-    if (!str(answers.daily_usage) && metrics.dailyKwh) filled.daily_usage = `${metrics.dailyKwh} kWh/day (bill, ${metrics.days || '?'} days)`;
     if (!str(answers.phases) && extracted.phases === 'three') filled.phases = 'Three phase';
     if (!str(answers.phases) && extracted.phases === 'single') filled.phases = 'Single phase';
     if (!str(answers.dnsp) && str(extracted.distributor)) {
@@ -146,7 +145,7 @@ exports.handler = async (event) => {
       const pick = ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex'].find(o => d.includes(o.toLowerCase().split(' ')[0]));
       filled.dnsp = pick || 'Other';
     }
-    if (!str(answers.existing_system) && metrics.hasSolarAlready) filled.existing_system = 'Existing solar';
+    if (!str(answers.existing_pv) && !str(answers.existing_system) && metrics.hasSolarAlready) filled.existing_pv = 'Existing solar (the bill shows exports)';
     const newAnswers = { ...answers, ...filled };
 
     const { error: upErr } = await supabaseAdmin.from('projects').update({ bill_reading: reading, template_answers: newAnswers }).eq('id', projectId);

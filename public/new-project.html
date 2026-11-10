@@ -106,8 +106,8 @@
     <div id="msg"></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=130"></script>
-  <script src="/js/template-questions.js?v=3"></script>
+  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/template-questions.js?v=4"></script>
   <script src="/js/email-compose.js?v=11"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -118,19 +118,12 @@
     let prefillLeadId = null;
     let prefillEmailThreadId = null; // quote started from an inbox conversation
     let prefillBrief = ''; // a lead's or email's summary of the work, saved as the AI brief
+    let prefillLeadNeedsVisit = false; // the lead said a site visit is needed: step 2 starts at Needed
+    let prefillLeadAttachments = []; // files sent with the lead, copied to the scope of works documents
     let currentTemplate = 'new_build';
     let companySettings = {};
     let selectedClientId = null;
     const sitePicker = attachSitePicker(document.getElementById('p-site-pick'), document.getElementById('p-address'));
-
-    const TEMPLATE_INFO = {
-      new_build: { note: 'Multi-stage project with a deposit and a full scope of works.', photoCategory: 'electrical' },
-      solar: { note: 'Solar questions (grid, existing system, roof, switchboard, supply), tick Batteries as well on the quote to add the battery set. Pylon design on the cover, STC credit on the quote.', photoCategory: 'solar' },
-      battery: { note: 'Battery questions (usable kWh, backup, location to AS/NZS 5139, CEC list, VPP, federal discount), the SAA and Clean Energy Regulator rules checked before sending, BSTC credit on the quote.', photoCategory: 'solar' },
-      renovation: { note: 'Multi-stage renovation with a deposit. Asks about asbestos, switchboard, approvals and occupancy, which set up the pre-work and handover tasks.', photoCategory: 'electrical' },
-      service_work: { note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts.', photoCategory: 'electrical' },
-      quick_estimate: { note: 'Single cost centre, no deposit, labelled "Estimate only" for the client and invoiced from actual hours and materials.', photoCategory: 'general' },
-    };
 
     function applyTemplate(template) {
       currentTemplate = template;
@@ -233,6 +226,24 @@
 
     // ---------- create ----------
 
+    // A lead's files live in the lead-uploads store; the AI scope of works reads project-documents, so
+    // each is copied there (sow-source/, like a file added on step 4). One that fails is left out.
+    async function copyLeadAttachments(attachments) {
+      const docs = [];
+      for (const a of attachments) {
+        try {
+          const { data: blob, error: dlErr } = await supabaseClient.storage.from('lead-uploads').download(a.path);
+          if (dlErr) throw dlErr;
+          const name = a.name || a.path.split('/').pop() || 'file';
+          const path = `sow-source/${Date.now()}-${name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+          const { error: upErr } = await supabaseClient.storage.from('project-documents').upload(path, blob, { contentType: blob.type || undefined });
+          if (upErr) throw upErr;
+          docs.push({ path, name, mime: blob.type || null });
+        } catch (err) { console.error('Lead file not copied to the quote:', a.path, err); }
+      }
+      return docs;
+    }
+
     document.getElementById('save-btn').addEventListener('click', async () => {
       const msg = document.getElementById('msg');
       msg.innerHTML = '';
@@ -292,13 +303,15 @@
           deposit_percent: payDefaults.deposit,
           reference_photos: [], cover_photos: coverPhotos,
           proposal_template: currentTemplate,
-          template_answers: {},
+          template_answers: startingAnswers({ fromLead: !!prefillLeadId, fromEmail: !!prefillEmailThreadId }),
+          sow_documents: await copyLeadAttachments(prefillLeadAttachments),
           estimate_disclaimer_text: currentTemplate === 'quick_estimate'
             ? (companySettings.default_estimate_disclaimer || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.')
             : '',
           pipeline_stage: 'draft_quote',
         };
         if (prefillLeadId) projectFields.lead_id = prefillLeadId;
+        if (prefillLeadNeedsVisit) Object.assign(projectFields, { site_visit_decision: 'needed', needs_site_visit: true });
 
         const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
         if (projErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(projErr.message)}</div>`; return; }
@@ -378,8 +391,9 @@
             ? qandaRows.map(([k, v]) => `${k}: ${typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}`).join('\n')
             : '(no further details captured)';
           document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
-          const attachments = (lead.details && lead.details.attachments) || [];
-          if (attachments.length) document.getElementById('lead-attachments-note').innerHTML = `<p class="subtitle" style="margin-top:8px;">${attachments.length} file${attachments.length === 1 ? '' : 's'} came with this enquiry. They are offered to the AI scope of works on the quote's Scope of works step.</p>`;
+          prefillLeadNeedsVisit = !!lead.needs_site_visit;
+          prefillLeadAttachments = ((lead.details && lead.details.attachments) || []).filter(a => a && a.path);
+          if (prefillLeadAttachments.length) document.getElementById('lead-attachments-note').innerHTML = `<p class="subtitle" style="margin-top:8px;">${prefillLeadAttachments.length} file${prefillLeadAttachments.length === 1 ? '' : 's'} came with this enquiry. Create adds them to the quote's scope of works documents, which the AI reads.</p>`;
         }
       }
 

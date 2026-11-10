@@ -14,48 +14,43 @@
 // `requiredFor: ['battery']` narrows that to one template (battery
 // questions also appear on a Solar quote with "Batteries as well").
 
-// Asked on every quote, first.
+// Asked on every quote, first. Create fills it when the quote comes from a lead or an email.
 const GENERAL_QUESTIONS = [
   { id: 'info_source', type: 'select', label: 'Where this information came from', options: ['Phone call', 'Site visit', 'Client email', 'Lead form', 'In person'], required: true },
-  { id: 'info_date', type: 'date', label: 'When' },
-  { id: 'info_by', type: 'text', label: 'Who spoke to the client', placeholder: 'e.g. Jasper' },
-  { id: 'info_notes', type: 'textarea', label: 'What the client asked for, in their words', placeholder: 'Anything that should shape the scope or the price' },
 ];
 
+// One question for an existing system on both Solar and Battery quotes (it replaced the older
+// existing_system and existing_system_detail answers, item 70; solar-roi.js still reads the old
+// detail answer on older quotes). Required on a Battery quote: the battery couples to it.
+const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+
+// Only questions something reads: the ready-to-send gate (required), the job's tasks, the
+// savings estimate, or the "What the customer gets" lines sent to the AI scope of works.
+// Roof, switchboard, meter and NMI photos are on the site inspection checklist.
 const SOLAR_QUESTIONS = [
   { id: 'with_battery', type: 'yesno', label: 'Batteries as well? (adds the battery questions and rules)', required: true },
-  { id: 'grid_type', type: 'select', label: 'Grid connection', options: ['Grid connected', 'Grid connected, VPP interest', 'Off grid'], required: true },
-  { id: 'existing_system', type: 'select', label: 'Existing solar or battery to tie into', options: ['None', 'Existing solar', 'Existing battery', 'Existing solar and battery'], required: true },
-  { id: 'existing_system_detail', type: 'text', label: 'Existing system details', placeholder: 'e.g. 6.6 kW, Fronius Primo 5, 2019' },
-  { id: 'life_support', type: 'yesno', label: 'Anyone on site on medical or life-support equipment?', required: true },
-  { id: 'roof_type', type: 'select', label: 'Roof type', options: ['Tin (Colorbond)', 'Tile', 'Klip-lok', 'Flat or membrane', 'Ground mount', 'Other'], required: true },
-  { id: 'roof_condition', type: 'select', label: 'Roof condition', options: ['Good', 'Worn, needs a look', 'Needs repair first'] },
-  { id: 'storeys', type: 'select', label: 'Storeys', options: ['Single', 'Double', 'Three or more'] },
-  { id: 'switchboard_type', type: 'select', label: 'Existing switchboard', options: ['Modern, with RCDs', 'Older, circuit breakers only', 'Ceramic fuses', 'Not sure'], required: true },
-  { id: 'phases', type: 'select', label: 'Supply', options: ['Single phase', 'Three phase', 'Not sure'], required: true },
-  { id: 'nmi', type: 'text', label: 'NMI (from the electricity bill)', placeholder: '10 or 11 characters' },
-  { id: 'dnsp', type: 'select', label: 'Network (DNSP)', options: ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Other'] },
+  { id: 'life_support', type: 'yesno', label: 'Anyone on site on medical or life-support equipment? (Yes adds a job task to tell the network)', required: true },
+  EXISTING_PV_QUESTION,
+  { id: 'grid_type', type: 'select', label: 'Grid connection', options: ['Grid connected', 'Grid connected, VPP interest', 'Off grid'] },
+  { id: 'roof_type', type: 'select', label: 'Roof type', options: ['Tin (Colorbond)', 'Tile', 'Klip-lok', 'Flat or membrane', 'Ground mount', 'Other'] },
+  { id: 'phases', type: 'select', label: 'Supply (filled from the bill when it shows)', options: ['Single phase', 'Three phase', 'Not sure'] },
+  { id: 'nmi', type: 'text', label: 'NMI (filled from the bill; copied to the job)', placeholder: '10 or 11 characters' },
+  { id: 'dnsp', type: 'select', label: 'Network (DNSP, filled from the bill)', options: ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Other'] },
   { id: 'export_limit', type: 'select', label: 'Export limit', options: ['Not known yet', 'No limit', '5 kW', '10 kW', 'Zero export'] },
-  { id: 'daily_usage', type: 'text', label: 'Daily use (kWh) or bill attached', placeholder: 'e.g. 22 kWh/day, bill in Documents' },
-  { id: 'shading', type: 'select', label: 'Shading', options: ['None', 'Some', 'Heavy'] },
-  { id: 'access', type: 'text', label: 'Access notes', placeholder: 'Roof access, parking, dogs, gate code' },
 ];
 
-// Battery proposal, and a Solar proposal with "Batteries as well".
+// Battery proposal, and a Solar proposal with "Batteries as well". The battery quoted is the
+// one on the bill card (step 1) or the battery lines, never an answer here.
 const BATTERY_QUESTIONS = [
-  // What the customer asked for, for the record. The quote, the savings estimate and the ready-to-send
-  // check use the battery quoted (step 3 / the bill card, or the battery lines), never this answer.
-  { id: 'battery_kwh_wanted', type: 'number', label: 'Usable kWh the customer asked for (optional; the quote uses the battery quoted on step 3)', placeholder: 'e.g. 13.5' },
   { id: 'backup_needs', type: 'text', label: 'What must stay on in a blackout', placeholder: 'e.g. fridge, lights, pump, nothing', required: true },
-  { id: 'existing_pv', type: 'text', label: 'Existing PV size and inverter', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] },
-  { id: 'coupling', type: 'select', label: 'Coupling', options: ['Hybrid inverter (DC coupled)', 'AC coupled', 'Not sure'], required: true },
-  { id: 'battery_location', type: 'select', label: 'Where the battery goes', options: ['Garage', 'External wall', 'Under cover outside', 'Dedicated room', 'Other'], required: true },
+  EXISTING_PV_QUESTION,
   { id: 'location_clear', type: 'yesno', label: 'Location clear of habitable rooms, exits and heat, with AS/NZS 5139 clearances?', required: true },
-  { id: 'distance_to_board', type: 'text', label: 'Distance to the switchboard (m)', placeholder: 'e.g. 4' },
   { id: 'vpp_capable', type: 'yesno', label: 'Battery (or its inverter) VPP capable?', required: true },
   { id: 'cec_listed', type: 'yesno', label: 'Battery on the CEC approved product list?', required: true },
   { id: 'first_battery', type: 'yesno', label: 'First battery discount claim at this address?', required: true },
   { id: 'solar_commissioned_first', type: 'yesno', label: 'Solar commissioned before or with the battery?', required: true },
+  { id: 'coupling', type: 'select', label: 'Coupling', options: ['Hybrid inverter (DC coupled)', 'AC coupled', 'Not sure'] },
+  { id: 'battery_location', type: 'select', label: 'Where the battery goes', options: ['Garage', 'External wall', 'Under cover outside', 'Dedicated room', 'Other'] },
   { id: 'state_rebate', type: 'yesno', label: 'State rebate or loan as well?' },
   { id: 'internet', type: 'yesno', label: 'Internet at the site for monitoring?' },
 ];
@@ -67,8 +62,6 @@ const TEMPLATE_QUESTIONS = {
     { id: 'built_pre_1990', type: 'yesno', label: 'Built before 1990? (possible asbestos in walls, ceilings or switchboard backing)' },
     { id: 'occupied', type: 'yesno', label: 'Will the property be occupied during the works?' },
     { id: 'switchboard_upgrade', type: 'yesno', label: 'Switchboard upgrade needed?' },
-    { id: 'switchboard_type', type: 'select', label: 'Existing switchboard', options: ['Modern, with RCDs', 'Older, circuit breakers only', 'Ceramic fuses', 'Not sure'] },
-    { id: 'walls_open', type: 'select', label: 'Wall and ceiling access', options: ['Already stripped back', 'Closed - cut-ins needed', 'Mixed'] },
     { id: 'other_trades', type: 'yesno', label: 'Builder or other trades on site? (sequencing needs coordinating)' },
     { id: 'approval_needed', type: 'yesno', label: 'Strata, body corporate or heritage approval needed?' },
     { id: 'smoke_alarms', type: 'yesno', label: 'Smoke alarm upgrade required?' },
@@ -102,7 +95,11 @@ function quoteHasBattery(template, answers) {
 function questionGroupsForQuote(template, answers) {
   const groups = [{ title: 'Where this came from', questions: GENERAL_QUESTIONS }];
   if (TEMPLATE_QUESTIONS[template]) groups.push({ title: TEMPLATE_QUESTION_TITLES[template], questions: TEMPLATE_QUESTIONS[template] });
-  if (template === 'solar' && quoteHasBattery(template, answers)) groups.push({ title: 'Battery questions', questions: BATTERY_QUESTIONS });
+  if (template === 'solar' && quoteHasBattery(template, answers)) {
+    // the existing system question is already in the solar set: asked once
+    const asked = new Set(SOLAR_QUESTIONS.map(q => q.id));
+    groups.push({ title: 'Battery questions', questions: BATTERY_QUESTIONS.filter(q => !asked.has(q.id)) });
+  }
   return groups;
 }
 
@@ -185,12 +182,22 @@ function templateAnswersText(template, answers) {
   return lines.join('\n');
 }
 
-// Default deposit % and payment milestones for each template, pre-filled in
-// the quote editor (new-project.html / project.html) and editable per quote
-// from there. Milestones are what the client sees on the quote's payment
-// schedule - everything is invoiced after completion of each milestone, or
-// as a progress claim at the end of the month (see the schedule's footnote
-// in quote.html). The deposit % is what's actually auto-invoiced on approval.
+// What each proposal type is, shown on Create and used by both quote pages. photoCategory picks the
+// Settings > Portfolio photos used on the proposal's inside pages; showPylon and showDeposit set
+// which parts of step 3 (Pricing) show; singleStage types keep one stage.
+const TEMPLATE_INFO = {
+  new_build: { label: 'New Build', note: 'Multi-stage project with a deposit and a full scope of works.', photoCategory: 'electrical', showDeposit: true, showPylon: false },
+  solar: { label: 'Solar Proposal', note: 'Solar questions and the electricity bill, with Batteries as well for the battery set. Pylon design and the STC credit on the quote.', photoCategory: 'solar', showDeposit: true, showPylon: true },
+  battery: { label: 'Battery Proposal', note: 'Battery questions (backup, AS/NZS 5139 location, CEC list, VPP, federal discount), checked before sending, with the BSTC credit on the quote.', photoCategory: 'solar', showDeposit: true, showPylon: true },
+  quick_estimate: { label: 'Quick Estimate', note: 'Single cost centre, no deposit, labelled "Estimate only" for the client and invoiced from actual hours and materials.', photoCategory: 'general', showDeposit: false, showPylon: false, singleStage: true },
+  renovation: { label: 'Renovation', note: 'Multi-stage renovation with a deposit. Asks about asbestos, switchboard, approvals and occupancy, which set up the pre-work and handover tasks.', photoCategory: 'electrical', showDeposit: true, showPylon: false },
+  service_work: { label: 'Service Work', note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts.', photoCategory: 'electrical', showDeposit: true, showPylon: false, singleStage: true },
+};
+
+// Default deposit % and payment stages for each type, set at Create and again when the type is
+// changed on step 1 (only where the quote still has the old type's defaults). The client's
+// payment schedule is the deposit first, then these stages; together they make 100%. The deposit
+// % is what is invoiced on approval.
 const TEMPLATE_PAYMENT_DEFAULTS = {
   new_build: { deposit: 10, milestones: [] },
   renovation: { deposit: 10, milestones: [] },
@@ -198,7 +205,6 @@ const TEMPLATE_PAYMENT_DEFAULTS = {
   solar: {
     deposit: 10,
     milestones: [
-      { label: 'Deposit, due on acceptance', percent: 10 },
       { label: 'On ordering materials', percent: 40 },
       { label: 'On installation complete', percent: 30 },
       { label: 'On commissioning and handover', percent: 20 },
@@ -207,7 +213,6 @@ const TEMPLATE_PAYMENT_DEFAULTS = {
   battery: {
     deposit: 10,
     milestones: [
-      { label: 'Deposit, due on acceptance', percent: 10 },
       { label: 'On ordering the battery', percent: 50 },
       { label: 'On installation and commissioning', percent: 40 },
     ],
@@ -215,38 +220,35 @@ const TEMPLATE_PAYMENT_DEFAULTS = {
   quick_estimate: { deposit: 0, milestones: [] },
 };
 
-// Fills the deposit field and milestone rows with the new template's
-// defaults - but only where the person hasn't changed them: the deposit is
-// replaced only if it's blank or still the previous template's default, and
-// the milestones only if there are none or they're still the previous
-// template's untouched defaults. Relies on the page's own milestoneRowHtml /
-// wireMilestoneRows / refreshMilestoneTotal.
-function applyTemplatePaymentDefaults(prevTemplate, template) {
+// A milestone row that is the deposit itself (older quotes carried one in their milestones).
+function isDepositMilestone(m) { return /^deposit\b/i.test(String((m && m.label) || '').trim()); }
+
+// What a change of proposal type should set: the new type's deposit when the quote still has the
+// old type's (or none), and its payment stages when the quote's are still the old type's untouched
+// defaults (a leading deposit row on an older quote is ignored). Returns { deposit_percent?, milestones? }.
+function paymentDefaultsOnTypeChange(prevTemplate, template, current) {
   const prev = TEMPLATE_PAYMENT_DEFAULTS[prevTemplate] || { deposit: null, milestones: [] };
   const next = TEMPLATE_PAYMENT_DEFAULTS[template];
-  if (!next) return;
+  const out = {};
+  if (!next) return out;
+  const dep = current.deposit_percent;
+  if (dep == null || Number(dep) === Number(prev.deposit) || Number(dep) === 0) out.deposit_percent = next.deposit;
+  const stages = (current.milestones || []).filter(m => !isDepositMilestone(m));
+  const untouched = stages.length === prev.milestones.length &&
+    stages.every((m, i) => String(m.label).trim() === prev.milestones[i].label && Number(m.percent) === prev.milestones[i].percent);
+  if (untouched) out.milestones = next.milestones.map(m => ({ ...m }));
+  return out;
+}
 
-  const depositEl = document.getElementById('p-deposit');
-  if (depositEl && next.deposit > 0 && (depositEl.value === '' || Number(depositEl.value) === Number(prev.deposit) || Number(depositEl.value) === 0)) {
-    depositEl.value = next.deposit;
-  }
-
-  const rowsEl = document.getElementById('milestone-rows');
-  if (!rowsEl) return;
-  const current = [...rowsEl.querySelectorAll('.milestone-row')].map(r => ({
-    label: r.querySelector('.milestone-label').value.trim(),
-    percent: parseFloat(r.querySelector('.milestone-percent').value) || 0,
-  }));
-  const untouched = current.length === prev.milestones.length &&
-    current.every((m, i) => m.label === prev.milestones[i].label && m.percent === prev.milestones[i].percent);
-  if (!untouched) return;
-  rowsEl.innerHTML = next.milestones.map(m => milestoneRowHtml(m)).join('');
-  wireMilestoneRows();
-  refreshMilestoneTotal();
+// The answers a new quote starts with: where it came from, when Create knows (a lead or an email).
+function startingAnswers({ fromLead, fromEmail }) {
+  if (fromLead) return { info_source: 'Lead form' };
+  if (fromEmail) return { info_source: 'Client email' };
+  return {};
 }
 
 // Server side (netlify/functions/_shared/solar-compliance-rules.js) requires this file for the
 // ready-to-send gate. Browsers never see this branch.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { GENERAL_QUESTIONS, SOLAR_QUESTIONS, BATTERY_QUESTIONS, TEMPLATE_QUESTIONS, quoteHasBattery, questionGroupsForQuote, missingRequiredAnswers, templateAnswersText };
+  module.exports = { GENERAL_QUESTIONS, SOLAR_QUESTIONS, BATTERY_QUESTIONS, TEMPLATE_QUESTIONS, TEMPLATE_INFO, TEMPLATE_PAYMENT_DEFAULTS, quoteHasBattery, questionGroupsForQuote, missingRequiredAnswers, templateAnswersText, paymentDefaultsOnTypeChange, isDepositMilestone, startingAnswers };
 }

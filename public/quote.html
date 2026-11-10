@@ -256,7 +256,7 @@
   </div>
   <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=130"></script>
+  <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
   <script src="/js/solar-roi.js?v=13"></script>
   <script>
@@ -790,7 +790,7 @@
       // on the quote (projects.bill_reading, backlog item 29). Same maths as the quote page's
       // preview (public/js/solar-roi.js). Solar and battery proposals, switched off per quote
       // with projects.show_roi, never on variation pages. The battery size comes from the
-      // pre-quote answer; the solar size from the quote's STC system size or the Pylon design.
+      // bill card on step 1 or the battery lines; the solar size from the quote's STC system size or the Pylon design.
       const roiAnswers = data.roi_answers || {};
       const roiSolarKw = template === 'battery' ? 0 : (Number(project.stc_system_kw) || Number(pd.summary && pd.summary.dc_output_kw) || 0);
       const roiBatteryKwh = Number(project.battery_kwh) || roiBatteryKwhFromLines(data.cost_centres) || 0; // the battery we are quoting: step 3, else the quote's own line items; never the "wanted" answer
@@ -862,16 +862,20 @@
         </section>` : '';
 
       // 4. Investment and payment schedule
+      // The deposit first, then the quote's payment stages. An older quote whose stages start with their
+      // own deposit row shows that row instead (item 70 took the deposit row out of the defaults).
       const milestones = data.payment_milestones || [];
+      const depositRowHtml = `<tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount * 1.1)}</td></tr>`;
+      const ownDepositRow = milestones.length && /^deposit\b/i.test(String(milestones[0].label || '').trim());
       const milestoneRowsHtml = milestones.length
-        ? milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(baseTotal * 1.1 * (Number(m.percent) / 100))}</td></tr>`).join('')
+        ? (ownDepositRow || !(depositPercent > 0) ? '' : depositRowHtml) + milestones.map(m => `<tr><td>${esc(m.label)}</td><td class="num">${money(baseTotal * 1.1 * (Number(m.percent) / 100))}</td></tr>`).join('')
         : `
-          <tr><td>Deposit (${depositPercent}%), due on acceptance</td><td class="num">${money(depositAmount * 1.1)}</td></tr>
+          ${depositRowHtml}
           ${baseCentres.map(c => `<tr><td>${esc(c.name)}, due on completion</td><td class="num">${money(c.quoted_amount * 1.1 * (1 - depositPercent / 100))}</td></tr>`).join('')}
         `;
       // Approved variations are invoiced on their own, once that work is done.
       const variationScheduleRows = centres.filter(c => c.is_variation).map(c => `<tr><td>${esc(c.name)}, invoiced when the work is done</td><td class="num">${money(c.quoted_amount * 1.1)}</td></tr>`).join('');
-      const paymentScheduleHtml = (template === 'quick_estimate' || template === 'time_and_materials') ? '' : `
+      const paymentScheduleHtml = template === 'quick_estimate' ? '' : `
         <div class="sec-title ps">Payment schedule</div>
         <table class="qtable split ps">
           <thead><tr><th>Milestone</th><th class="num">Amount (inc GST)</th></tr></thead>
