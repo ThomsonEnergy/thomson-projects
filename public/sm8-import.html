@@ -144,6 +144,7 @@
       { value: 'quotes', label: 'Quotes' },
       { value: 'check', label: 'Need checking' },
       { value: 'new-client', label: 'New clients' },
+      { value: 'deposits', label: 'Deposits to add' },
       { value: 'done', label: 'Already imported' },
     ];
 
@@ -170,13 +171,15 @@
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-    // Line items for every job not already imported, a few jobs per call.
-    // ServiceM8 allows about 180 calls a minute and each job takes two, so
+    // Line items for every job not already imported, a few jobs per call,
+    // and the payments on a job already in the app that ServiceM8 says was
+    // paid something (a deposit it may be missing, item 71). ServiceM8
+    // allows about 180 calls a minute and each job takes two or three, so
     // batches are spaced out, and any job it turned away (rate limit) is
     // tried again after a pause.
     async function loadLines() {
       const msg = document.getElementById('load-msg');
-      let todo = rows.filter(r => !r.alreadyImported);
+      let todo = rows.filter(r => !r.alreadyImported || depositCheck(r));
       const total = todo.length;
       linesLoading = true;
       updateImportBar();
@@ -193,12 +196,15 @@
           const batch = todo.slice(i, i + LINES_BATCH);
           try {
             const data = await callFn('sm8-import-lines', {
-              jobs: batch.map(r => ({ uuid: r.sm8JobUuid, number: r.sm8JobNumber, totalIncGst: r.sm8Total, claims: r.claims })),
+              jobs: batch.map(r => ({ uuid: r.sm8JobUuid, number: r.sm8JobNumber, totalIncGst: r.sm8Total, claims: r.claims, invoiceSent: !!r.invoiceSent, paymentAmount: r.paymentAmount, paymentsOnly: !!r.alreadyImported })),
             });
             batch.forEach(r => {
               const e = edits.get(r.sm8JobUuid);
               const res = data.lines[r.sm8JobUuid];
-              if (res && res.ok) {
+              if (res && res.ok && res.paymentsOnly) {
+                e.deposits = res.deposits;
+                e.linesError = null;
+              } else if (res && res.ok) {
                 e.lines = res;
                 e.linesError = null;
                 e.invoiced = res.invoicedExGst.toFixed(2);
@@ -301,6 +307,7 @@
         if (filter === 'quotes') return r.kind === 'quote';
         if (filter === 'check') return !r.alreadyImported && needsCheck(r);
         if (filter === 'new-client') return !r.alreadyImported && e.clientId === 'new';
+        if (filter === 'deposits') return pendingDeposits(r, e).length > 0;
         if (filter === 'done') return !!(e.result && e.result.ok);
         return true;
       });
@@ -326,6 +333,21 @@
     }
 
     const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // A job already in the app whose ServiceM8 payments may hold a deposit it is missing (item 71):
+    // its payments are read, and any not on the job's stages yet can be added by ticking the job.
+    const depositCheck = (r) => r.kind !== 'quote' && r.paymentAmount > 0 && !!(r.alreadyImported && r.alreadyImported.jobNumber);
+    const pendingDeposits = (r, e) => (r.alreadyImported && e.deposits ? e.deposits.filter(d => !(r.alreadyImported.claimNumbers || []).includes(d.number)) : []);
+    const canImport = (r, e) => !(e.result && e.result.ok) || pendingDeposits(r, e).length > 0;
+    const depositText = (d) => `${escapeHtml(d.number)} ${money(d.amount)} ex GST (${money(d.amountIncGst)} inc) paid ${d.date ? new Date(d.date).toLocaleDateString('en-AU') : 'date unknown'}${d.method ? ', ' + escapeHtml(d.method) : ''}`;
+    function depositSection(r, e) {
+      if (!depositCheck(r)) return '';
+      if (e.linesError) return `<div class="imp-warn"><div>${escapeHtml(e.linesError)}</div></div>`;
+      if (!e.deposits) return '<p class="subtitle" style="margin:10px 0 0;">Checking its payments in ServiceM8...</p>';
+      const pending = pendingDeposits(r, e);
+      const ref = `J${r.alreadyImported.jobNumber}`;
+      if (!pending.length) return `<div class="imp-meta" style="margin-top:8px;">No deposit missing on ${ref}.</div>`;
+      return `<div class="imp-claims">Not on ${ref} yet: ${pending.map(depositText).join(' &middot; ')}. Tick the job and press Import to add ${pending.length === 1 ? 'it' : 'them'} to ${ref} as paid claim${pending.length === 1 ? '' : 's'} (nothing else on the job changes).</div>`;
+    }
     // The job's lines with the admin's Labour/Material choices applied.
     const linesOf = (e) => (e.lines ? e.lines.lines.map((l, i) => ({ ...l, item_type: e.typeOverrides[i] || l.item_type })) : []);
     function jobFigures(e) {
@@ -388,7 +410,7 @@
           ${valueField}
           ${r.kind === 'quote' ? '' : `<div><label>Invoiced to date, ex GST ($)</label><input type="number" step="0.01" min="0" data-field="invoiced" value="${escAttr(e.invoiced)}" ${locked} /><div class="imp-meta">Left to invoice <strong class="imp-left">${money(f.value - f.invoiced)}</strong>${stc ? ' before STCs' : ''}</div></div>`}
         </div>
-        ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
+        ${claims.length ? `<div class="imp-claims">ServiceM8 claims: ${claims.map(c => `#${escapeHtml(c.number)} ${money(c.valueExGst)} ${c.paid ? `paid ${new Date(c.paid).toLocaleDateString('en-AU')}${c.method ? ' (' + escapeHtml(c.method) + ')' : ''}` : c.invoiced ? 'invoiced' : `<span style="color:var(--red);">not invoiced (${escapeHtml(c.status)})</span>`}`).join(' &middot; ')}</div>` : ''}
         ${groupRows ? `<details style="margin-top:10px;"><summary>Line items (${f.lines.length})${standaloneCount ? ` - check Labour/Material on the ${standaloneCount} line${standaloneCount === 1 ? '' : 's'} outside a prebuild` : ''}</summary>
           <div style="overflow-x:auto;"><table class="imp-stages"><thead><tr><th>Item</th><th>Type</th><th class="num">Qty x sell</th><th class="num">Sell, ex GST</th></tr></thead><tbody>${groupRows}</tbody></table></div>
         </details>` : ''}`;
@@ -397,18 +419,19 @@
     // Claims for the job's notes, so the history stays with the job.
     // The Completed claims behind "invoiced to date", for the stage's imported_claims (item 45): the
     // date comes from ServiceM8's own note line ("[2026-07-10] Partial invoice #4515A created").
+    // A deposit or an invoice paid in ServiceM8 carries its payment date and method (item 71).
     function claimsForImport(e, r) {
       const claims = e.lines ? e.lines.claimsUsed.filter(c => c.invoiced) : [];
       return claims.map(c => {
         const m = String(r.notesText || '').match(new RegExp('\\[(\\d{4}-\\d{2}-\\d{2})\\] Partial invoice #' + String(c.number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' created'));
-        return { number: c.number, amount: c.valueExGst, date: m ? m[1] : null };
+        return { number: c.number, amount: c.valueExGst, date: c.date || (m ? m[1] : null), paid: c.paid || null, method: c.method || null };
       });
     }
 
     function claimsNote(e) {
       const claims = e.lines ? e.lines.claimsUsed : [];
       if (!claims.length) return '';
-      return '\n\nServiceM8 claims at the move (ex GST):\n' + claims.map(c => `#${c.number}: $${c.valueExGst.toFixed(2)}, ${c.invoiced ? 'invoiced' : `not invoiced yet (${c.status})`}`).join('\n');
+      return '\n\nServiceM8 claims at the move (ex GST):\n' + claims.map(c => `#${c.number}: $${c.valueExGst.toFixed(2)}, ${c.paid ? `paid ${c.paid}${c.method ? ' (' + c.method + ')' : ''}` : c.invoiced ? 'invoiced' : `not invoiced yet (${c.status})`}`).join('\n');
     }
 
     function resultLine(e, r) {
@@ -418,6 +441,8 @@
       const link = `<a href="/project.html?id=${e.result.projectId}" target="_blank">${ref}</a>`;
       // A ServiceM8 quote brought across earlier that is now a Work Order.
       const approveHint = e.result.skipped && r && r.kind === 'job' && !e.result.jobNumber && e.result.quoteNumber ? ' (brought across as a quote: approve it there to make it the job)' : '';
+      const added = e.result.added || [];
+      if (e.result.skipped && added.length) return `<div class="imp-result ok">Added to ${link} as paid claim${added.length === 1 ? '' : 's'}: ${added.map(a => `${escapeHtml(a.number)} ${money(a.amount)} ex GST`).join(', ')}</div>`;
       return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}${approveHint}</div>`;
     }
 
@@ -428,7 +453,7 @@
 
       el.innerHTML = list.map(r => {
         const e = edits.get(r.sm8JobUuid);
-        const done = !!(e.result && e.result.ok);
+        const done = !canImport(r, e);
         const locked = done ? 'disabled' : '';
         return `
           <div class="imp-job ${!e.include && !done ? 'excluded' : ''}" data-uuid="${r.sm8JobUuid}">
@@ -436,6 +461,7 @@
               <label><input type="checkbox" data-field="include" ${e.include && !done ? 'checked' : ''} ${locked} /> ${r.kind === 'quote' ? '<span class="badge info">Quote</span> ' : ''}ServiceM8 #${escapeHtml(r.sm8JobNumber)}</label>
               <div class="imp-meta">${r.kind === 'quote' ? `${r.sm8Date ? 'Quoted ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}${r.quoteSent ? 'Sent' + (r.quoteSentDate ? ' ' + new Date(r.quoteSentDate).toLocaleDateString('en-AU') : '') : '<span style="color:var(--red);">Not sent</span>'} &middot; ` : ''}${r.kind !== 'quote' && r.sm8Date ? 'Work order ' + new Date(r.sm8Date).toLocaleDateString('en-AU') + ' &middot; ' : ''}ServiceM8 total ${money(r.sm8Total)} inc GST${r.invoiceSent && !r.claims.length ? ' &middot; invoice sent' : ''}${r.paymentAmount > 0 ? ' &middot; ' + money(r.paymentAmount) + ' paid' : ''}</div>
             </div>
+            ${r.alreadyImported ? depositSection(r, e) : `
             <div class="imp-grid">
               <div style="grid-column:1 / -1;"><label>Job name</label><input data-field="name" value="${escAttr(e.name)}" ${locked} /></div>
               <div style="grid-column:1 / -1;"><label>Client</label><select data-field="clientId" ${locked}>${clientOptions(r, e)}</select>${done ? '' : matchLine(r, e)}</div>
@@ -443,7 +469,7 @@
               <div><label>Contact</label><div>${escapeHtml([r.clientPhone, r.clientEmail].filter(Boolean).join(' / ')) || '<span class="subtitle">None in ServiceM8</span>'}</div></div>
             </div>
             ${jobSection(r, e, locked)}
-            ${allWarnings(r).length && !done ? `<div class="imp-warn">${allWarnings(r).map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}
+            ${allWarnings(r).length && !done ? `<div class="imp-warn">${allWarnings(r).map(w => `<div>${escapeHtml(w)}</div>`).join('')}</div>` : ''}`}
             <details>
               <summary>Description and ${r.notes.length} note${r.notes.length === 1 ? '' : 's'}</summary>
               <pre>${escapeHtml(r.description || '(no description)')}</pre>
@@ -487,7 +513,7 @@
     }
 
     function selectedRows() {
-      return rows.filter(r => { const e = edits.get(r.sm8JobUuid); return e.include && !(e.result && e.result.ok); });
+      return rows.filter(r => { const e = edits.get(r.sm8JobUuid); return e.include && canImport(r, e); });
     }
 
     function updateImportBar() {
@@ -500,6 +526,7 @@
     function validate(list) {
       for (const r of list) {
         const e = edits.get(r.sm8JobUuid);
+        if (r.alreadyImported) continue; // only a deposit goes onto the job it already is
         if (!e.name.trim()) return `ServiceM8 #${r.sm8JobNumber}: job name is required.`;
         if (!e.lines && !e.linesError) return `ServiceM8 #${r.sm8JobNumber}: line items are still loading.`;
         const f = jobFigures(e);
@@ -515,14 +542,20 @@
       const problem = validate(list);
       if (problem) { msg.innerHTML = `<span style="color:var(--red);">${escapeHtml(problem)}</span>`; return; }
 
-      const newClients = new Set(list.filter(r => edits.get(r.sm8JobUuid).clientId === 'new').map(r => r.companyUuid || r.companyName)).size;
-      if (!confirm(`Create ${list.length} job${list.length === 1 ? '' : 's'} in the app${newClients ? ` and ${newClients} new client${newClients === 1 ? '' : 's'}` : ''}? Nothing is changed in ServiceM8.`)) return;
+      const creating = list.filter(r => !r.alreadyImported);
+      const adds = list.length - creating.length;
+      const newClients = new Set(creating.filter(r => edits.get(r.sm8JobUuid).clientId === 'new').map(r => r.companyUuid || r.companyName)).size;
+      const what = [
+        creating.length ? `create ${creating.length} job${creating.length === 1 ? '' : 's'} in the app${newClients ? ` and ${newClients} new client${newClients === 1 ? '' : 's'}` : ''}` : '',
+        adds ? `add ${adds} ServiceM8 deposit${adds === 1 ? '' : 's'} to job${adds === 1 ? '' : 's'} already in the app` : '',
+      ].filter(Boolean).join(' and ');
+      if (!confirm(`${what.charAt(0).toUpperCase()}${what.slice(1)}? Nothing is changed in ServiceM8.`)) return;
 
       const btn = document.getElementById('import-btn');
       const loadBtn = document.getElementById('load-btn');
       btn.disabled = true;
       loadBtn.disabled = true;
-      let ok = 0, failed = 0;
+      let ok = 0, failed = 0, created = 0;
       try {
         for (let i = 0; i < list.length; i += BATCH) {
           msg.textContent = `Importing ${Math.min(i + BATCH, list.length)} of ${list.length}...`;
@@ -538,9 +571,11 @@
               stage: {
                 name: e.stageName.trim() || 'Labour & Materials',
                 quotedExGst: Number(e.manualValue) || 0,
-                invoicedExGst: Number(e.invoiced) || 0,
-                // only when the typed figure is still the claims' own total (a hand-edited figure has no claims behind it)
-                claims: Math.abs(claimsForImport(e, r).reduce((t, c) => t + c.amount, 0) - (Number(e.invoiced) || 0)) < 0.01 ? claimsForImport(e, r) : [],
+                invoicedExGst: r.alreadyImported ? r2(pendingDeposits(r, e).reduce((t, d) => t + d.amount, 0)) : Number(e.invoiced) || 0,
+                // only when the typed figure is still the claims' own total (a hand-edited figure has no claims behind it);
+                // a job already in the app sends just the deposits it is missing
+                claims: r.alreadyImported ? pendingDeposits(r, e).map(d => ({ number: d.number, amount: d.amount, date: d.date, paid: d.date, method: d.method }))
+                  : Math.abs(claimsForImport(e, r).reduce((t, c) => t + c.amount, 0) - (Number(e.invoiced) || 0)) < 0.01 ? claimsForImport(e, r) : [],
                 stcs: e.lines ? e.lines.stcs || [] : [],
                 lines: linesOf(e).map(l => ({ item_type: l.item_type, description: l.description, quantity: l.quantity, cost: l.cost, price: l.price, group: l.group, base_quantity: l.base_quantity })),
                 groups: e.lines ? e.lines.groups.map(g => ({ key: g.key, description: g.description })) : [],
@@ -551,7 +586,10 @@
             const data = await callFn('sm8-import-jobs', { rows: batch });
             data.results.forEach(res => {
               edits.get(res.sm8JobUuid).result = res;
-              if (res.ok) ok++; else failed++;
+              if (res.ok) { ok++; if (!res.skipped) created++; } else failed++;
+              // the deposits just added are on the job now, so the row locks like any imported one
+              const r = rows.find(x => x.sm8JobUuid === res.sm8JobUuid);
+              if (res.ok && res.added && res.added.length && r && r.alreadyImported) r.alreadyImported.claimNumbers = [...(r.alreadyImported.claimNumbers || []), ...res.added.map(a => a.number)];
             });
           } catch (err) {
             batch.forEach(b => { edits.get(b.sm8JobUuid).result = { ok: false, error: err.message }; });
@@ -559,11 +597,12 @@
           }
           renderList();
         }
+        const doneText = `${created} job${created === 1 ? '' : 's'} imported${ok - created ? `, ${ok - created} deposit${ok - created === 1 ? '' : 's'} added` : ''}`;
         msg.innerHTML = failed
-          ? `<span style="color:var(--red);">${ok} imported, ${failed} failed. Fix the failed ones and press Import again; the imported ones are skipped.</span>`
-          : `<span style="color:var(--green);">${ok} job${ok === 1 ? '' : 's'} imported.</span>`;
+          ? `<span style="color:var(--red);">${doneText}, ${failed} failed. Fix the failed ones and press Import again; the imported ones are skipped.</span>`
+          : `<span style="color:var(--green);">${doneText}.</span>`;
         // Then bring their timesheets, checklists, docs and photos across.
-        if (ok) startCopy();
+        if (created) startCopy();
       } finally {
         loadBtn.disabled = false;
         updateImportBar();
@@ -575,7 +614,7 @@
     function setAllIncluded(include) {
       visibleRows().forEach(r => {
         const e = edits.get(r.sm8JobUuid);
-        if (!(e.result && e.result.ok)) e.include = include;
+        if (canImport(r, e)) e.include = include;
       });
       renderList();
     }

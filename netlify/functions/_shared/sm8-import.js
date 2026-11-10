@@ -195,7 +195,7 @@ async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
 
   const [{ data: clients, error: clientsErr }, { data: imported, error: importedErr }] = await Promise.all([
     supabaseAdmin.from('clients').select('id, name, email, phone, address, sm8_company_uuid').limit(10000),
-    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid').not('sm8_job_uuid', 'is', null),
+    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, cost_centres(imported_claims)').not('sm8_job_uuid', 'is', null),
   ]);
   if (clientsErr) throw clientsErr;
   if (importedErr) throw importedErr;
@@ -289,7 +289,12 @@ async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
       notesText: buildNotesText(job, jobNotes),
       clientMatch: match ? { clientId: match.clientId, reason: match.reason, ambiguous: !!match.ambiguous } : null,
       candidates: candidates.map(c => ({ id: c.id, name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '' })),
-      alreadyImported: already ? { projectId: already.id, jobNumber: already.job_number, quoteNumber: already.quote_number } : null,
+      // claimNumbers: the ServiceM8 claims and deposits already on the job's stages, so the review
+      // screen can offer only a deposit the job is missing (item 71)
+      alreadyImported: already ? {
+        projectId: already.id, jobNumber: already.job_number, quoteNumber: already.quote_number,
+        claimNumbers: (already.cost_centres || []).flatMap(c => (Array.isArray(c.imported_claims) ? c.imported_claims : []).map(x => String(x.number))),
+      } : null,
       warnings,
     };
   };
@@ -349,7 +354,7 @@ function isLabourName(name, tierNames) {
 // job: { number, totalIncGst }, claims: [{ number, status }] from the job list.
 // taxRates: Map of ServiceM8 tax_rate_uuid -> rate % (10 for GST, 0 for
 // GST-free), used only to check the result against ServiceM8's total.
-function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates = new Map()) {
+function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates = new Map(), deposits = []) {
   const warnings = [];
   const active = jobMaterials.filter(m => isOn(m.active));
   const claimStatus = new Map(claims.map(c => [String(c.number).toLowerCase(), c.status]));
@@ -367,6 +372,16 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
     else if (status === 'Unsuccessful') warnings.push(`Claim #${number} ($${value.toFixed(2)}) is Unsuccessful (voided) in ServiceM8 but still taken off the job there - counted as not invoiced, check it`);
     else if (!invoiced) warnings.push(`Claim #${number} ($${value.toFixed(2)}) is taken off the job in ServiceM8 but is not Completed - counted as not invoiced yet`);
     claimsUsed.push({ number, status: status || 'unknown', valueExGst: value, invoiced });
+  }
+
+  // Deposits (payments on the main job: a claim's own payment sits on the claim job) each become
+  // a paid claim, so the job comes across with its deposit paid and only the balance left to claim
+  // (item 71). The one exception is a job whose own invoice went out with no partial claims: there
+  // the payments are that invoice's, and the invoice itself becomes the claim (below, once the
+  // job's value is known).
+  const invoiceOnly = isOn(job.invoiceSent) && !claimsUsed.length;
+  if (!invoiceOnly) {
+    for (const d of deposits) claimsUsed.push({ number: d.number, status: 'Paid', valueExGst: d.amount, invoiced: true, date: d.date, paid: d.date, method: d.method });
   }
 
   // Line items, in ServiceM8's order: each bundle followed by its
@@ -419,6 +434,14 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   }
 
   const quotedExGst = r2(lines.reduce((s, l) => s + l.sell, 0));
+  if (invoiceOnly && num(job.totalIncGst) > 0) {
+    const paidIncGst = r2(deposits.reduce((s, d) => s + d.amountIncGst, 0));
+    const last = deposits[deposits.length - 1];
+    claimsUsed.push({
+      number: String(job.number), status: 'Completed', valueExGst: lines.length ? quotedExGst : exGst(job.totalIncGst), invoiced: true, date: null,
+      paid: last && paidIncGst >= num(job.totalIncGst) - 0.01 ? last.date : null, method: last ? last.method : null,
+    });
+  }
   const invoicedExGst = r2(claimsUsed.filter(c => c.invoiced).reduce((s, c) => s + c.valueExGst, 0));
 
   // Check against ServiceM8's own total, which includes GST line by line
@@ -443,6 +466,23 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
 // materials at cost with the stage markup on top. The markup is the one
 // that makes the materials sell for exactly what ServiceM8 charged, so the
 // stage's value matches the job and editing it later does not move it.
+// The payments ServiceM8 holds on the main job (jobpayment rows), oldest first, as the paid
+// claims they become: "4809 deposit" ($ ex GST, the payment date, the method).
+function depositsFrom(job, payments) {
+  const rows = (payments || []).filter(p => num(p.amount) > 0)
+    .sort((a, b) => String(a.payment_date || a.timestamp || '').localeCompare(String(b.payment_date || b.timestamp || '')));
+  return rows.map((p, i) => {
+    const date = String(p.payment_date || p.timestamp || '').slice(0, 10);
+    return {
+      number: `${job.number} deposit${rows.length > 1 ? ' ' + (i + 1) : ''}`,
+      amountIncGst: r2(p.amount),
+      amount: exGst(p.amount),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
+      method: clean(p.payment_method).slice(0, 50) || 'ServiceM8',
+    };
+  });
+}
+
 function stageFromLines(lines) {
   let labourSell = 0, materialCost = 0, materialSell = 0;
   for (const l of lines) {
@@ -478,11 +518,21 @@ async function loadSm8JobLines(apiKey, jobs, tierNames) {
     while (i < jobs.length) {
       const job = jobs[i++];
       try {
-        const [mats, bundles] = await Promise.all([
-          sm8GetAll(apiKey, 'jobmaterial', `job_uuid eq '${job.uuid}' and active eq 1`),
-          sm8GetAll(apiKey, 'jobmaterialbundle', `job_uuid eq '${job.uuid}' and active eq 1`),
+        // Payments are read only when ServiceM8 says the job has some (no extra call on most
+        // jobs). A job already in the app is only checked for a deposit it is missing.
+        const [mats, bundles, payments] = await Promise.all([
+          job.paymentsOnly ? [] : sm8GetAll(apiKey, 'jobmaterial', `job_uuid eq '${job.uuid}' and active eq 1`),
+          job.paymentsOnly ? [] : sm8GetAll(apiKey, 'jobmaterialbundle', `job_uuid eq '${job.uuid}' and active eq 1`),
+          num(job.paymentAmount) > 0 ? sm8GetAll(apiKey, 'jobpayment', `job_uuid eq '${job.uuid}' and active eq 1`) : [],
         ]);
-        out[job.uuid] = { ok: true, ...buildJobStage(job, job.claims || [], mats, bundles, tierNames, taxRates) };
+        const deposits = depositsFrom(job, payments);
+        if (job.paymentsOnly) {
+          // its own invoice sent with no claims: the payments are that invoice's, not a deposit
+          const invoiceOnly = isOn(job.invoiceSent) && !(job.claims || []).some(c => c.status === 'Completed');
+          out[job.uuid] = { ok: true, paymentsOnly: true, deposits: invoiceOnly ? [] : deposits };
+          continue;
+        }
+        out[job.uuid] = { ok: true, ...buildJobStage(job, job.claims || [], mats, bundles, tierNames, taxRates, deposits) };
       } catch (err) {
         out[job.uuid] = { ok: false, error: err.message, rateLimited: /\b429\b/.test(err.message) };
       }

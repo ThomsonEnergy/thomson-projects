@@ -2371,11 +2371,12 @@
         paid_at: null, xero_invoice_id: null, id: cn.id, isCredit: true,
         labour_amount: -(Number(cn.labour_amount) || 0), material_amount: -(Number(cn.material_amount) || 0), stc_amount: -(Number(cn.stc_amount) || 0), bstc_amount: -(Number(cn.bstc_amount) || 0),
       }));
-      // Claims invoiced before the job came across from ServiceM8 (cost_centres.imported_claims, item 45):
-      // already inside invoiced_amount, listed first, no invoice page or Xero behind them.
+      // Claims invoiced before the job came across from ServiceM8 (cost_centres.imported_claims, item 45),
+      // and deposits paid there (paid and method, item 71): already inside invoiced_amount, listed
+      // first, no invoice page or Xero behind them.
       const importedInvoices = (Array.isArray(c.imported_claims) ? c.imported_claims : []).map((ic, i) => ({
         invoice_number: ic.number, invoice_token: null, sent_at: ic.date || null, created_at: ic.date || '1970-01-01', sortFirst: i,
-        paid_at: null, xero_invoice_id: null, id: null, isImported: true, source: ic.source || 'servicem8',
+        paid_at: ic.paid || null, paid_method: ic.method || null, xero_invoice_id: null, id: null, isImported: true, source: ic.source || 'servicem8',
         labour_amount: Number(ic.amount) || 0, material_amount: 0, stc_amount: 0, bstc_amount: 0,
       }));
       const stageInvoices = [...importedInvoices, ...[...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))];
@@ -4377,7 +4378,7 @@
                             <td data-label="Invoice">${escapeHtml(inv.invoice_number || '')} <span class="subtitle" style="font-size:11px;">ServiceM8</span></td>
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
                             <td data-label="Sent">${inv.sent_at ? new Date(inv.sent_at).toLocaleDateString('en-AU') : ''}</td>
-                            <td data-label=""><span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span></td>
+                            <td data-label="">${inv.paid_at ? `<span class="badge accepted" style="margin-right:6px;">Paid</span><span class="subtitle" style="font-size:11px;">Paid in ServiceM8 ${new Date(inv.paid_at).toLocaleDateString('en-AU')}${inv.paid_method ? ', ' + escapeHtml(inv.paid_method) : ''}</span>` : `<span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span>`}</td>
                           </tr>` : inv.isCredit ? `
                           <tr>
                             <td data-label="Invoice">Credit note</td>
