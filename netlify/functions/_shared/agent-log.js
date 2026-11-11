@@ -19,6 +19,7 @@ const AGENTS = {
   'sync-gmail': { label: 'Email sync (sales@ and My inbox)', every: 5 },
   'mailbox-work': { label: 'Postie: email agent (sorting, labels, drafts, clean up)', every: 60 },
   'draft-reply': { label: 'Postie: Draft reply (on request)', every: 525600 }, // only runs when pressed: never "late"
+  'photo-tagger': { label: 'Picture tagger (new job pictures)', every: 525600 }, // runs when pictures are added: never "late"
   'send-notifications': { label: 'Phone notifications', every: 1 },
   'sync-overheads-nightly': { label: 'Xero overheads sync (nightly)', every: 1440 },
   'sync-leave-balances': { label: 'Xero leave balances (nightly)', every: 1440 },

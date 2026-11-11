@@ -10,7 +10,8 @@
 // have no caption and stay as they are) every time something changes: there is no Save to press.
 // onSettled runs once, a few seconds after the last change has saved (the page remakes the PDF
 // then). Reads project_photos and the quote's site inspection answers for "From this job's
-// pictures"; a picked picture is copied, so deleting it from Site Photos later never empties the
+// pictures", and other jobs' tagged pictures for "Recent installs with this gear" (js/photo-tags.js,
+// item 73b); a picked picture is copied, so deleting it from Site Photos later never empties the
 // proposal. Uploads go through uploadPhotos(), which compresses them.
 
 const QUOTE_PICTURE_CAPTIONS = ['Your site', 'Similar system', 'Indicative picture'];
@@ -33,7 +34,8 @@ function mountQuotePictures({ el, project, onSettled }) {
       <label class="qp-add" style="margin:0; font-weight:600; font-size:13px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer;">Add other pictures<input type="file" class="qp-file" data-caption="Indicative picture" accept="image/*" multiple style="display:none;" /></label>
       <button type="button" class="secondary qp-pick" style="font-size:13px; padding:8px 12px;">From this job's pictures</button>
     </div>
-    <div class="qp-state" style="font-size:12px; min-height:18px; margin-top:6px;"></div>`;
+    <div class="qp-state" style="font-size:12px; min-height:18px; margin-top:6px;"></div>
+    <div class="qp-recent"></div>`;
   const listEl = el.querySelector('.qp-list');
   const stateEl = el.querySelector('.qp-state');
   const say = (text, bad) => { stateEl.innerHTML = `<span ${bad ? 'style="color:var(--red);"' : 'class="subtitle"'}>${escapeHtml(text)}</span>`; };
@@ -54,7 +56,7 @@ function mountQuotePictures({ el, project, onSettled }) {
       // once things go quiet (the PDF is remade once, not on every tap)
       if (onSettled) settle = setTimeout(() => onSettled(rows), 4000);
     }).catch((err) => {
-      stateEl.innerHTML = `<span style="color:var(--red);">Not saved: ${escapeHtml(friendlyError(err))}</span> <button type="button" class="link-quiet qp-retry" style="background:none; border:none; padding:0; cursor:pointer;">Try again</button>`;
+      stateEl.innerHTML = `<span style="color:var(--red);">Not saved: ${escapeHtml(friendlyError(err))}</span> <button type="button" class="link-quiet qp-retry" style="background:none; border:none; padding:0; min-height:0; color:var(--link); cursor:pointer;">Try again</button>`;
       stateEl.querySelector('.qp-retry').addEventListener('click', save);
     }).finally(() => { inFlight--; });
     return queue;
@@ -70,7 +72,7 @@ function mountQuotePictures({ el, project, onSettled }) {
           <input type="text" class="qp-caption" maxlength="80" placeholder="Caption under the picture" value="${escapeHtml(p.caption)}" style="margin:0 0 6px;" />
           <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
             ${QUOTE_PICTURE_CAPTIONS.map(c => `<button type="button" class="${p.caption === c ? '' : 'secondary '}qp-chip" data-caption="${escapeHtml(c)}" style="font-size:12px; padding:4px 10px;">${escapeHtml(c)}</button>`).join('')}
-            <button type="button" class="link-quiet qp-remove" style="background:none; border:none; padding:0; margin-left:4px; font-size:12px; cursor:pointer;">Remove</button>
+            <button type="button" class="link-quiet qp-remove" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:4px; font-size:12px; cursor:pointer;">Remove</button>
           </div>
           <p class="subtitle qp-none" style="margin:4px 0 0; font-size:11.5px;${p.caption.trim() ? ' display:none;' : ''}">No caption: the client may take this for their own place.</p>
         </div>
@@ -109,6 +111,61 @@ function mountQuotePictures({ el, project, onSettled }) {
     input.value = '';
   }));
 
+  // Puts copies of pictures that live elsewhere (Site Photos, another job) on this quote: its own
+  // copy, so the proposal keeps the picture whatever happens to the original.
+  async function copyIn(photos, caption) {
+    const files = await Promise.all(photos.map(async (p, n) => {
+      const res = await fetch(p.url);
+      if (!res.ok) throw new Error('A picture could not be read. Try again.');
+      const blob = await res.blob();
+      return new File([blob], `job-picture-${n + 1}.${(blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`, { type: blob.type || 'image/jpeg' });
+    }));
+    const urls = await uploadPhotos(files, 'reference');
+    urls.forEach(url => list.push({ url, caption }));
+    render();
+    save();
+  }
+
+  // Recent installs with this gear: finished jobs' pictures tagged with a brand on this quote and
+  // marked fine for proposals, offered without a search. A tap adds one, captioned "Similar system".
+  const recentEl = el.querySelector('.qp-recent');
+  loadJsOnce('/js/photo-tags.js?v=1', () => typeof recentInstallPhotos === 'function').then(async () => {
+    const brands = quoteBrands(project);
+    const photos = await recentInstallPhotos({ brands, excludeProjectId: project.id });
+    if (!photos.length) return;
+    recentEl.innerHTML = `
+      <label style="margin-top:14px; font-weight:600;">Recent installs with this gear</label>
+      <p class="subtitle" style="margin:2px 0 8px;">Finished jobs with ${escapeHtml(brands.join(', '))} on them. Tap one to add it, captioned "Similar system".</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px;">
+        ${photos.map((p, i) => `<button type="button" class="qp-recent-add" data-i="${i}" title="${escapeHtml(p.ai_caption || '')}" style="padding:0; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:none; cursor:pointer;"><img src="${escapeHtml(supaImageVariant(p.url, 200, 60))}" alt="${escapeHtml(p.ai_caption || '')}" loading="lazy" style="width:100%; aspect-ratio:1; object-fit:cover; display:block;" /></button>`).join('')}
+      </div>`;
+    // a tap opens the whole picture first: it is another customer's place, so a person looks at it
+    // properly before it goes on a proposal, and can take it off the offer for good
+    recentEl.querySelectorAll('.qp-recent-add').forEach(b => b.addEventListener('click', () => {
+      const p = photos[Number(b.dataset.i)];
+      const overlay = openModal(`
+        <h2 style="margin-bottom:4px;">Add this picture?</h2>
+        <p class="subtitle" style="margin:0 0 10px;">It is from another job. Check there is nobody in it and nothing that says whose place it is (a street number, a number plate, paperwork).</p>
+        <img src="${escapeHtml(supaImageVariant(p.url, 1200, 75))}" alt="" style="width:100%; max-height:60vh; object-fit:contain; background:var(--surface-2); border-radius:8px; display:block;" />
+        <p class="subtitle" style="margin:8px 0 0; font-size:12.5px;">${escapeHtml(p.ai_caption || '')}</p>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button type="button" id="qp-recent-yes">Add to this proposal</button><button type="button" class="secondary" id="qp-recent-never">Not for other customers</button><button type="button" class="secondary" id="qp-recent-no">Cancel</button></div>
+        <div id="qp-recent-msg" style="font-size:12px;"></div>`, { maxWidth: 640, zIndex: 110 });
+      const fail = (err) => { overlay.querySelector('#qp-recent-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(err))}</div>`; };
+      overlay.querySelector('#qp-recent-no').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#qp-recent-yes').addEventListener('click', async (e) => {
+        e.target.disabled = true; e.target.textContent = 'Adding...';
+        try { await copyIn([p], 'Similar system'); overlay.remove(); b.remove(); }
+        catch (err) { fail(err); e.target.disabled = false; e.target.textContent = 'Add to this proposal'; }
+      });
+      overlay.querySelector('#qp-recent-never').addEventListener('click', async () => {
+        const { error } = await supabaseClient.from('project_photos').update({ ok_for_proposals: false }).eq('id', p.id);
+        if (error) { fail(error); return; }
+        overlay.remove(); b.remove();
+        showToast('That picture will not be offered again.');
+      });
+    }));
+  }).catch(() => {});
+
   // This job's own pictures (Site Photos and the site visit's checklist pictures): tick the ones
   // to show the client. Each ticked picture is copied into the proposal's own folder.
   const pickBtn = el.querySelector('.qp-pick');
@@ -141,18 +198,8 @@ function mountQuotePictures({ el, project, onSettled }) {
         if (!picked.length) { overlay.remove(); return; }
         add.disabled = true; add.textContent = `Copying ${picked.length} picture${picked.length === 1 ? '' : 's'}...`;
         try {
-          // its own copy, so the proposal keeps the picture whatever happens to the original
-          const files = await Promise.all(picked.map(async (p, n) => {
-            const res = await fetch(p.url);
-            if (!res.ok) throw new Error('A picture could not be read. Try again.');
-            const blob = await res.blob();
-            return new File([blob], `job-picture-${n + 1}.${(blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`, { type: blob.type || 'image/jpeg' });
-          }));
-          const urls = await uploadPhotos(files, 'reference');
-          urls.forEach(url => list.push({ url, caption: 'Your site' }));
+          await copyIn(picked, 'Your site');
           overlay.remove();
-          render();
-          save();
         } catch (err) {
           overlay.querySelector('#qp-pick-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(err))}</div>`;
           add.disabled = false; add.textContent = 'Add to the proposal';
