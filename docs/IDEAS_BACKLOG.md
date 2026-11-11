@@ -1611,6 +1611,10 @@ Plan, in three builds on one branch (they touch the same pages), each whole on i
 - Step 4 has three ways in, and each sets the caption by itself: **Add pictures of their site** (captioned "Your site"), **Add other pictures** ("Indicative picture", one tap to "Similar system") and **From this job's pictures** (the job's Site Photos, "Your site"). A picture with no caption shows a line saying the client may take it for their own place. The box saves itself; Save scope of works no longer carries the pictures.
 - A Solar or Battery proposal prints them on Your system, two across, the whole picture (never cropped), caption under each. The other proposal types have no Your system page, so theirs print where they did, on the Photos page under What it will look like, now with the captions.
 - The Your system equipment table now carries over onto the next sheet (it ran off at 26 rows).
+- **From this job's pictures** offers the job's Site Photos and the site visit's checklist pictures. A picked picture is copied into the proposal's own folder, so deleting the original later never empties a proposal a client is reading.
+- The PDF is remade once, 4 seconds after the last picture change, not on every tap. A caption saves when its box is left; leaving the page mid-save asks first.
+- Settings previews are cut the way the proposal cuts the picture: upright for the front page (it fills a whole sheet, so a tall picture suits), wide for About.
+- A fresh reviewer's 8 findings were fixed before the merge (the two above, an unescaped About picture link on the client's page, two boxes saved together losing one, and smaller ones).
 - Each migration ships with its build: this one holds the two settings and the public settings function; the picture tags (73b) and product pictures (73c) bring their own, so 73a could go to staging whole.
 - `quote.html`'s weight budget went up 2 KB (810 to 812 KB) for the pictures and captions.
 - Proof: `node scripts/proposal-fits.js --settings <file>` renders the made-up proposal with a Solar title picture and an About picture; the fixture now has four pictures, one with no caption.
