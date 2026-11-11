@@ -1148,7 +1148,7 @@
         if (!out) return;
         const r = project.bill_reading;
         if (!r) { out.innerHTML = ''; return; }
-        const s = suggestSizes({ reading: r, answers: liveAnswers(), zoneRating: currentZone(), siteAddress: project.client_address });
+        const s = suggestSizes({ reading: r, answers: liveAnswers(), zoneRating: currentZone(), siteAddress: project.client_address, siteSun: project.site_sun });
         if (!s.dailyKwh) { out.innerHTML = ''; return; }
         const wantsBattery = quoteHasBattery(currentTemplate, liveAnswers());
         out.innerHTML = `
@@ -1508,7 +1508,7 @@
       function estimateArgs() {
         const inputs = readRoiInputs(false);
         // clientType sets the GST basis of the bill when roi_inputs.bill_gst is blank (M10): a company's bill is ex GST
-        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), siteAddress: project.client_address, money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), siteAddress: project.client_address, siteSun: project.site_sun, money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
       }
 
       // ----- the Savings assumptions page: change an assumed value, or show the figures past a hard block -----
@@ -1656,7 +1656,7 @@
         const el = byId('bc-plan-results');
         if (!el || !planResults) return;
         const args = estimateArgs();
-        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, template: args.template, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, siteAddress: args.siteAddress, clientType: args.clientType,
+        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, template: args.template, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, siteAddress: args.siteAddress, siteSun: args.siteSun, clientType: args.clientType,
           candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));

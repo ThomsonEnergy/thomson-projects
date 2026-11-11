@@ -817,7 +817,7 @@
       const roiInputs = project.roi_inputs || {};
       // clientType sets the GST basis of the bill (a company's bill is ex GST unless roi_inputs.bill_gst says inc) (M10)
       const roiClientType = isCompanyClient ? 'company' : 'individual';
-      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, siteAddress: project.client_address, money, inputs: roiInputs, solarPrice: roiInputs.solar_price, batteryPrice: roiInputs.battery_price, clientType: roiClientType }) : { sections: [], asks: [], columns: [], fromBill: [], assumed: [] };
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, siteAddress: project.client_address, siteSun: project.site_sun, money, inputs: roiInputs, solarPrice: roiInputs.solar_price, batteryPrice: roiInputs.battery_price, clientType: roiClientType }) : { sections: [], asks: [], columns: [], fromBill: [], assumed: [] };
       const est = pres.est;
       const cur = est ? est.current : null;
       const br = project.bill_reading || {};
@@ -843,7 +843,7 @@
       // saved on the quote, always with the disclaimer (a suggestion only, no endorsement, no payment).
       const planOpts = Array.isArray(roiInputs.plan_options) ? roiInputs.plan_options : [];
       const planCmp = roiWanted && planOpts.length && project.bill_reading
-        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, template, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, siteAddress: project.client_address, clientType: roiClientType, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
+        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, template, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, siteAddress: project.client_address, siteSun: project.site_sun, clientType: roiClientType, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
         : null;
       const planOptsHtml = planCmp ? (() => {
         const byKey = Object.fromEntries(planOpts.map(o => [o.plan_id, o]));

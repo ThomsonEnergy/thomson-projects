@@ -16,8 +16,8 @@
 // The assumed values, in the order shown. `scale` turns the stored number into what a person types
 // (0.7 clear days as "7", 0.9 round trip as "90"); `normal` reads the normal value from roiSettings.
 const SAVINGS_FIELDS = [
-  { key: 'yield_per_kw', label: 'Sun: kWh a day from each kW of panels, averaged over the year', min: 1, max: 7, step: 0.1, scale: 1, normal: (n) => n.yieldPerKw, hint: 'What a kW of panels makes, with cloudy days and normal losses already counted (not peak sun hours). The normal value follows the site: 4.2 in Queensland and the Northern Rivers, 3.9 around Sydney.' },
-  { key: 'clear_day_share', label: 'Clear days in every 10 (the rest are overcast)', min: 3, max: 10, step: 1, scale: 10, normal: (n) => n.clearShare, hint: 'Spreads the same yearly sun over clear and dull days. The yearly total does not change: fewer clear days means the battery fills less often.' },
+  { key: 'yield_per_kw', label: 'Sun: kWh a day from each kW of panels, averaged over the year', min: 1, max: 7, step: 0.1, scale: 1, normal: (n) => n.yieldPerKw, hint: (n) => `What a kW of panels makes, with cloudy days and normal losses already counted (not peak sun hours). ${n.sunRecords ? `The normal value is from the sun records for this site (${n.sunRecords}).` : 'No sun records for this site yet, so the normal value is the area\'s: 4.2 in Queensland and the Northern Rivers, 3.9 around Sydney.'}` },
+  { key: 'clear_day_share', label: 'Clear days in every 10 (the rest are overcast)', min: 3, max: 10, step: 1, scale: 10, normal: (n) => n.clearShare, hint: (n) => `Spreads the same yearly sun over clear and dull days. The yearly total does not change: fewer clear days means the battery fills less often.${n.sunRecords ? ' The normal value is counted from this site\'s sun records.' : ''}` },
   { key: 'overcast_output', label: 'What an overcast day makes, % of a normal day', min: 0, max: 90, step: 5, scale: 100, normal: (n) => n.overcastGen, hint: 'The yearly total does not change: the clear days are lifted to make up for it.' },
   { key: 'daylight_share', label: 'Power used between 6am and 6pm, % of the day\'s use', min: 10, max: 90, step: 1, scale: 100, normalText: 'about 51 (a typical home)', hint: 'Not used when the bill splits peak, shoulder and off-peak kWh: the bill decides then.' },
   { key: 'annual_kwh', label: 'Power the home uses in a year, kWh', min: 100, max: 5000000, step: 1, scale: 1, normalText: 'from the bill', hint: 'Only when the bill\'s period is not typical of the year.' },
@@ -50,12 +50,12 @@ async function openSavingsAssumptions({ project, gaps, zoneRating, onSaved }) {
   const saved = project.roi_inputs || {};
   const typed = (saved.assumptions && typeof saved.assumptions === 'object') ? saved.assumptions : {};
   const overrides = (saved.overrides && typeof saved.overrides === 'object') ? saved.overrides : {};
-  const normal = roiSettings({}, zoneRating, project.client_address);
+  const normal = roiSettings({}, zoneRating, project.client_address, project.site_sun);
   const show = (f, stored) => { const n = Number(stored); return Number.isFinite(n) ? String(Math.round(n * f.scale * 1000) / 1000) : ''; };
   const fieldRow = (f) => {
     const normalText = f.normalText || show(f, f.normal(normal));
     return `<div style="display:grid; grid-template-columns:1fr 110px; gap:4px 12px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border);">
-      <div><div style="font-size:13px;">${escapeHtml(f.label)}</div><div class="subtitle" style="font-size:11.5px; margin:1px 0 0;">Normal: ${escapeHtml(normalText)}${f.hint ? `. ${escapeHtml(f.hint)}` : ''}</div></div>
+      <div><div style="font-size:13px;">${escapeHtml(f.label)}</div><div class="subtitle" style="font-size:11.5px; margin:1px 0 0;">Normal: ${escapeHtml(normalText)}${f.hint ? `. ${escapeHtml(typeof f.hint === 'function' ? f.hint(normal) : f.hint)}` : ''}</div></div>
       <input type="number" inputmode="decimal" class="sa-field" data-key="${f.key}" min="${f.min}" max="${f.max}" step="${f.step}" placeholder="${escapeHtml(f.normalText ? 'normal' : normalText)}" value="${escapeHtml(typed[f.key] != null ? show(f, typed[f.key]) : '')}" style="margin:0;" />
     </div>`;
   };

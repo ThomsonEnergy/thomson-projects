@@ -67,21 +67,35 @@ function roiSiteYield(zoneRating, address) {
   return zone === A.defaultZoneRating && north ? A.northYieldPerKwPerDay : A.yieldPerKwPerDay[zone];
 }
 
-function roiSettings(inputs, zoneRating, siteAddress) {
+// The site's own sun figures (projects.site_sun, item 75: ten years of daily sun records for the
+// spot, worked out by netlify/functions/site-sun.js), when they are for this address and every
+// figure is believable; null otherwise, and the zone's figures are used.
+function roiSiteSun(siteSun, siteAddress) {
+  const s = siteSun;
+  if (!s || typeof s !== 'object' || String(s.for_address || '').trim() !== String(siteAddress || '').trim()) return null;
+  const y = roiNum(s.yield_per_kw), c = roiNum(s.clear_share), o = roiNum(s.overcast_output);
+  const seasons = Array.isArray(s.seasons) && s.seasons.length === 4 ? s.seasons.map(roiNum) : [];
+  if (!(y >= 2.5 && y <= 6 && c >= 0.3 && c <= 1 && o >= 0 && o <= 0.9) || seasons.length !== 4 || !seasons.every(v => v >= 0.3 && v <= 1.8)) return null;
+  return { yield: y, clearShare: c, overcastGen: o, seasons, years: String(s.years || '') };
+}
+
+function roiSettings(inputs, zoneRating, siteAddress, siteSun) {
   const A = ROI_ASSUMPTIONS;
   const typed = (inputs && typeof inputs.assumptions === 'object' && inputs.assumptions) || {};
   const num = (key, min, max) => { const n = roiNum(typed[key]); return n != null && n >= min && n <= max ? n : null; };
-  const zoneYield = roiSiteYield(zoneRating, siteAddress);
-  const clearShare = num('clear_day_share', 0.3, 1) ?? A.dayTypes[0].share;
-  const overcastGen = num('overcast_output', 0, 0.9) ?? A.dayTypes[1].gen;
+  const site = roiSiteSun(siteSun, siteAddress);
+  const zoneYield = site ? site.yield : roiSiteYield(zoneRating, siteAddress);
+  const clearShare = num('clear_day_share', 0.3, 1) ?? (site ? site.clearShare : A.dayTypes[0].share);
+  const overcastGen = num('overcast_output', 0, 0.9) ?? (site ? site.overcastGen : A.dayTypes[1].gen);
   // a clear day is lifted so that the clear and the overcast days still average to the yearly yield
   const dayTypes = clearShare >= 0.999 ? [{ name: 'clear', share: 1, gen: 1 }]
     : [{ name: 'clear', share: clearShare, gen: (1 - (1 - clearShare) * overcastGen) / clearShare }, { name: 'overcast', share: 1 - clearShare, gen: overcastGen }];
-  const raw = A.seasons.map((sn, i) => ({ name: sn.name, gen: num(`season_gen_${i}`, 0.2, 2) ?? sn.gen, load: num(`season_load_${i}`, 0.2, 2) ?? sn.load }));
+  const raw = A.seasons.map((sn, i) => ({ name: sn.name, gen: num(`season_gen_${i}`, 0.2, 2) ?? (site ? site.seasons[i] : sn.gen), load: num(`season_load_${i}`, 0.2, 2) ?? sn.load }));
   const mean = (k) => raw.reduce((t, sn) => t + sn[k], 0) / raw.length;
   const meanGen = mean('gen'), meanLoad = mean('load');
   return {
     yieldPerKw: num('yield_per_kw', 1, 7) ?? zoneYield, zoneYield,
+    sunRecords: site ? site.years || 'ten years' : null, // the years of records behind the sun figures, or null for the zone's
     clearShare, overcastGen, dayTypes,
     seasons: raw.map(sn => ({ name: sn.name, gen: sn.gen / meanGen, load: sn.load / meanLoad })),
     daylightShare: num('daylight_share', 0.1, 0.9), // null: the normal household day
@@ -744,9 +758,9 @@ function roiBillAdjust(reading, metrics) {
 // solar only shows what was bought, so the home's use (and, on a time-of-use bill, its use in each
 // band) is raised until the model, with that solar on the roof, buys what the bill says. A yearly
 // use typed for the quote is used as it is.
-function roiHome({ reading, answers, inputs, zoneRating, siteAddress, template }) {
+function roiHome({ reading, answers, inputs, zoneRating, siteAddress, siteSun, template }) {
   const inp = inputs || {};
-  const S = roiSettings(inp, zoneRating, siteAddress);
+  const S = roiSettings(inp, zoneRating, siteAddress, siteSun);
   const metrics = billMetrics(reading);
   if (!metrics.dailyKwh) return null;
   const existingKw = existingSolarKw(answers);
@@ -817,8 +831,8 @@ function roiHome({ reading, answers, inputs, zoneRating, siteAddress, template }
 // the "Rise" figures are the same with prices rising every year (settings.priceRise). A payback is
 // the year the savings so far, at today's prices, reach the price.
 function roiEstimate(argsIn) {
-  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, netCost, solarPrice, batteryPrice, billGst, template } = roiIncGstArgs(argsIn);
-  const home = roiHome({ reading, answers, inputs, zoneRating, siteAddress, template });
+  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, siteSun, netCost, solarPrice, batteryPrice, billGst, template } = roiIncGstArgs(argsIn);
+  const home = roiHome({ reading, answers, inputs, zoneRating, siteAddress, siteSun, template });
   if (!home) return null;
   const { settings: S, metrics } = home;
   const inp = inputs || {};
@@ -914,8 +928,8 @@ const ROI_NOT_PAID_OFF = `Not paid off in ${ROI_ASSUMPTIONS.paybackCapYears} yea
 // current plan's own deal and is not carried over. Returns null without a usable bill.
 function roiComparePlans(argsIn) {
   // the bill and the current plan on an inc GST basis, the same as every published plan (M10)
-  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, candidates, template } = roiIncGstArgs(argsIn);
-  const home = roiHome({ reading, answers, inputs, zoneRating, siteAddress, template });
+  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, siteSun, candidates, template } = roiIncGstArgs(argsIn);
+  const home = roiHome({ reading, answers, inputs, zoneRating, siteAddress, siteSun, template });
   if (!home) return null;
   const { settings: S, metrics } = home;
   const inp = inputs || {};
@@ -1075,9 +1089,10 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
   else if (!r.estimated && !typedIn.has('usage')) assumed.push(['Your year', `The ${days || 'period'} on your bill ${days ? 'stand' : 'stands'} for your whole year`]);
   if (est.newSolarKw > 0 || home.existingKw > 0) {
     // two lines, so the day spread never reads as sun taken off a second time
-    assumed.push(['Sun', `${S.yieldPerKw} kWh a day from each kW of panels. That is the average over the whole year, with cloudy days and normal losses already counted`]);
+    const fromRecords = S.sunRecords && S.typed.yield_per_kw == null ? `, from the sun records for your area (${S.sunRecords})` : '';
+    assumed.push(['Sun', `${S.yieldPerKw} kWh a day from each kW of panels${fromRecords}. That is the average over the whole year, with cloudy days and normal losses already counted`]);
     const clear = Math.round(S.clearShare * 10);
-    assumed.push(['Clear and dull days', clear >= 10 ? 'Every day is taken as an average day' : `The year's sun is spread as ${clear} clear days in 10 and ${10 - clear} overcast${S.typed.overcast_output != null ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}. That does not change the yearly total: it allows for dull days, when the panels cover less of the home${est.batteryKwh > 0 ? ' and the battery does not fill' : ''}`]);
+    assumed.push(['Clear and dull days', clear >= 10 ? 'Every day is taken as an average day' : `The year's sun is spread as ${clear} clear days in 10 and ${10 - clear} overcast${S.typed.overcast_output != null || S.sunRecords ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}. That does not change the yearly total: it allows for dull days, when the panels cover less of the home${est.batteryKwh > 0 ? ' and the battery does not fill' : ''}`]);
   }
   if (Object.keys(S.typed).some(k => /^season_/.test(k))) assumed.push(['Seasons', `Against the yearly average, summer, autumn, winter and spring: panels make ${S.seasons.map(sn => `${Math.round(sn.gen * 100)}%`).join(', ')}; the home uses ${S.seasons.map(sn => `${Math.round(sn.load * 100)}%`).join(', ')}`]);
   if (home.existingKw > 0) assumed.push(['Your existing solar', `${home.existingKw} kW${typedIn.has('existing') ? ' (our estimate: we do not have its size)' : ''}${home.ownSolarKwh > 0 ? `, supplying about ${roiKwh(home.ownSolarKwh)} a year that your bill does not show` : ''}. ${home.existingRemoved ? 'It comes off the roof with this job' : 'It stays and keeps working'}`]);
@@ -1114,7 +1129,7 @@ function roiPresentation(argsIn) {
   // clientType ('company' | 'individual') and inputs.bill_gst set the GST basis of the bill (M10); the
   // bill and the inputs are normalised to inc GST once here and passed on normalised
   const args = roiIncGstArgs(argsIn);
-  const { reading, answers, template, newSolarKw, batteryKwh, netCost, zoneRating, siteAddress, money, inputs, solarPrice, batteryPrice, linesBatteryKwh, pylonStorage, billGst, billGstTyped, clientType, overridden, overrideNotes } = args;
+  const { reading, answers, template, newSolarKw, batteryKwh, netCost, zoneRating, siteAddress, siteSun, money, inputs, solarPrice, batteryPrice, linesBatteryKwh, pylonStorage, billGst, billGstTyped, clientType, overridden, overrideNotes } = args;
   const gaps = roiGaps({ reading, answers, template, newSolarKw, batteryKwh, netCost, inputs, solarPrice, batteryPrice, billGst, billGstTyped, clientType, overridden });
   const has = (k) => !gaps.some(g => g.key === k && !g.overridden);
   const asks = gaps.filter(g => g.client).map(g => ({ key: g.key, need: g.client, gives: (!g.overridden && ROI_GAP_GIVES[g.key]) || 'a more accurate estimate', blocking: g.blocking }));
@@ -1130,7 +1145,7 @@ function roiPresentation(argsIn) {
     if (has('total') && m.annualBill) sections[0].rows.push(['Bills now', [roiBillText(m.annualBill)]]);
     return { ...empty, sections, columns: ['Estimate'], rows: sections[0].rows.map(([k, v]) => [k, v[0]]), assumed: overrideNotes || [] };
   }
-  const estArgs = { reading, answers, template, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };
+  const estArgs = { reading, answers, template, inputs, newSolarKw, batteryKwh, zoneRating, siteAddress, siteSun, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };
   const est = roiEstimate(estArgs);
   const home = est.home, S = est.settings;
   const dollars = has('rate');
