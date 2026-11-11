@@ -22,6 +22,7 @@ node scripts/smoke.js --base https://staging--thomsonprojects.netlify.app --logi
 
 - `npm run check`: syntax, policy pairs, **dead code** (new findings only, baseline in `scripts/deadcode-baseline.json`) and **page budgets** (`scripts/page-budgets.json`). A page over budget: make it smaller (move code to a per-tab file) or, with a reason the PR states, raise its budget. `project.html` and `settings.html` budgets never go up.
 - A finding you cleared from the baseline: remove its line from `scripts/deadcode-baseline.json` in the same PR.
+- The client proposal (`quote.html`, `solar-roi.js`): `node scripts/proposal-fits.js` renders a made-up quote with no network and fails when a page runs off its sheet or the phone (`--out` saves a picture of every page for the PR).
 - Migrations: after the PR preview's Supabase branch has run them, read the security and performance advisors on that branch and fix what they flag.
 - Agents: a prompt or model change runs every case in `agents/evals/<agent>/` and passes them all before it ships (see `agents/evals/README.md`).
 
