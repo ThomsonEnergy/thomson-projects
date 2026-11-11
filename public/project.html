@@ -3810,7 +3810,7 @@
         // ----- step 4: scope of works -----
         renderEditSowDocList();
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
-        loadJsOnce('/js/quote-pictures.js?v=2', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+        loadJsOnce('/js/quote-pictures.js?v=3', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
