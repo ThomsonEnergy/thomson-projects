@@ -65,8 +65,9 @@ function roiChecks(argsIn) {
     if (c.paybackRaw != null && (c.paybackRaw < 1 || c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears)) add('payback', c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears ? `${ROI_NOT_PAID_OFF} (about ${c.paybackRaw} years at this saving), which is what the proposal says: check the price, the sizes and the rates.` : `Pays for itself in ${c.paybackRaw} years, which is unusual: check the price, the sizes and the rates.`);
     if (c.paybackRaw == null && est.prices.total > 0 && c.totalSaving > 0) add('payback', `${c.paybackText}, which is what the proposal says: the savings never reach the price${est.batteryKwh > 0 ? ` (past year ${est.settings.batteryLifeYears} only the solar's share is counted)` : ''}. Check the price, the sizes and the rates.`);
     if (c.billNowIsActual && c.modelledNow > 0) {
-      const diff = (c.modelledNow - c.billNow) / c.billNow;
-      if (Math.abs(diff) > 0.2) add('model_vs_bill', `These rates on this use come to ${fmt(c.modelledNow)} a year but the bill says ${fmt(c.billNow)} (${diff > 0 ? '+' : ''}${Math.round(diff * 100)}%): check the rates, the supply charge and the kWh split, or a discount on the bill.`);
+      // a bill at or below zero (in credit) has no sensible percentage: say the two figures
+      const diff = c.billNow > 0 ? (c.modelledNow - c.billNow) / c.billNow : null;
+      if (diff == null || Math.abs(diff) > 0.2) add('model_vs_bill', `These rates on this use come to ${fmt(c.modelledNow)} a year but the bill says ${fmt(c.billNow)}${diff == null ? '' : ` (${diff > 0 ? '+' : ''}${Math.round(diff * 100)}%)`}: check the rates, the supply charge and the kWh split, or a discount or credit on the bill.`);
     }
   }
   if (roiExportLimitUnclear(a)) add('export_limit_unclear', `The export limit answer "${a.export_limit}" is not a number of kW, so no limit is applied: type the kW in total across the phases (for 5 kW a phase on three phases, 15).`);

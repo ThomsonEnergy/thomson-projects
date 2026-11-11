@@ -1019,7 +1019,7 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money }) {
   const gap = (k) => gaps.some(g => g.key === k);
   const fromBill = [], assumed = [];
   const days = m.days ? `${m.days} days` : '';
-  fromBill.push(['Your bill', [r.retailer ? String(r.retailer) : '', days, bills && m.billTotal != null ? money(m.billTotal) : ''].filter(Boolean).join(', ') || 'as read']);
+  fromBill.push(['Your bill', [r.retailer ? String(r.retailer) : '', days, bills && m.billTotal != null ? (m.billTotal < 0 ? `${money(-m.billTotal)} in credit` : money(m.billTotal)) : ''].filter(Boolean).join(', ') || 'as read']);
   fromBill.push(['Power you bought', `${m.totalKwh ? `${roiKwh(m.totalKwh)}, ` : ''}${m.dailyKwh} kWh a day`]);
   if (dollars) {
     const rates = plan.tariff === 'tou' ? ROI_BANDS.filter(b => (plan.bandShare[b.key] || 0) > 0 && plan.rateKnown[b.key]).map(b => `${b.label.toLowerCase()} ${plan[b.key]}`).join(', ') : `${plan.rate}`;
@@ -1079,7 +1079,7 @@ function roiPresentation(argsIn) {
   const canModel = has('existing') && ((roiNum(newSolarKw) || 0) > 0 || (roiNum(batteryKwh) || 0) > 0);
   if (!canModel) {
     const sections = [{ title: 'Your home now', rows: [['Power bought', [`${roiKwh(m.annualKwh)} a year (${m.dailyKwh} kWh a day)`]]] }];
-    if (has('total') && m.annualBill) sections[0].rows.push(['Bills now', [`${roiDollars(m.annualBill)} a year`]]);
+    if (has('total') && m.annualBill) sections[0].rows.push(['Bills now', [roiBillText(m.annualBill)]]);
     return { ...empty, sections, columns: ['Estimate'], rows: sections[0].rows.map(([k, v]) => [k, v[0]]) };
   }
   const estArgs = { reading, answers, template, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };

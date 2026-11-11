@@ -104,10 +104,26 @@ const RETIRED_QUESTION_LABELS = {
   walls_open: 'Wall and ceiling access',
 };
 
-// Answers to retired questions this quote still carries, as { label, value }.
-function earlierAnswers(answers) {
+// True when a saved answer is one this question can still give. A choice question whose saved value
+// is not among its choices holds an older answer under the same key (existing_system was "Existing
+// solar" and the like before it became "Existing system after this job"): that value belongs to the
+// retired label below, not to the question.
+function answerFitsQuestion(q, value) {
+  if (!String(value ?? '').trim()) return false;
+  if (q.type === 'yesno') return value === 'Yes' || value === 'No';
+  if (q.type === 'select') return q.options.includes(value);
+  return true;
+}
+
+// Answers to retired questions this quote still carries, as { label, value }: every retired key with
+// a value, unless a current question of that key can give that value (then it prints there).
+function earlierAnswers(answers, template) {
   answers = answers || {};
-  return Object.keys(RETIRED_QUESTION_LABELS).filter(id => String(answers[id] ?? '').trim()).map(id => ({ label: RETIRED_QUESTION_LABELS[id], value: answers[id] }));
+  const live = new Map();
+  questionGroupsForQuote(template, answers).forEach(g => g.questions.forEach(q => live.set(q.id, q)));
+  return Object.keys(RETIRED_QUESTION_LABELS)
+    .filter(id => String(answers[id] ?? '').trim() && !(live.has(id) && answerFitsQuestion(live.get(id), answers[id])))
+    .map(id => ({ label: RETIRED_QUESTION_LABELS[id], value: answers[id] }));
 }
 
 const TEMPLATE_QUESTION_TITLES = {
@@ -212,11 +228,11 @@ function templateAnswersSummaryHtml(template, answers) {
   answers = answers || {};
   const rows = [];
   questionGroupsForQuote(template, answers).forEach(g => {
-    g.questions.filter(q => answers[q.id]).forEach(q => {
+    g.questions.filter(q => answerFitsQuestion(q, answers[q.id])).forEach(q => {
       rows.push(`<tr><td>${q.label.replace(/</g, '&lt;')}</td><td>${String(answers[q.id]).replace(/</g, '&lt;')}</td></tr>`);
     });
   });
-  earlierAnswers(answers).forEach(a => rows.push(`<tr><td>${a.label.replace(/</g, '&lt;')}</td><td>${String(a.value).replace(/</g, '&lt;')}</td></tr>`));
+  earlierAnswers(answers, template).forEach(a => rows.push(`<tr><td>${a.label.replace(/</g, '&lt;')}</td><td>${String(a.value).replace(/</g, '&lt;')}</td></tr>`));
   return rows.length ? `<table><tbody>${rows.join('')}</tbody></table>` : `<p class="subtitle">No answers recorded yet.</p>`;
 }
 
@@ -225,9 +241,9 @@ function templateAnswersText(template, answers) {
   answers = answers || {};
   const lines = [];
   questionGroupsForQuote(template, answers).forEach(g => {
-    g.questions.filter(q => answers[q.id]).forEach(q => lines.push(`${q.label}: ${answers[q.id]}`));
+    g.questions.filter(q => answerFitsQuestion(q, answers[q.id])).forEach(q => lines.push(`${q.label}: ${answers[q.id]}`));
   });
-  earlierAnswers(answers).forEach(a => lines.push(`${a.label}: ${a.value}`));
+  earlierAnswers(answers, template).forEach(a => lines.push(`${a.label}: ${a.value}`));
   return lines.join('\n');
 }
 
