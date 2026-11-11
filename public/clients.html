@@ -218,16 +218,8 @@
     }
 
     // --- contacts sub-form ---
-    // js/clients-portal.js (the portal card, item 74) on first use, the way the email composer is loaded.
-    let clientPortalJs = null;
-    function loadClientPortalJs() {
-      return (clientPortalJs ||= new Promise((resolve, reject) => {
-        const el = document.createElement('script');
-        el.src = '/js/clients-portal.js?v=3';
-        el.onload = resolve; el.onerror = () => reject(new Error('The portal card did not load.'));
-        document.head.appendChild(el);
-      }));
-    }
+    // js/clients-portal.js (the portal card, item 74) comes down on first use, like the email composer.
+    const loadClientPortalJs = () => loadJsOnce('/js/clients-portal.js?v=3', () => typeof renderClientPortal === 'function');
 
     function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
@@ -287,7 +279,7 @@
       document.getElementById('c-terms').value = 'cod';
       document.getElementById('c-rate-card').value = defaultRateCardId;
       renderClientAgreement(null);
-      if (typeof renderClientPortal === 'function') renderClientPortal(null);
+      document.getElementById('client-portal').innerHTML = '';
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -577,30 +569,25 @@
       }
       if (siteErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a site did not: ${escapeHtml(siteErrors.join('; '))}</div>`; await loadClients(); return; }
 
-      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74).
-      // After the sites, and never in the way of the save: a failure is a toast, the client is saved.
-      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
-      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
-      if (newlyTicked.length) {
-        try {
-          await loadClientPortalJs();
-          const results = await sendPortalLogins(newlyTicked);
-          const sent = results.filter(r => r.sent).map(r => r.email);
-          const failed = results.filter(r => !r.ok);
-          const skipped = results.filter(r => r.ok && !r.sent);
-          if (failed.length) showToast(`Saved. Portal login not sent to ${failed.map(f => f.email).join(', ')}: ${failed[0].message}`, { error: true, ms: 8000 });
-          else if (sent.length) showToast(`Saved. Portal login emailed to ${sent.join(', ')}.`);
-          else if (skipped.length) showToast(`Saved. ${skipped[0].email}: ${skipped[0].message}`, { ms: 8000 });
-        } catch (err) {
-          showToast(`Saved. Portal login not sent: ${err.message}`, { error: true, ms: 8000 });
-        }
-      }
-
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();
       const listMsg = document.getElementById('clients-list-msg');
       listMsg.innerHTML = '<div class="success-box">Client saved.</div>';
       setTimeout(() => { listMsg.innerHTML = ''; }, 4000);
+
+      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74),
+      // after the save is done and shown: the emails take a second or two each and never hold it up.
+      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
+      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
+      if (newlyTicked.length) {
+        try {
+          await loadClientPortalJs();
+          const r = await sendPortalLogins(newlyTicked);
+          showToast(r.text, { error: r.failed.length > 0, ms: 8000 });
+        } catch (err) {
+          showToast(`Portal login not sent: ${err.message}`, { error: true, ms: 8000 });
+        }
+      }
       } finally {
         btn.disabled = false;
         btn.textContent = label;

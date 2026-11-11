@@ -66,19 +66,14 @@
     return bits.join(' &middot; ');
   }
 
-  // portal-invite.js emails a temporary password (the same call the Clients page makes)
+  // the same call the Clients page makes (sendPortalLogins in js/clients-portal.js, loaded on first use)
   async function sendPortalLogin(a) {
     a.textContent = 'Sending...';
     try {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      const res = await fetch('/.netlify/functions/portal-invite', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ email: a.dataset.email, resend: true }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!data.ok) throw new Error(data.error || 'Not sent');
-      showToast(`Portal login emailed to ${a.dataset.email}.`);
-      a.textContent = 'Portal login sent';
+      await loadJsOnce('/js/clients-portal.js?v=3', () => typeof sendPortalLogins === 'function');
+      const r = await sendPortalLogins([a.dataset.email], { resend: true });
+      showToast(r.text, { error: r.failed.length > 0, ms: 8000 });
+      a.textContent = r.sent.length ? 'Portal login sent' : 'Send portal login';
     } catch (err) {
       showToast(err.message, { error: true });
       a.textContent = 'Send portal login';

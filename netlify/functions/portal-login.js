@@ -27,8 +27,8 @@ const SAME_ANSWER = 'If that email is on a client record, a code is on its way.'
 const TOO_MANY_TRIES = 'Too many wrong tries. Ask for a new code.';
 const WRONG_PASSWORD = 'That email and password do not match. Try again, or choose "Email me a code instead".';
 
-// an unknown email still costs one scrypt, so the answer takes as long either way
-const NO_ACCOUNT_HASH = S.hashPassword(S.newToken());
+// an unknown email is checked against this, so the answer takes as long either way
+const NO_ACCOUNT_HASH = S.noPasswordHash();
 const ipOf = (event) => String((event.headers || {})['x-nf-client-connection-ip'] || (event.headers || {})['x-forwarded-for'] || '').split(',')[0].trim() || null;
 const hourAgo = () => new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
@@ -58,16 +58,18 @@ exports.handler = async (event) => {
 async function password(admin, event, email, pw, device) {
   if (!email || !pw) return S.json(400, { ok: false, error: 'Type your email and password.' });
   const ip = ipOf(event);
-  const { count: wrong } = await admin.from('portal_logins').select('id', { count: 'exact', head: true }).eq('email', email).is('code_hash', null).eq('attempts', 1).gte('created_at', hourAgo());
+  const [{ count: wrong }, { data: account }] = await Promise.all([
+    admin.from('portal_logins').select('id', { count: 'exact', head: true }).eq('email', email).is('code_hash', null).eq('attempts', 1).gte('created_at', hourAgo()),
+    admin.from('portal_accounts').select('id, password_hash, must_change').eq('email', email).maybeSingle(),
+  ]);
   if ((wrong || 0) >= MAX_ATTEMPTS) return S.json(429, { ok: false, error: 'Too many wrong tries. Choose "Email me a code instead" to get back in.' });
-  const { data: account } = await admin.from('portal_accounts').select('id, password_hash, must_change').eq('email', email).maybeSingle();
   const ok = S.verifyPassword(pw, account ? account.password_hash : NO_ACCOUNT_HASH) && !!account;
   if (!ok) {
     await admin.from('portal_logins').insert({ email, code_hash: null, ip, attempts: 1, expires_at: new Date().toISOString(), used_at: new Date().toISOString() });
     return S.json(400, { ok: false, error: WRONG_PASSWORD });
   }
   const scope = await S.portalScope(admin, email, { staffCheck: false });
-  if (!scope.clients.length && !scope.contactJobIds.length) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
+  if (!scope.canLogIn) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
   return S.json(200, { ok: true, ...(await openSession(admin, scope, device, 'login_password')), mustChange: !!account.must_change });
 }
 
@@ -83,7 +85,7 @@ async function send(admin, event, email) {
   }
   const scope = await S.portalScope(admin, email);
   if (scope.staffUser) return S.json(200, { ok: true, staff: true, message: 'That is a staff login. Use the app instead.' });
-  if (!scope.clients.length && !scope.contactJobIds.length) {
+  if (!scope.canLogIn) {
     // unknown email: the same words, no code (code_hash null), but the attempt still counts against the limits
     await admin.from('portal_logins').insert({ email, code_hash: null, ip, expires_at: new Date().toISOString(), used_at: new Date().toISOString() });
     return S.json(200, { ok: true, message: SAME_ANSWER, minutes: S.CODE_MINUTES });
@@ -115,10 +117,10 @@ async function verify(admin, email, codeIn, device) {
   }
   // send already refused a staff email, so no Auth lookup here
   const scope = await S.portalScope(admin, email, { staffCheck: false });
-  if (!scope.clients.length && !scope.contactJobIds.length) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
+  if (!scope.canLogIn) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
   await admin.from('portal_logins').update({ used_at: new Date().toISOString() }).eq('id', login.id);
   // a code login always ends in choosing a password (the account is made if it is their first time)
-  const { error: accountErr } = await admin.from('portal_accounts').upsert({ email, password_hash: S.hashPassword(S.newToken()), must_change: true, updated_at: new Date().toISOString() }, { onConflict: 'email' });
+  const { error: accountErr } = await admin.from('portal_accounts').upsert({ email, password_hash: S.noPasswordHash(), must_change: true, updated_at: new Date().toISOString() }, { onConflict: 'email' });
   if (accountErr) throw accountErr;
   return S.json(200, { ok: true, ...(await openSession(admin, scope, device, 'login_code')), mustChange: true });
 }

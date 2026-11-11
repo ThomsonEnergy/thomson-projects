@@ -164,12 +164,12 @@
       ${r.site ? `<div class="site">${esc(r.site)}</div>` : ''}
       <div class="status"><span class="pl-status ${esc(r.tone)}">${esc(r.status)}</span></div>
     </a>`;
-  const listHtml = (rows, { empty, showDone }) => {
+  const listHtml = (rows, { empty }) => {
     const open = rows.filter((r) => r.open);
     const done = rows.filter((r) => !r.open);
     return `
       ${open.length ? open.map(rowHtml).join('') : `<p class="pl-muted">${esc(empty)}</p>`}
-      ${done.length ? `<details ${showDone ? 'open' : ''}><summary class="pl-muted" style="cursor:pointer; margin:8px 0;">Show finished (${done.length})</summary>${done.map(rowHtml).join('')}</details>` : ''}`;
+      ${done.length ? `<details><summary class="pl-muted" style="cursor:pointer; margin:8px 0;">Show finished (${done.length})</summary>${done.map(rowHtml).join('')}</details>` : ''}`;
   };
 
   async function showOverview() {
@@ -258,25 +258,23 @@
 
   function showWork(work) {
     const el = document.getElementById('pl-work');
-    {
-      const inv = (x) => x.invoiced ? `<span class="pl-muted">${esc(x.invoiceNumber || 'Invoiced')}</span>` : 'Not yet';
-      el.innerHTML = `
-        <div class="pl-big">${esc(money(work.notInvoiced))}</div>
-        <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
-        ${work.note ? `<p class="pl-muted">${esc(work.note)}</p>` : ''}
-        <h3>Labour</h3>
-        ${work.labour.length ? `${table(['Day', 'Who', 'Hours', '$Amount', 'Invoiced'], work.labour.map((l) => `
-          <tr><td>${esc(l.day)}<br><span class="pl-muted">${esc(l.start)} to ${esc(l.end)}</span></td><td>${esc(l.who)}</td><td>${esc(l.bands || `${l.hours} h`)}</td><td class="n">${esc(money(l.amount))}</td><td>${inv(l)}</td></tr>`))}
-          <p class="pl-muted" style="margin:6px 0 0;">Hours at the Schedule of Rates: ${esc(work.rules.standardHours)} standard, after hours and weekends at the schedule's rates, minimum ${esc(work.rules.minimumHours)} hours a day per person on the invoice.</p>` : `<span class="pl-muted">No hours logged yet.</span>`}
-        <h3>Materials used</h3>
-        ${work.materials.length ? table(['Item', 'Qty', 'From', '$Amount', 'Invoiced'], work.materials.map((m) => `
-          <tr><td>${esc(m.description)}</td><td>${esc(m.quantity)}</td><td>${esc(m.from)}</td><td class="n">${esc(money(m.amount))}</td><td>${inv(m)}</td></tr>`)) : `<span class="pl-muted">No materials yet.</span>`}
-        <h3>Orders</h3>
-        ${work.purchaseOrders.length ? work.purchaseOrders.map((po) => `
-          <details style="margin:6px 0;"><summary style="cursor:pointer;"><strong>PO ${esc(po.number)}</strong> ${esc(po.supplier)}: ${esc(po.state)} <span class="pl-muted">(${esc(money(po.total))})</span></summary>
-            <table class="pl-table" style="margin-top:6px;"><tbody>${po.lines.map((l) => `<tr><td>${esc(l.description)}</td><td>${esc(l.quantity)}</td><td>${l.received ? 'Picked up' : l.backordered ? `Back order${l.eta ? `, due ${esc(l.eta)}` : ''}` : 'Ordered'}</td><td class="n">${esc(money(l.amount))}</td></tr>`).join('')}</tbody></table>
-          </details>`).join('') : `<span class="pl-muted">No orders on this job.</span>`}`;
-    }
+    const inv = (x) => x.invoiced ? `<span class="pl-muted">${esc(x.invoiceNumber || 'Invoiced')}</span>` : 'Not yet';
+    el.innerHTML = `
+      <div class="pl-big">${esc(money(work.notInvoiced))}</div>
+      <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
+      ${work.note ? `<p class="pl-muted">${esc(work.note)}</p>` : ''}
+      <h3>Labour</h3>
+      ${work.labour.length ? `${table(['Day', 'Who', 'Hours', '$Amount', 'Invoiced'], work.labour.map((l) => `
+        <tr><td>${esc(l.day)}<br><span class="pl-muted">${esc(l.start)} to ${esc(l.end)}</span></td><td>${esc(l.who)}</td><td>${esc(l.bands || `${l.hours} h`)}</td><td class="n">${esc(money(l.amount))}</td><td>${inv(l)}</td></tr>`))}
+        <p class="pl-muted" style="margin:6px 0 0;">Hours at the Schedule of Rates: ${esc(work.rules.standardHours)} standard, after hours and weekends at the schedule's rates, minimum ${esc(work.rules.minimumHours)} hours a day per person on the invoice.</p>` : `<span class="pl-muted">No hours logged yet.</span>`}
+      <h3>Materials used</h3>
+      ${work.materials.length ? table(['Item', 'Qty', 'From', '$Amount', 'Invoiced'], work.materials.map((m) => `
+        <tr><td>${esc(m.description)}</td><td>${esc(m.quantity)}</td><td>${esc(m.from)}</td><td class="n">${esc(money(m.amount))}</td><td>${inv(m)}</td></tr>`)) : `<span class="pl-muted">No materials yet.</span>`}
+      <h3>Orders</h3>
+      ${work.purchaseOrders.length ? work.purchaseOrders.map((po) => `
+        <details style="margin:6px 0;"><summary style="cursor:pointer;"><strong>PO ${esc(po.number)}</strong> ${esc(po.supplier)}: ${esc(po.state)} <span class="pl-muted">(${esc(money(po.total))})</span></summary>
+          <table class="pl-table" style="margin-top:6px;"><tbody>${po.lines.map((l) => `<tr><td>${esc(l.description)}</td><td>${esc(l.quantity)}</td><td>${l.received ? 'Picked up' : l.backordered ? `Back order${l.eta ? `, due ${esc(l.eta)}` : ''}` : 'Ordered'}</td><td class="n">${esc(money(l.amount))}</td></tr>`).join('')}</tbody></table>
+        </details>`).join('') : `<span class="pl-muted">No orders on this job.</span>`}`;
   }
 
   async function route() {

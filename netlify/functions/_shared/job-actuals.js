@@ -45,7 +45,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
   const firstId = centres[0].id;
   const centreOf = (id) => (id && centres.some(c => c.id === id) ? id : firstId);
 
-  const [{ data: entries }, { data: usage }, { data: invItems }, { data: settings }, { data: holidays }, { data: tiers }] = await Promise.all([
+  const [{ data: entries }, { data: usage }, { data: invItems }, { data: settings }, { data: holidays }, { data: tiers }, { data: openInvoices }] = await Promise.all([
     supabaseAdmin.from('time_entries').select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids, billable').eq('project_id', projectId).not('clock_out', 'is', null).order('clock_in'),
     // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
     // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
@@ -54,6 +54,8 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
     supabaseAdmin.from('public_holidays').select('holiday_date'),
     supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate').order('sort_order'),
+    // do-and-charge invoices on this job that can still be added to (item 64)
+    supabaseAdmin.from('invoices').select('id, invoice_number, sent_at, invoice_line_items(id)').eq('project_id', projectId).is('xero_invoice_id', null).is('paid_at', null).order('sent_at', { ascending: false }),
   ]);
 
   const staffIds = [...new Set((entries || []).map(e => e.staff_id))];
@@ -160,11 +162,6 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     };
   });
   const sum = (k) => r2(centreRows.reduce((s, c) => s + c[k], 0));
-  // do-and-charge invoices on this job that can still be added to (item 64)
-  const { data: openInvoices } = await supabaseAdmin.from('invoices')
-    .select('id, invoice_number, sent_at, invoice_line_items(id)')
-    .eq('project_id', projectId).is('xero_invoice_id', null).is('paid_at', null).order('sent_at', { ascending: false });
-
   return {
     ok: true,
     data: {

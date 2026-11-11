@@ -4,10 +4,10 @@
 // without the scope in the query. Called by portal-read.js. Reads only.
 //
 //   portalOverview(admin, scope) -> { clients, needsYou, jobs, quotes, company }
-//   portalProject(admin, scope, projectId) -> the job page (with `work` on a do and charge job the
-//     email may see money on), or null when it is not theirs
 //   scopedProject(admin, scope, projectId) -> the project row (money true or false), or null when
-//     it is not theirs: the check before an open is logged against a job
+//     it is not theirs: the one check before a job is read or an open is logged against it
+//   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
+//     charge job the email may see money on)
 //
 // Money (invoices, hours, prices, purchase orders, the Schedule of Rates) only goes to an email on
 // the client record (scope.clients). A job contact (scope.contactJobIds) sees the job's progress,
@@ -17,9 +17,9 @@
 
 const { jobActuals } = require('./job-actuals');
 const { RULES } = require('./labour-bands');
-const { firstName, listNames, sydneyToday, jobRef: projectRef, fmtDay: dayText, fmtTime: clockText } = require('./schedule-emails');
-const { localDateKey: sydneyKey } = require('./compute-labour-cost');
-const { moneyText: money } = require('./invoice-events');
+const { firstName, listNames, sydneyToday, jobRef, fmtDay, fmtTime } = require('./schedule-emails');
+const { localDateKey } = require('./compute-labour-cost');
+const { moneyText } = require('./invoice-events');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
@@ -67,13 +67,13 @@ async function bookingsFor(admin, projectIds, { from } = {}) {
   const byKey = {};
   (data || []).forEach((a) => {
     const key = `${a.project_id}|${a.assignment_date}`;
-    const b = (byKey[key] ||= { projectId: a.project_id, dateKey: a.assignment_date, day: dayText(a.assignment_date), start: null, end: null, who: [] });
+    const b = (byKey[key] ||= { projectId: a.project_id, dateKey: a.assignment_date, day: fmtDay(a.assignment_date), start: null, end: null, who: [] });
     const n = firstName(a.profiles?.full_name);
     if (!b.who.includes(n)) b.who.push(n);
     if (a.start_time && (!b.start || a.start_time < b.start)) b.start = a.start_time;
     if (a.end_time && (!b.end || a.end_time > b.end)) b.end = a.end_time;
   });
-  return Object.values(byKey).map((b) => ({ ...b, start: clockText(b.start), end: clockText(b.end) }));
+  return Object.values(byKey).map((b) => ({ ...b, start: fmtTime(b.start), end: fmtTime(b.end) }));
 }
 
 // Who is clocked in on these jobs right now: clocked in today (Sydney); a clock-out forgotten
@@ -83,7 +83,7 @@ async function onSiteFor(admin, projectIds) {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await admin.from('time_entries').select('project_id, clock_in, profiles(full_name)').in('project_id', projectIds).is('clock_out', null).gte('clock_in', dayAgo).order('clock_in');
   const today = sydneyToday();
-  return (data || []).filter((e) => sydneyKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: firstName(e.profiles?.full_name), since: timeText(e.clock_in) }));
+  return (data || []).filter((e) => localDateKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: firstName(e.profiles?.full_name), since: timeText(e.clock_in) }));
 }
 
 // Invoices the client has been sent (made but not sent stay hidden), with a plain status word.
@@ -96,16 +96,14 @@ async function invoicesFor(admin, projectIds, { onlyOpen } = {}) {
   if (onlyOpen) q = q.is('paid_at', null);
   const { data } = await q;
   const today = sydneyToday();
-  const seen = new Set();
   return (data || [])
-    .filter((i) => !seen.has(i.id) && seen.add(i.id))
     .map((i) => {
       const balance = r2(i.balance_due);
       const paid = !!i.paid_at || balance <= 0;
       const status = paid ? 'paid' : (i.due_date && i.due_date < today) ? 'overdue' : 'awaiting';
       return {
         id: i.id, projectId: i.project_id, number: i.invoice_number, description: i.description || (i.is_deposit ? 'Deposit' : ''),
-        sent: i.sent_at ? dayText(sydneyKey(i.sent_at)) : '', due: i.due_date ? dayText(i.due_date) : '', dueKey: i.due_date || '',
+        sent: i.sent_at ? fmtDay(localDateKey(i.sent_at)) : '', due: i.due_date ? fmtDay(i.due_date) : '', dueKey: i.due_date || '',
         balance, status, label: INVOICE_LABELS[status],
         url: `/invoice.html?token=${i.invoice_token}`,
       };
@@ -145,7 +143,7 @@ function projectRow(p, ctx) {
   const onSite = ctx.onSite.filter((o) => o.projectId === p.id);
   const st = statusLine(p, { booking, onSite, invoices: ctx.invoices });
   return {
-    id: p.id, ref: projectRef(p), name: p.name, site: p.client_address || '', kind: p.job_number ? 'job' : 'quote',
+    id: p.id, ref: jobRef(p), name: p.name, site: p.client_address || '', kind: p.job_number ? 'job' : 'quote',
     status: st.text, tone: st.tone || '', open: st.open, money: p.money,
     quoteUrl: !p.job_number && p.sent_at && p.quote_token ? `/quote.html?token=${p.quote_token}` : null,
     needsYou: st.needsYou || null,
@@ -180,17 +178,15 @@ async function portalOverview(admin, scope) {
   rows.filter((r) => r.needsYou === 'Approve your quote').forEach((r) => needsYou.push({ text: `${r.ref} ${r.name}: your quote is waiting on you`, action: 'Open quote', url: r.quoteUrl, kind: 'opened_quote', projectId: r.id, detail: r.ref }));
   (variations.data || []).forEach((v) => needsYou.push({ text: `${refOf(v.project_id)}: variation ${v.variation_number || ''} to sign`.replace(/\s+/g, ' '), action: 'Open variation', url: `/quote.html?variation=${v.variation_token}`, kind: 'opened_variation', projectId: v.project_id, detail: `Variation ${v.variation_number || ''}`.trim() }));
   (offers.data || []).forEach((o) => needsYou.push({ text: `${refOf(o.project_id)}: pick a time that suits you`, action: 'Pick a time', url: `/pick-time.html?token=${o.token}` }));
-  invoices.filter((i) => i.status === 'overdue').forEach((i) => needsYou.push({ text: `${i.number} is overdue (${money(i.balance)})`, action: 'Pay online', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
-  invoices.filter((i) => i.status === 'awaiting').forEach((i) => needsYou.push({ text: `${i.number}: ${money(i.balance)} due ${i.due}`, action: 'View invoice', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
+  invoices.filter((i) => i.status === 'overdue').forEach((i) => needsYou.push({ text: `${i.number} is overdue (${moneyText(i.balance)})`, action: 'Pay online', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
+  invoices.filter((i) => i.status === 'awaiting').forEach((i) => needsYou.push({ text: `${i.number}: ${moneyText(i.balance)} due ${i.due}`, action: 'View invoice', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
   return {
     clients: scope.clients.map((c) => ({ id: c.id, name: c.name, main: c.main })),
     needsYou, jobs, quotes, company: comp,
   };
 }
 
-async function portalProject(admin, scope, projectId) {
-  const p = await scopedProject(admin, scope, projectId);
-  if (!p) return null;
+async function portalProject(admin, p) {
   const today = sydneyToday();
   const hasWork = p.money && p.proposal_template === 'direct_job' && !!p.job_number;
   const [allBookings, onSite, invoices, photos, docs, contacts, variations, comp, client, work] = await Promise.all([
@@ -207,31 +203,28 @@ async function portalProject(admin, scope, projectId) {
   ]);
   const bookings = allBookings.filter((b) => b.dateKey >= today);
   const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
-  const st = statusLine(p, { booking: bookings[0] || null, onSite, invoices });
   const manager = (contacts.data || []).find((c) => c.role === 'site_manager') || (contacts.data || []).find((c) => c.role === 'project_manager');
 
   // Documents: the ticked ones, plus what we have already sent them (the quote PDF once sent,
   // approved variations, the agreement letter). Signed links last an hour.
-  const files = (docs.data || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: dayText(sydneyKey(d.created_at)) }));
-  if (p.money && p.sent_at && p.quote_pdf_path) files.unshift({ path: p.quote_pdf_path, name: `${projectRef(p)} quote.pdf`, mime: 'application/pdf', when: dayText(sydneyKey(p.sent_at)) });
-  (variations.data || []).filter((v) => v.approval_status === 'approved' && v.pdf_path).forEach((v) => files.push({ path: v.pdf_path, name: `Variation ${v.variation_number || ''}.pdf`.replace(/\s+\./, '.'), mime: 'application/pdf', when: dayText(sydneyKey(v.created_at)) }));
+  const files = (docs.data || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: fmtDay(localDateKey(d.created_at)) }));
+  if (p.money && p.sent_at && p.quote_pdf_path) files.unshift({ path: p.quote_pdf_path, name: `${jobRef(p)} quote.pdf`, mime: 'application/pdf', when: fmtDay(localDateKey(p.sent_at)) });
+  (variations.data || []).filter((v) => v.approval_status === 'approved' && v.pdf_path).forEach((v) => files.push({ path: v.pdf_path, name: `Variation ${v.variation_number || ''}.pdf`.replace(/\s+\./, '.'), mime: 'application/pdf', when: fmtDay(localDateKey(v.created_at)) }));
   const cl = client.data;
   const agreementOn = !!(cl && cl.agreement_sent_at && !cl.agreement_withdrawn_at && cl.agreement_token);
-  if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: dayText(sydneyKey(cl.agreement_sent_at)) });
+  if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: fmtDay(localDateKey(cl.agreement_sent_at)) });
   const signed = files.length ? await admin.storage.from('project-documents').createSignedUrls(files.map((f) => f.path), 3600) : { data: [] };
   const urlByPath = {};
   (signed.data || []).forEach((s) => { if (s.signedUrl && !s.error) urlByPath[s.path] = s.signedUrl; });
   const documents = files.map((f) => ({ name: f.name, mime: f.mime, when: f.when, url: urlByPath[f.path] || null })).filter((f) => f.url);
 
   return {
-    id: p.id, ref: projectRef(p), name: p.name, site: p.client_address || '', kind: p.job_number ? 'job' : 'quote',
-    status: st.text, tone: st.tone || '', open: st.open, money: p.money,
+    ...projectRow(p, { bookings, onSite, invoices }),
     hasWork, work,
-    quoteUrl: !p.job_number && p.sent_at && p.quote_token ? `/quote.html?token=${p.quote_token}` : null,
     manager: manager ? firstName(manager.profiles?.full_name) : null,
     company: comp,
     bookings, pastBookings, onSite,
-    photos: (photos.data || []).map((ph) => ({ url: ph.url, caption: ph.caption || '', when: dayText(sydneyKey(ph.created_at)), video: isVideoUrl(ph.url) })),
+    photos: (photos.data || []).map((ph) => ({ url: ph.url, caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,
     variations: (variations.data || []).map((v) => ({ number: v.variation_number, description: v.description, status: v.approval_status === 'sent' ? 'To sign' : 'Signed', url: v.approval_status === 'sent' ? `/quote.html?variation=${v.variation_token}` : null })),
@@ -243,62 +236,69 @@ async function portalProject(admin, scope, projectId) {
 // Work so far on a do and charge job (p already checked: in scope, money, direct_job): labour per
 // clocked day at the Schedule of Rates, materials at the client's price, purchase orders with
 // their pickup state, and what is not yet invoiced.
+const WORK_RULES = { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours };
+const EMPTY_WORK = { labour: [], materials: [], purchaseOrders: [], labourOpen: 0, materialsOpen: 0, notInvoiced: 0, rules: WORK_RULES, agreement: null };
+
 async function portalWork(admin, p) {
   const [actuals, { data: pos }] = await Promise.all([
     jobActuals(admin, p.id, { includeBilled: true }),
     admin.from('purchase_orders').select('id, po_number, supplier_name, status, received, order_date, cost_centre_id, purchase_order_line_items(description, quantity, unit_cost, received, is_backordered, backorder_eta)').eq('project_id', p.id).neq('po_kind', 'tools').order('order_date', { ascending: false }),
   ]);
   if (!actuals.ok) {
-    console.error('portal work not read for', projectRef(p), actuals.error);
-    return { labour: [], materials: [], purchaseOrders: [], labourOpen: 0, materialsOpen: 0, notInvoiced: 0, note: 'The work so far is not ready to show yet. Call us if you need it today.', rules: { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours }, agreement: null };
+    console.error('portal work not read for', jobRef(p), actuals.error);
+    return { ...EMPTY_WORK, note: 'The work so far is not ready to show yet. Call us if you need it today.' };
   }
   const d = actuals.data;
   const bandLabel = (band) => band === 'standard' ? 'standard' : (RULES.bands[band]?.label || band);
   const bandOrder = Object.keys(RULES.bands);
-  const labour = [];
+  // each line priced at the Schedule of Rates; staffId and the first band's rate stay out of the row the client gets
+  const priced = [];
   d.centres.forEach((c) => c.labourLines.forEach((l) => {
     if (!l.billable && !l.invoiced) return;
     const parts = Object.entries(l.bands).filter(([, h]) => h > 0);
     const amount = parts.reduce((s, [band, h]) => s + h * l.rate * (RULES.bands[band]?.multiplier || 1), 0);
-    labour.push({
-      dateKey: l.dateKey, day: dayText(l.dateKey), who: firstName(l.staffName), staffId: l.staffId, start: l.start, end: l.end,
-      hours: r2(l.hours), bands: parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', '),
-      rate: r2(l.rate), amount: r2(amount), invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
+    priced.push({
+      staffId: l.staffId,
       // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
       firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
+      row: {
+        dateKey: l.dateKey, day: fmtDay(l.dateKey), who: firstName(l.staffName), start: l.start, end: l.end,
+        hours: r2(l.hours), bands: parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', '),
+        rate: r2(l.rate), amount: r2(amount), invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
+      },
     });
   }));
-  labour.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  priced.sort((a, b) => a.row.dateKey.localeCompare(b.row.dateKey));
   // The minimum per person per day (the panel's applyMinimum in js/project-invoice-actuals.js): a
   // short day not yet invoiced is rounded up on that person's first line of the day, at the rate
   // of that line's first band, so the figure here is the figure the invoice will carry.
   const min = Number(RULES.minimumHours) || 0;
   const byDay = new Map();
-  labour.filter((l) => !l.invoiced).forEach((l) => {
-    const k = `${l.staffId}|${l.dateKey}`;
-    if (!byDay.has(k)) byDay.set(k, { total: 0, first: l });
-    byDay.get(k).total += l.hours;
+  priced.filter((x) => !x.row.invoiced).forEach((x) => {
+    const k = `${x.staffId}|${x.row.dateKey}`;
+    if (!byDay.has(k)) byDay.set(k, { total: 0, first: x });
+    byDay.get(k).total += x.row.hours;
   });
   byDay.forEach(({ total, first }) => {
     if (min && total > 0 && total < min) {
-      first.amount = r2(first.amount + (min - total) * first.firstBandRate);
-      first.bands = `${first.bands || `${first.hours} h`} (min. ${min} hrs)`;
+      first.row.amount = r2(first.row.amount + (min - total) * first.firstBandRate);
+      first.row.bands = `${first.row.bands || `${first.row.hours} h`} (min. ${min} hrs)`;
     }
   });
-  labour.forEach((l) => { delete l.staffId; delete l.firstBandRate; });
+  const labour = priced.map((x) => x.row);
   const materials = [];
   d.centres.forEach((c) => c.materialLines.forEach((m) => {
     if (!m.billable && !m.invoiced) return;
-    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? dayText(sydneyKey(m.createdAt)) : '' });
+    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' });
   }));
   const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0]).markupPercent;
   const purchaseOrders = (pos || []).map((po) => {
     const m = 1 + markupOf(po.cost_centre_id) / 100;
-    const lines = (po.purchase_order_line_items || []).map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, amount: r2((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0) * m), received: !!l.received, backordered: !!l.is_backordered, eta: l.backorder_eta ? dayText(l.backorder_eta) : '' }));
+    const lines = (po.purchase_order_line_items || []).map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, amount: r2((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0) * m), received: !!l.received, backordered: !!l.is_backordered, eta: l.backorder_eta ? fmtDay(l.backorder_eta) : '' }));
     const allIn = lines.length ? lines.every((l) => l.received) : !!po.received;
     const someIn = lines.some((l) => l.received);
     return {
-      number: po.po_number, supplier: po.supplier_name, ordered: po.order_date ? dayText(po.order_date) : '',
+      number: po.po_number, supplier: po.supplier_name, ordered: po.order_date ? fmtDay(po.order_date) : '',
       state: allIn ? 'Picked up' : someIn ? 'Part picked up, rest to come' : lines.some((l) => l.backordered) ? 'Ordered, part on back order' : 'Ordered, waiting for pickup',
       total: r2(lines.reduce((s, l) => s + l.amount, 0)), lines,
     };
@@ -308,7 +308,7 @@ async function portalWork(admin, p) {
   return {
     labour, materials, purchaseOrders,
     labourOpen, materialsOpen, notInvoiced: r2(labourOpen + materialsOpen),
-    rules: { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours },
+    rules: WORK_RULES,
     agreement: d.rateCard.percentOff > 0 ? { name: d.rateCard.name, percentOff: d.rateCard.percentOff } : null,
   };
 }

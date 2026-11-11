@@ -11,6 +11,7 @@
 
 const S = require('./_shared/portal-session');
 const D = require('./_shared/portal-data');
+const { jobRef } = require('./_shared/schedule-emails');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPEN_KINDS = ['opened_quote', 'opened_invoice', 'opened_document', 'opened_variation', 'opened_rates'];
@@ -31,9 +32,9 @@ exports.handler = async (event) => {
     const projectId = String(body.projectId || '');
     if (!UUID.test(projectId)) return S.json(400, { ok: false, error: 'Which job?' });
     if (action === 'job') {
-      const job = await D.portalProject(admin, scope, projectId);
-      if (!job) return S.json(404, { ok: false, error: 'That job is not on your account.' });
-      await log('viewed_job', { projectId, detail: job.ref });
+      const p = await D.scopedProject(admin, scope, projectId);
+      if (!p) return S.json(404, { ok: false, error: 'That job is not on your account.' });
+      const [job] = await Promise.all([D.portalProject(admin, p), log('viewed_job', { projectId, detail: jobRef(p) })]);
       return S.json(200, { ok: true, email: scope.email, job });
     }
     if (action === 'event') {
