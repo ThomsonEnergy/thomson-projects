@@ -284,7 +284,7 @@
       if (params.get('job')) await showJob(params.get('job'));
       else await showOverview();
     } catch (err) {
-      if (err.message === 'login') return;
+      if (err.message === 'login' || err.message === 'password') return; // the login or password screen is already up
       main.innerHTML = `<a class="pl-back" href="/portal.html">&larr; All your jobs</a><div class="error-box">${esc(err.message)}</div>`;
     }
   }

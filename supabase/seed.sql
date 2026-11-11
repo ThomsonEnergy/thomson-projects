@@ -109,10 +109,15 @@ declare
   v_staff uuid;
   v_centre uuid;
   v_po uuid;
+  v_tier uuid;
 begin
   if exists (select 1 from public.portal_sessions where token_hash = 'e51e7c03e21d2eb2f63a5e62b72b2ddbebf453bc779fbbc674d5da52e44a42c9') then return; end if;
   select id into v_staff from public.profiles where role = 'staff' and active order by created_at limit 1;
   if v_staff is null then select id into v_staff from public.profiles where active order by created_at limit 1; end if;
+  -- the shift is priced at a Schedule of Rates tier (the first one, made if the branch has none)
+  select id into v_tier from public.billable_rate_tiers order by sort_order limit 1;
+  if v_tier is null then insert into public.billable_rate_tiers (name, sell_rate, sort_order) values ('Licensed Electrician', 107.27, 1) returning id into v_tier; end if;
+  update public.profiles set rate_tier_id = v_tier where id = v_staff and rate_tier_id is null;
   select id into v_centre from public.cost_centres where project_id = v_job order by sort_order limit 1;
   if v_centre is null then
     insert into public.cost_centres (project_id, name, sort_order, quoted_amount, invoiced_amount, estimated_labour_cost, estimated_material_cost, markup_percent)

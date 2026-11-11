@@ -144,8 +144,13 @@ exports.handler = async (event) => {
     // nothing new and every worker working: no push, the digest is still on the Ops page
     if (digest.push) await notifyManagers(admin, { kind: 'ops_digest', title: digest.title, body: digest.pushText.slice(0, 300), link: '/ops.html', dedupe: `ops_digest:${sydneyDate()}` });
     await admin.from('agent_runs').delete().lt('started_at', new Date(Date.now() - 90 * 86400000).toISOString());
-    // the client portal's usage log is kept 12 months (migration 20261201000000)
-    await admin.from('portal_events').delete().lt('created_at', new Date(Date.now() - 365 * 86400000).toISOString());
+    // the client portal: the usage log is kept 12 months (migration 20261201000000); codes and
+    // wrong tries 30 days (the limits look back an hour); a device's session 30 days past its end
+    const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+    await admin.from('portal_events').delete().lt('created_at', daysAgo(365));
+    await admin.from('portal_logins').delete().lt('created_at', daysAgo(30));
+    await admin.from('portal_sessions').delete().lt('expires_at', daysAgo(30));
+    await admin.from('portal_sessions').delete().lt('ended_at', daysAgo(30));
     return { summary: `${digest.title}. ${digest.text}`, details: digest, needsMe: digest.needCount };
   });
 };

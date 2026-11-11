@@ -11,7 +11,7 @@
     // photos: every tile holds an <img> or <video> with data-photo-id
     photo: { table: 'project_photos', noun: 'photo', tiles: (listEl, rows) => {
       const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
-      return [...listEl.querySelectorAll('[data-photo-id]')].map((media) => [media.parentElement, byId[media.dataset.photoId]]);
+      return [...listEl.querySelectorAll('img[data-photo-id], video[data-photo-id]')].map((media) => [media.parentElement, byId[media.dataset.photoId]]);
     } },
     // documents: every .doc-tile holds a .doc-view-link with the file path
     document: { table: 'project_documents', noun: 'document', tiles: (listEl, rows) => {

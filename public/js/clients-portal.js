@@ -19,6 +19,7 @@ const portalWhenText = (iso) => new Date(iso).toLocaleString('en-AU', { day: 'nu
 // portal-invite.js with the staff member's token: { ok, sent, message } or { ok: false, error }
 async function portalInvite(email, resend) {
   const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) throw new Error('Your login has run out. Log in again and try once more.');
   const res = await fetch('/.netlify/functions/portal-invite', {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
     body: JSON.stringify({ email, resend: !!resend }),
