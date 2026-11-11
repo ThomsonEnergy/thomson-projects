@@ -82,6 +82,16 @@ Build on the existing feeds:
 
 Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Wholesale-price plans are not estimated (the app says so); a proper wholesale estimate is backlogged as item 35. Detail in `docs/IDEAS_BACKLOG.md` item 34.
 
+## Picture tagger (built 11 Nov 2026, backlog item 73b, on `staging`)
+
+Reads every picture added to a job and tags it with what is in it: the brands it can see, what it shows (inverter, battery, solar panels, switchboard and so on, from a fixed list), models read off a label, and the kind of picture (finished install, in progress, before, damage, label, paperwork, site). It also writes one plain caption and marks a picture fine to show another customer only when it is a finished install with no people and nothing identifying in it (the code checks the model's own flags, it does not take the model's word alone).
+
+- **Code:** prompt `agents/prompts/photo-tagger.js`; the reader `netlify/functions/_shared/photo-tagger.js`; `tag-photos-background.js` (a job's new pictures, started by the browser after an upload, any active user) and `tag-photos.js` (admin, one picture a call, the dry run and the backlog from Settings). Model: the app's standard (Claude Sonnet 5.5, low effort), the picture given at 1,024 px on its long side. The job's Pylon equipment is given as a hint only.
+- **Starts read only:** `company_settings.photo_tagging_on` is off until the owner has run "Try it on 50 pictures" (Settings > Company Details > Picture tags), which lists the tags and the cost and saves nothing, and then switched it on. Off, nothing is tagged or saved. A picture is read once; a person can add or take off a tag by hand afterwards.
+- **Reports to the ops manager** as `photo-tagger` (runs, tokens, a failure alert), like the other on-request workers.
+- **Eval set:** `agents/evals/photo-tagger/` (10 code checks that run anywhere, 4 picture cases that need the API key). Add a case whenever it gets a real picture wrong.
+- **Writes:** `project_photos.tags`, `ai_caption`, `ok_for_proposals`, `tagged_at`, `tag_note` only.
+
 ## Proposed 27 Oct 2026: one brain, many workers (waiting on the owner's yes, backlog item 37)
 
 ### How it works today (from the code, 27 Oct 2026)
