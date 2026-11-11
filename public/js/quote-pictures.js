@@ -6,20 +6,23 @@
 // on their Photos page (quote.html).
 //
 // Who calls it: project.html, when the Quote tab is built, as mountQuotePictures({ el, project,
-// onSaved }). Writes projects.reference_photos ([{ url, caption }]; an older quote's pictures have
-// no caption and stay as they are) every time something changes: there is no Save to press.
-// Reads project_photos for "From this job's pictures". Uploads go through uploadPhotos(), which
-// compresses them.
+// onSettled }). Writes projects.reference_photos ([{ url, caption }]; an older quote's pictures
+// have no caption and stay as they are) every time something changes: there is no Save to press.
+// onSettled runs once, a few seconds after the last change has saved (the page remakes the PDF
+// then). Reads project_photos and the quote's site inspection answers for "From this job's
+// pictures"; a picked picture is copied, so deleting it from Site Photos later never empties the
+// proposal. Uploads go through uploadPhotos(), which compresses them.
 
 const QUOTE_PICTURE_CAPTIONS = ['Your site', 'Similar system', 'Indicative picture'];
 
-function mountQuotePictures({ el, project, onSaved }) {
+function mountQuotePictures({ el, project, onSettled }) {
   if (!el) return;
   // older rows are a bare link or { url }: both read as a picture with no caption
   let list = (project.reference_photos || []).map(p => (typeof p === 'string' ? { url: p } : p)).filter(p => p && p.url)
     .map(p => ({ url: p.url, caption: String(p.caption || '') }));
   let queue = Promise.resolve();
-  let typing = null;
+  let typing = null, settle = null, inFlight = 0;
+  const rowsNow = () => list.map(p => (p.caption.trim() ? { url: p.url, caption: p.caption.trim() } : { url: p.url }));
 
   el.innerHTML = `
     <label style="margin-top:14px; font-weight:600;">Pictures of your system</label>
@@ -33,24 +36,31 @@ function mountQuotePictures({ el, project, onSaved }) {
     <div class="qp-state" style="font-size:12px; min-height:18px; margin-top:6px;"></div>`;
   const listEl = el.querySelector('.qp-list');
   const stateEl = el.querySelector('.qp-state');
+  const say = (text, bad) => { stateEl.innerHTML = `<span ${bad ? 'style="color:var(--red);"' : 'class="subtitle"'}>${escapeHtml(text)}</span>`; };
 
-  // Writes the whole list, one save after another so the last change always lands last.
+  // Writes the whole list, one save after another so the last change always lands last. The page's
+  // copy of the quote is brought up to date straight away, so a redraw of the tab shows it too.
   function save() {
-    clearTimeout(typing);
-    const rows = list.map(p => (p.caption.trim() ? { url: p.url, caption: p.caption.trim() } : { url: p.url }));
-    stateEl.innerHTML = '<span class="subtitle">Saving...</span>';
+    clearTimeout(typing); typing = null;
+    clearTimeout(settle);
+    const rows = rowsNow();
+    project.reference_photos = rows;
+    say('Saving...');
+    inFlight++;
     queue = queue.then(async () => {
       const { error } = await supabaseClient.from('projects').update({ reference_photos: rows }).eq('id', project.id);
       if (error) throw error;
-      project.reference_photos = rows;
-      stateEl.innerHTML = '<span class="subtitle">Saved.</span>';
-      if (onSaved) onSaved(rows);
+      say('Saved.');
+      // once things go quiet (the PDF is remade once, not on every tap)
+      if (onSettled) settle = setTimeout(() => onSettled(rows), 4000);
     }).catch((err) => {
       stateEl.innerHTML = `<span style="color:var(--red);">Not saved: ${escapeHtml(friendlyError(err))}</span> <button type="button" class="link-quiet qp-retry" style="background:none; border:none; padding:0; cursor:pointer;">Try again</button>`;
       stateEl.querySelector('.qp-retry').addEventListener('click', save);
-    });
+    }).finally(() => { inFlight--; });
     return queue;
   }
+  // leaving with a caption still being typed or a save on its way asks first
+  window.addEventListener('beforeunload', (e) => { if (typing || inFlight) { e.preventDefault(); e.returnValue = ''; } });
 
   function render() {
     listEl.innerHTML = list.length ? list.map((p, i) => `
@@ -67,15 +77,19 @@ function mountQuotePictures({ el, project, onSaved }) {
       </div>`).join('') : '<p class="subtitle" style="margin:0; font-size:12.5px;">No pictures on this quote yet.</p>';
     listEl.querySelectorAll('.qp-row').forEach(row => {
       const i = Number(row.dataset.i);
+      const input = row.querySelector('.qp-caption');
       row.querySelector('.qp-thumb').addEventListener('click', () => openPhotoLightbox(list.map(p => p.url), i));
-      // typing a caption: the row is updated where it stands (a redraw would take the cursor away)
-      row.querySelector('.qp-caption').addEventListener('input', (e) => {
-        list[i].caption = e.target.value;
-        row.querySelector('.qp-none').style.display = e.target.value.trim() ? 'none' : '';
-        row.querySelectorAll('.qp-chip').forEach(b => b.classList.toggle('secondary', b.dataset.caption !== e.target.value));
+      // typing a caption: the row is updated where it stands (a redraw would take the cursor away),
+      // saved after a pause and at once when the box is left
+      input.addEventListener('input', () => {
+        list[i].caption = input.value;
+        project.reference_photos = rowsNow();
+        row.querySelector('.qp-none').style.display = input.value.trim() ? 'none' : '';
+        row.querySelectorAll('.qp-chip').forEach(b => b.classList.toggle('secondary', b.dataset.caption !== input.value));
         clearTimeout(typing);
         typing = setTimeout(save, 900);
       });
+      input.addEventListener('change', () => { if (typing) save(); });
       row.querySelectorAll('.qp-chip').forEach(b => b.addEventListener('click', () => { list[i].caption = b.dataset.caption; render(); save(); }));
       row.querySelector('.qp-remove').addEventListener('click', () => { list.splice(i, 1); render(); save(); });
     });
@@ -83,41 +97,70 @@ function mountQuotePictures({ el, project, onSaved }) {
 
   el.querySelectorAll('.qp-file').forEach(input => input.addEventListener('change', async () => {
     if (!input.files.length) return;
-    stateEl.innerHTML = `<span class="subtitle">Uploading ${input.files.length} picture${input.files.length === 1 ? '' : 's'}...</span>`;
+    say(`Uploading ${input.files.length} picture${input.files.length === 1 ? '' : 's'}...`);
     try {
       const urls = await uploadPhotos(input.files, 'reference');
       urls.forEach(url => list.push({ url, caption: input.dataset.caption }));
       render();
       save();
     } catch (err) {
-      stateEl.innerHTML = `<span style="color:var(--red);">${escapeHtml(friendlyError(err))}</span>`;
+      say(friendlyError(err), true);
     }
     input.value = '';
   }));
 
-  // The job's own Site Photos (taken on the site visit, say): tick the ones to show the client.
-  el.querySelector('.qp-pick').addEventListener('click', async () => {
-    const { data, error } = await supabaseClient.from('project_photos').select('url, caption, created_at').eq('project_id', project.id).order('created_at', { ascending: false }).limit(300);
-    if (error) { stateEl.innerHTML = `<span style="color:var(--red);">${escapeHtml(friendlyError(error))}</span>`; return; }
-    const have = new Set(list.map(p => p.url));
-    const photos = (data || []).filter(p => p.url && !isVideoUrl(p.url) && !have.has(p.url));
-    const overlay = openModal(`
-      <h2 style="margin-bottom:4px;">This job's pictures</h2>
-      <p class="subtitle" style="margin:0 0 10px;">${photos.length ? 'Tap the ones to show on the proposal. They go on captioned "Your site".' : 'No pictures on this job yet (or they are all on the proposal already). Add them on the Site Photos tab, or use the Add buttons.'}</p>
-      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px; max-height:55vh; overflow:auto;">
-        ${photos.map((p, i) => `<label style="margin:0; position:relative; cursor:pointer;"><input type="checkbox" class="qp-tick" data-i="${i}" style="position:absolute; top:6px; left:6px; width:18px; height:18px; margin:0;" /><img src="${escapeHtml(supaImageVariant(p.url, 200, 60))}" alt="${escapeHtml(p.caption || '')}" loading="lazy" style="width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; display:block;" /></label>`).join('')}
-      </div>
-      <div style="margin-top:12px; display:flex; gap:8px;">${photos.length ? '<button type="button" id="qp-add-picked">Add to the proposal</button>' : ''}<button type="button" class="secondary" id="qp-pick-close">Close</button></div>`, { maxWidth: 560, zIndex: 110 });
-    overlay.querySelector('#qp-pick-close').addEventListener('click', () => overlay.remove());
-    const add = overlay.querySelector('#qp-add-picked');
-    if (add) add.addEventListener('click', () => {
-      const picked = [...overlay.querySelectorAll('.qp-tick:checked')].map(c => photos[Number(c.dataset.i)]);
-      overlay.remove();
-      if (!picked.length) return;
-      picked.forEach(p => list.push({ url: p.url, caption: 'Your site' }));
-      render();
-      save();
-    });
+  // This job's own pictures (Site Photos and the site visit's checklist pictures): tick the ones
+  // to show the client. Each ticked picture is copied into the proposal's own folder.
+  const pickBtn = el.querySelector('.qp-pick');
+  pickBtn.addEventListener('click', async () => {
+    pickBtn.disabled = true;
+    try {
+      const LIMIT = 300;
+      const insp = typeof findLinkedSiteInspection === 'function' ? await findLinkedSiteInspection(project).catch(() => null) : null;
+      const [{ data, error }, { data: answers }] = await Promise.all([
+        supabaseClient.from('project_photos').select('url, caption, created_at').eq('project_id', project.id).order('created_at', { ascending: false }).limit(LIMIT),
+        insp ? supabaseClient.from('site_inspection_answers').select('photo_path, photo_paths').eq('inspection_id', insp.id) : Promise.resolve({ data: [] }),
+      ]);
+      if (error) throw error;
+      const visit = (answers || []).flatMap(a => (Array.isArray(a.photo_paths) && a.photo_paths.length ? a.photo_paths : (a.photo_path ? [a.photo_path] : [])));
+      const seen = new Set();
+      const photos = [...visit.map(url => ({ url, caption: 'Site visit' })), ...(data || [])]
+        .filter(p => p.url && !isVideoUrl(p.url) && !/\.pdf(\?|$)/i.test(p.url) && !seen.has(p.url) && seen.add(p.url));
+      const overlay = openModal(`
+        <h2 style="margin-bottom:4px;">This job's pictures</h2>
+        <p class="subtitle" style="margin:0 0 10px;">${photos.length ? `Tap the ones to show on the proposal. Each gets the caption "Your site".${(data || []).length >= LIMIT ? ` Showing the newest ${LIMIT}.` : ''}` : 'No pictures on this job yet. Add them on the Site Photos tab, or use the Add buttons.'}</p>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px; max-height:55vh; overflow:auto;">
+          ${photos.map((p, i) => `<label style="margin:0; position:relative; cursor:pointer;"><input type="checkbox" class="qp-tick" data-i="${i}" style="position:absolute; top:6px; left:6px; width:18px; height:18px; margin:0;" /><img src="${escapeHtml(supaImageVariant(p.url, 200, 60))}" alt="${escapeHtml(p.caption || '')}" loading="lazy" style="width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; display:block;" /></label>`).join('')}
+        </div>
+        <div id="qp-pick-msg" style="font-size:12px;"></div>
+        <div style="margin-top:12px; display:flex; gap:8px;">${photos.length ? '<button type="button" id="qp-add-picked">Add to the proposal</button>' : ''}<button type="button" class="secondary" id="qp-pick-close">Close</button></div>`, { maxWidth: 560, zIndex: 110 });
+      overlay.querySelector('#qp-pick-close').addEventListener('click', () => overlay.remove());
+      const add = overlay.querySelector('#qp-add-picked');
+      if (add) add.addEventListener('click', async () => {
+        const picked = [...overlay.querySelectorAll('.qp-tick:checked')].map(c => photos[Number(c.dataset.i)]);
+        if (!picked.length) { overlay.remove(); return; }
+        add.disabled = true; add.textContent = `Copying ${picked.length} picture${picked.length === 1 ? '' : 's'}...`;
+        try {
+          // its own copy, so the proposal keeps the picture whatever happens to the original
+          const files = await Promise.all(picked.map(async (p, n) => {
+            const res = await fetch(p.url);
+            if (!res.ok) throw new Error('A picture could not be read. Try again.');
+            const blob = await res.blob();
+            return new File([blob], `job-picture-${n + 1}.${(blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')}`, { type: blob.type || 'image/jpeg' });
+          }));
+          const urls = await uploadPhotos(files, 'reference');
+          urls.forEach(url => list.push({ url, caption: 'Your site' }));
+          overlay.remove();
+          render();
+          save();
+        } catch (err) {
+          overlay.querySelector('#qp-pick-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(err))}</div>`;
+          add.disabled = false; add.textContent = 'Add to the proposal';
+        }
+      });
+    } catch (err) {
+      say(friendlyError(err), true);
+    } finally { pickBtn.disabled = false; }
   });
 
   render();

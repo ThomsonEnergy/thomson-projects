@@ -871,7 +871,7 @@
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
-      loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data));
+      loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';

@@ -192,7 +192,7 @@
 
   .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
   .gallery img { width: 100%; height: 150px; object-fit: cover; display: block; }
-  /* pictures with a caption under each (Settings step 4, Pictures of your system): the whole picture shows, never a crop */
+  /* pictures with a caption under each (quote step 4, Pictures of your system): the whole picture shows, never a crop */
   .gallery.pics { grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }
   .gallery.pics figure { margin: 0; }
   .gallery.pics img { height: 230px; object-fit: contain; background: #f4f6fa; }
@@ -737,7 +737,7 @@
             ${introText ? `<p class="pg-lead">${esc(introText)}</p>` : ''}
             ${pylonSummary ? `<p class="pg-lead">${esc(pylonSummary)}</p>` : ''}
           </div>
-          <div class="band-photo"><img src="${introPhoto}" alt="" /></div>
+          <div class="band-photo"><img src="${esc(introPhoto)}" alt="" /></div>
           <div class="band-panel">
             ${slabsSvg('dark')}
             <div class="txt">

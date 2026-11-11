@@ -1785,7 +1785,7 @@
       return (srcDocs || []).length;
     }
 
-    // Supporting documents, Generate scope of works with AI, reference photos.
+    // Supporting documents and Generate scope of works with AI (the pictures are js/quote-pictures.js).
     function wireScopeTools(project) {
       document.getElementById('sow-doc-file').addEventListener('change', async () => {
         const fileInput = document.getElementById('sow-doc-file');
@@ -3805,8 +3805,9 @@
 
         // ----- step 4: scope of works -----
         renderEditSowDocList();
-        // Pictures of your system: its own file, saves itself, and the PDF is remade after a change
-        loadJsOnce('/js/quote-pictures.js?v=1', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSaved: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }));
+        // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
+        loadJsOnce('/js/quote-pictures.js?v=1', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+          .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
         document.getElementById('qs4-save').addEventListener('click', async () => {
