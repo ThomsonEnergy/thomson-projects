@@ -192,6 +192,11 @@
 
   .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
   .gallery img { width: 100%; height: 150px; object-fit: cover; display: block; }
+  /* pictures with a caption under each (quote step 4, Pictures of your system): the whole picture shows, never a crop */
+  .gallery.pics { grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }
+  .gallery.pics figure { margin: 0; }
+  .gallery.pics img { height: 230px; object-fit: contain; background: #f4f6fa; }
+  .gallery.pics figcaption { font-size: 12.5px; margin-top: 5px; }
 
   @media (max-width: 700px) {
     .pg { padding: 28px 22px 48px; min-height: 0; margin-bottom: 14px; box-shadow: none; }
@@ -214,6 +219,7 @@
     .invest-top { margin: 0 -22px 28px; padding: 28px 22px 30px; }
     .terms-cols { column-count: 1; font-size: 11px; }
     .gallery { grid-template-columns: repeat(2, 1fr); }
+    .gallery.pics { grid-template-columns: 1fr; }
     /* the three savings pictures one under the other, each wide enough to read */
     .roi-charts, .roi-charts:has(> :only-child) { grid-template-columns: 1fr; gap: 22px; }
     .roi-fig svg { max-width: 340px; }
@@ -356,7 +362,7 @@
       });
     }
 
-    // The cover page background (the black shed with the panels on it); a battery proposal gets the battery.
+    // The built-in title page pictures, used when Settings > Proposal pictures has none for the type.
     const COVER_PHOTO = '/img/showcase/shed-solar.jpg';
     const BATTERY_COVER_PHOTO = '/img/showcase/battery.jpg';
 
@@ -637,10 +643,13 @@
       const validText = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
       const validLine = (d, noun) => d ? `<p class="note-line" style="margin:10px 0 0;"><strong>This ${noun} is valid until ${esc(validText(d))}.</strong></p>` : '';
       const ownPhotos = (project.cover_photos || []).map(p => p.url || p).filter(Boolean);
-      const referencePhotos = (project.reference_photos || []).map(p => p.url || p);
       const depositPercent = Number(project.deposit_percent) || 0;
       const depositAmount = baseTotal * (depositPercent / 100);
       const esc = escapeHtml;
+      // Pictures of your system (quote step 4): { url, caption }; an older quote's have no caption
+      const pictures = (project.reference_photos || []).map(p => (typeof p === 'string' ? { url: p } : p)).filter(p => p && p.url);
+      const picturesHtml = pictures.length ? `<div class="gallery pics">${pictures.map(p => `<figure><img src="${esc(supaImageVariant(p.url, 800, 72))}" alt="" />${p.caption ? `<figcaption>${esc(p.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : '';
+      const onSystemPage = (template === 'solar' || template === 'battery') && !vInfo; // else they print on the Photos page
 
       const docLabel = vInfo ? 'Variation' : ({ quick_estimate: 'Estimate', service_work: 'Service quote' }[template] || 'Proposal');
       const qNum = project.quote_number ? `Q${project.quote_number}` : '';
@@ -655,8 +664,8 @@
 
       // Photo mix for this quote: the job's own photos first, then showcase.
       const showcaseMix = seededShuffle(SHOWCASE_PHOTOS, token);
-      // The intro page photo is always a showcase one (the job's own photos already feature elsewhere).
-      const introPhoto = supaImageVariant(showcaseMix[0], 1300, 72);
+      // The About picture: the one from Settings > Proposal pictures, else a showcase one.
+      const introPhoto = supaImageVariant(s.about_photo_url || showcaseMix[0], 1300, 72);
       const scopePool = ownPhotos.concat(showcaseMix.slice(1));
       const photo = (i, w) => supaImageVariant(scopePool[i % scopePool.length], w || 1100, 72);
 
@@ -694,7 +703,7 @@
       // 1. Cover
       const coverHtml = `
         <section class="pg dark cover fixed">
-          <img class="cover-photo" src="${template === 'battery' ? BATTERY_COVER_PHOTO : COVER_PHOTO}" alt="" />
+          <img class="cover-photo" src="${esc(supaImageVariant((s.proposal_cover_photos || {})[template], 1600, 75) || (template === 'battery' ? BATTERY_COVER_PHOTO : COVER_PHOTO))}" alt="" />
           <div class="cover-scrim"></div>
           ${slabsSvg('cover')}
           ${darkHeadHtml('logo-cover')}
@@ -728,7 +737,7 @@
             ${introText ? `<p class="pg-lead">${esc(introText)}</p>` : ''}
             ${pylonSummary ? `<p class="pg-lead">${esc(pylonSummary)}</p>` : ''}
           </div>
-          <div class="band-photo"><img src="${introPhoto}" alt="" /></div>
+          <div class="band-photo"><img src="${esc(introPhoto)}" alt="" /></div>
           <div class="band-panel">
             ${slabsSvg('dark')}
             <div class="txt">
@@ -772,7 +781,7 @@
         ...(pd.storage_types || []).map(m => ({ kind: 'Battery', item: m })),
       ].filter(r => r.item && r.item.description);
       const hasBatteryGear = (pd.storage_types || []).some(m => m && m.description);
-      const systemHtml = ((template === 'solar' || template === 'battery') && (equipmentRows.length || designHtml) && !vInfo) ? `
+      const systemHtml = (onSystemPage && (equipmentRows.length || designHtml || picturesHtml)) ? `
         <section class="pg">
           ${slabsSvg('light')}
           ${headHtml}
@@ -780,10 +789,11 @@
             <h1 class="pg-title">Your<br>system</h1>
             ${pd.summary && pd.summary.dc_output_kw ? `<p class="pg-lead">${esc(String(pd.summary.dc_output_kw))} kW of solar as designed in Pylon.</p>` : ''}
             ${equipmentRows.length ? `
-            <table>
+            <table class="split">
               <thead><tr><th>Item</th><th>Equipment</th><th class="num">Qty</th></tr></thead>
               <tbody>${equipmentRows.map(r => `<tr><td>${esc(r.kind)}</td><td>${esc(r.item.description)}</td><td class="num">${esc(String(r.item.quantity || 1))}</td></tr>`).join('')}</tbody>
             </table>` : ''}
+            ${picturesHtml}
             ${designHtml}
             ${hasBatteryGear ? `
             <div class="sec-title" style="margin-top:22px;">About the battery</div>
@@ -975,9 +985,7 @@
         ${c.photo_groups.map(g => `
           <p class="note-line" style="margin:0 0 6px;">${esc(g.description || '')}</p>
           <div class="gallery">${(g.photos || []).map(p => `<img src="${supaImageVariant(p.url || p, 500, 70)}" alt="" />`).join('')}</div>`).join('')}`).join('') : '';
-      const referenceHtml = referencePhotos.length ? `
-        <div class="sec-title" style="margin-top:0;">What it will look like</div>
-        <div class="gallery">${referencePhotos.map(url => `<img src="${supaImageVariant(url, 500, 70)}" alt="" />`).join('')}</div>` : '';
+      const referenceHtml = picturesHtml && !onSystemPage ? `<div class="sec-title" style="margin-top:0;">What it will look like</div>${picturesHtml}` : '';
       const photosPageHtml = (referenceHtml || stagePhotosHtml) ? `
         <section class="pg">
           ${slabsSvg('light')}

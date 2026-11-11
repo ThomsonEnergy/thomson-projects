@@ -82,6 +82,8 @@
             <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Used when you tick "Ask for a review" in a client email. In Google Business Profile choose "Ask for reviews" and copy the link.</p>
           </div>
 
+          <div class="card" id="proposal-pictures-card"></div>
+
           <div class="card">
             <h2>Company details</h2>
             <p class="subtitle" style="margin-bottom:10px;">Shown on the proposal cover page.</p>
@@ -869,6 +871,7 @@
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
+      loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';

@@ -351,7 +351,6 @@
     let companySettings = {};
     let selectedClientId = null;
     let sitePicker = null; // attached when the quote edit form is on screen
-    let referencePhotos = [];
     let sowDocs = [];
     let billDocs = []; // the electricity bill pages filed on the quote (step 1), see wireBillCard
     let currentTemplate = 'new_build';
@@ -1786,7 +1785,7 @@
       return (srcDocs || []).length;
     }
 
-    // Supporting documents, Generate scope of works with AI, reference photos.
+    // Supporting documents and Generate scope of works with AI (the pictures are js/quote-pictures.js).
     function wireScopeTools(project) {
       document.getElementById('sow-doc-file').addEventListener('change', async () => {
         const fileInput = document.getElementById('sow-doc-file');
@@ -1868,20 +1867,6 @@
           btn.disabled = false;
           btn.textContent = 'Generate scope of works with AI';
         }
-      });
-
-      document.getElementById('reference-file').addEventListener('change', async () => {
-        const fileInput = document.getElementById('reference-file');
-        const msg = document.getElementById('reference-msg');
-        if (!fileInput.files.length) return;
-        msg.innerHTML = `<p class="subtitle">Uploading...</p>`;
-        try {
-          const urls = await uploadPhotos(fileInput.files, 'reference');
-          referencePhotos.push(...urls);
-          renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
-          fileInput.value = '';
-          msg.innerHTML = '';
-        } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
       });
 
     }
@@ -3420,11 +3405,7 @@
                 <textarea id="p-sow" style="min-height:240px;" placeholder="Paste your scope of works here, or generate it above...">${escapeHtml(project.sow_text || '')}</textarea>
 
 
-                <label style="margin-top:14px; font-weight:600;">What it will look like</label>
-                <p class="subtitle" style="margin:2px 0 6px;">Reference photos, renders, or similar completed jobs.</p>
-                <div id="reference-thumbs" style="margin-bottom:10px;"></div>
-                <input type="file" id="reference-file" accept="image/*" multiple />
-                <div id="reference-msg"></div>
+                <div id="quote-pictures"></div>
 
                 <label style="margin-top:14px; font-weight:600;">Terms and conditions</label>
                 <textarea id="p-terms" style="min-height:140px;">${escapeHtml(project.terms_text || '')}</textarea>
@@ -3569,7 +3550,6 @@
         lastPylonData = project.pylon_data || null;
         pylonKw = project.pylon_data?.summary?.dc_output_kw || null;
         sowDocs = (project.sow_documents || []).slice();
-        referencePhotos = (project.reference_photos || []).map(p => p.url || p);
         const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
         const refreshBar = () => { const bar = document.getElementById('quote-steps-bar'); if (bar) bar.innerHTML = quoteStepsBarHtml(project, project.cost_centres || []); };
         const say = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
@@ -3825,7 +3805,9 @@
 
         // ----- step 4: scope of works -----
         renderEditSowDocList();
-        renderPhotoThumbs(document.getElementById('reference-thumbs'), referencePhotos);
+        // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
+        loadJsOnce('/js/quote-pictures.js?v=1', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+          .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
         document.getElementById('qs4-save').addEventListener('click', async () => {
@@ -3836,7 +3818,6 @@
               sow_text: document.getElementById('p-sow').value,
               sow_brief: document.getElementById('p-brief').value.trim(),
               terms_text: document.getElementById('p-terms').value,
-              reference_photos: referencePhotos.map(url => ({ url })),
               sow_documents: sowDocs,
             };
             const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);

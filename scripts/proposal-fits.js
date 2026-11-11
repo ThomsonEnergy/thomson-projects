@@ -7,6 +7,8 @@
 //   node scripts/proposal-fits.js --out smoke/proposal (also saves a picture of every page)
 //   node scripts/proposal-fits.js --fixture path.json  (another quote, the shape get_quote_by_token returns)
 //   node scripts/proposal-fits.js --root ../other/public (another copy of the site, for a before picture)
+//   node scripts/proposal-fits.js --settings path.json (company settings laid over the made-up ones, e.g. the
+//                                                     proposal pictures get_public_company_settings returns)
 //
 // Playwright is pre-installed in cloud sessions (as for scripts/smoke.js). Nothing is written anywhere
 // but --out. The fixture holds no real client: scripts/fixtures/proposal-solar-battery.json.
@@ -19,7 +21,8 @@ const opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i 
 const root = path.resolve(opt('root', path.join(__dirname, '..', 'public')));
 const fixture = JSON.parse(fs.readFileSync(path.resolve(opt('fixture', path.join(__dirname, 'fixtures', 'proposal-solar-battery.json'))), 'utf8'));
 const out = opt('out', '') ? path.resolve(opt('out', '')) : null;
-const settings = { company_name: 'Thomson Energy', logo_url: null, abn: '00 000 000 000', phone: '0400 000 000', address: '1 Fixture Way, Testville NSW 2000', licenses: 'Fixture licence' };
+const settings = { company_name: 'Thomson Energy', logo_url: null, abn: '00 000 000 000', phone: '0400 000 000', address: '1 Fixture Way, Testville NSW 2000', licenses: 'Fixture licence',
+  ...(opt('settings', '') ? JSON.parse(fs.readFileSync(path.resolve(opt('settings', '')), 'utf8')) : {}) };
 const TYPES = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const VIEWS = [
   { name: 'sheets', viewport: { width: 1000, height: 1200 }, query: '&print=1' }, // what the PDF is made from
