@@ -90,7 +90,9 @@ Reads every picture added to a job and tags it with what is in it: the brands it
 - **Starts read only:** `company_settings.photo_tagging_on` is off until the owner has run "Try it on 50 pictures" (Settings > Company Details > Picture tags), which lists the tags and the cost and saves nothing, and then switched it on. Off, nothing is tagged or saved. A picture is read once; a person can add or take off a tag by hand afterwards.
 - **Reports to the ops manager** as `photo-tagger` (runs, tokens, a failure alert), like the other on-request workers.
 - **Eval set:** `agents/evals/photo-tagger/` (10 code checks that run anywhere, 4 picture cases that need the API key). Add a case whenever it gets a real picture wrong.
-- **Writes:** `project_photos.tags`, `ai_caption`, `ok_for_proposals`, `tagged_at`, `tag_note` only.
+- **Failures:** a read that fails is tried again, up to 3 times, then given up with the reason on the picture; a run where every read fails is reported as failed. A picture is claimed before it is read, so two runs never read (and pay for) the same one. Only pictures in the app's own storage are ever sent to the model.
+- **Other customers:** the tagger only suggests `ok_for_proposals`. A person sees the whole picture before it goes on another customer's proposal and can rule it out for good.
+- **Writes:** `project_photos.tags`, `ai_caption`, `ok_for_proposals`, `tagged_at`, `tag_note`, `tag_tries`, `tag_claimed_at` only.
 
 ## Proposed 27 Oct 2026: one brain, many workers (waiting on the owner's yes, backlog item 37)
 

@@ -11,6 +11,10 @@
 
 // The search typed on the Site Photos tab (kept while the tab is redrawn).
 let sitePhotoQuery = '';
+let photoQueryFromUrlUsed = false; // ?photo_q= fills the box once, not on every redraw
+
+// a text button that reads on every theme (a bare button takes the theme's button colours)
+const PHOTO_LINK_STYLE = 'background:none; border:none; padding:0; min-height:0; color:var(--link); cursor:pointer;';
 
 const photoTagWords = (q) => String(q || '').toLowerCase().replace(/[^a-z0-9. -]/g, ' ').split(/\s+/).filter(Boolean);
 
@@ -30,7 +34,7 @@ function photoTagsLineHtml(photo) {
   return `<div class="photo-tags" style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
     ${shown.map(t => `<span style="font-size:10.5px; padding:1px 6px; border:1px solid var(--border); border-radius:10px; color:var(--text);">${escapeHtml(t)}</span>`).join('')}
     ${tags.length > shown.length ? `<span style="font-size:10.5px;">+${tags.length - shown.length}</span>` : ''}
-    <button type="button" class="link-quiet photo-tags-edit" data-photo-id="${escapeHtml(photo.id)}" style="background:none; border:none; padding:0; font-size:10.5px; cursor:pointer;">${tags.length ? 'Edit' : 'Add tags'}</button>
+    <button type="button" class="link-quiet photo-tags-edit" data-photo-id="${escapeHtml(photo.id)}" style="${PHOTO_LINK_STYLE} font-size:10.5px;">${tags.length ? 'Edit' : 'Add tags'}</button>
   </div>`;
 }
 
@@ -39,7 +43,7 @@ function photoTagsLineHtml(photo) {
 function mountSitePhotoSearch({ el, initial, onChange }) {
   if (!el || el.dataset.mounted) return;
   el.dataset.mounted = '1';
-  if (initial) sitePhotoQuery = initial;
+  if (initial && !photoQueryFromUrlUsed) { sitePhotoQuery = initial; photoQueryFromUrlUsed = true; }
   el.innerHTML = `<input type="search" id="site-photo-q" placeholder="Search these pictures: Sigenergy, switchboard, before..." autocomplete="off" value="${escapeHtml(sitePhotoQuery)}" style="margin:12px 0 0;" />`;
   let timer = null;
   el.querySelector('#site-photo-q').addEventListener('input', (e) => {
@@ -60,13 +64,15 @@ function wireSitePhotoTags(redraw) {
   listEl.addEventListener('click', async (e) => {
     const btn = e.target.closest('.photo-tags-edit');
     if (!btn) return;
-    const { data, error } = await supabaseClient.from('project_photos').select('id, tags').eq('id', btn.dataset.photoId).single();
+    const { data, error } = await supabaseClient.from('project_photos').select('id, tags, ok_for_proposals').eq('id', btn.dataset.photoId).single();
     if (error) { showToast(friendlyError(error)); return; }
     openPhotoTagEditor({ photo: data, onSaved: redraw });
   });
 }
 
-// Add or take off a picture's tags by hand. photo: { id, tags, url }. onSaved(tags) after the save.
+// Add or take off a picture's tags by hand, and say whether it may be shown to other customers
+// (the tagger only suggests that: a person has the last word). photo: { id, tags,
+// ok_for_proposals }. onSaved(tags) after the save.
 function openPhotoTagEditor({ photo, onSaved }) {
   let tags = (photo.tags || []).slice();
   const overlay = openModal(`
@@ -74,11 +80,12 @@ function openPhotoTagEditor({ photo, onSaved }) {
       <p class="subtitle" style="margin:0 0 10px;">Pictures are found by their tags. Take off one that is wrong, or add your own (a brand, what it shows, a model).</p>
       <div id="pt-chips" style="display:flex; gap:6px; flex-wrap:wrap; min-height:28px;"></div>
       <div style="display:flex; gap:8px; margin-top:10px;"><input type="text" id="pt-new" maxlength="40" placeholder="Add a tag" style="margin:0;" /><button type="button" class="secondary" id="pt-add">Add</button></div>
+      <label style="display:flex; align-items:center; gap:8px; margin:12px 0 0; font-weight:400;"><input type="checkbox" id="pt-ok" style="width:auto; margin:0;" ${photo.ok_for_proposals ? 'checked' : ''} /> Fine to show other customers on a proposal (a finished job, nobody and nothing identifying in it)</label>
       <div style="margin-top:14px; display:flex; gap:8px;"><button type="button" id="pt-save">Save</button><button type="button" class="secondary" id="pt-cancel">Cancel</button></div>
       <div id="pt-msg"></div>`, { maxWidth: 440, zIndex: 120 });
   const chips = overlay.querySelector('#pt-chips');
   const draw = () => {
-    chips.innerHTML = tags.length ? tags.map((t, i) => `<span style="font-size:12.5px; padding:3px 8px; border:1px solid var(--border); border-radius:12px;">${escapeHtml(t)} <button type="button" class="link-quiet pt-x" data-i="${i}" title="Take off" style="background:none; border:none; padding:0 0 0 4px; cursor:pointer;">&times;</button></span>`).join('') : '<span class="subtitle" style="font-size:12.5px;">No tags yet.</span>';
+    chips.innerHTML = tags.length ? tags.map((t, i) => `<span style="font-size:12.5px; padding:3px 8px; border:1px solid var(--border); border-radius:12px;">${escapeHtml(t)} <button type="button" class="link-quiet pt-x" data-i="${i}" title="Take off" style="${PHOTO_LINK_STYLE} padding-left:4px;">&times;</button></span>`).join('') : '<span class="subtitle" style="font-size:12.5px;">No tags yet.</span>';
     chips.querySelectorAll('.pt-x').forEach(b => b.addEventListener('click', () => { tags.splice(Number(b.dataset.i), 1); draw(); }));
   };
   const add = () => {
@@ -95,7 +102,7 @@ function openPhotoTagEditor({ photo, onSaved }) {
     add(); // a tag typed but not yet added still counts
     const btn = overlay.querySelector('#pt-save');
     btn.disabled = true;
-    const { error } = await supabaseClient.from('project_photos').update({ tags }).eq('id', photo.id);
+    const { error } = await supabaseClient.from('project_photos').update({ tags, ok_for_proposals: overlay.querySelector('#pt-ok').checked }).eq('id', photo.id);
     if (error) {
       overlay.querySelector('#pt-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(error))}</div>`;
       btn.disabled = false;
@@ -108,26 +115,28 @@ function openPhotoTagEditor({ photo, onSaved }) {
   draw();
 }
 
-// The brands on a quote, as tags to look for: the first word of each Pylon model ("Sigenergy
-// SigenStor BAT 10.0" gives sigenergy), plus any known brand named in the stage lines.
-const PHOTO_BRANDS = ['sigenergy', 'fronius', 'sungrow', 'victron', 'winaico', 'tesla', 'enphase', 'solaredge', 'goodwe', 'byd', 'alpha ess', 'trina', 'jinko', 'longi', 'rec', 'sma', 'growatt', 'redback', 'selectronic', 'pylontech', 'zappi', 'clipsal', 'hager', 'nhp'];
+// The brands on a quote, as tags to look for: every known brand named in the Pylon models or the
+// stage lines. Only names on this list are ever searched for (a model's first word can be "2x").
+const PHOTO_BRANDS = ['sigenergy', 'fronius', 'sungrow', 'victron', 'winaico', 'tesla', 'enphase', 'solaredge', 'goodwe', 'byd', 'alpha ess', 'trina', 'jinko', 'longi', 'rec', 'sma', 'growatt', 'redback', 'selectronic', 'pylontech', 'canadian solar', 'ja solar', 'q cells', 'zappi', 'clipsal', 'hager', 'nhp'];
 function quoteBrands(project) {
   const pd = project.pylon_data || {};
-  const fromPylon = [...(pd.module_types || []), ...(pd.inverter_types || []), ...(pd.storage_types || [])]
-    .map(m => String((m && m.description) || '').trim().split(/\s+/)[0].toLowerCase()).filter(w => w.length > 2);
-  const lines = (project.cost_centres || []).flatMap(c => (c.cost_centre_line_items || []).map(li => `${li.description || ''} ${li.prebuild_client_description || ''}`)).join(' ').toLowerCase();
-  const fromLines = PHOTO_BRANDS.filter(b => new RegExp(`\\b${b}\\b`).test(lines));
-  return [...new Set([...fromPylon, ...fromLines])];
+  const text = [
+    ...[...(pd.module_types || []), ...(pd.inverter_types || []), ...(pd.storage_types || [])].map(m => (m && m.description) || ''),
+    ...(project.cost_centres || []).flatMap(c => (c.cost_centre_line_items || []).map(li => `${li.description || ''} ${li.prebuild_client_description || ''}`)),
+  ].join(' ').toLowerCase();
+  return PHOTO_BRANDS.filter(b => new RegExp(`\\b${b}\\b`).test(text));
 }
 
-// Recent finished installs on other jobs that carry any of these brand tags and are fine to show
-// another customer, newest first.
+// Recent finished installs to offer on a quote: pictures on other jobs (a job number, so the work
+// was won and done by us: never a customer's own picture on a quote or a lead), taken after that
+// job was approved, carrying one of these brand tags and marked fine for other customers. Newest
+// first.
 async function recentInstallPhotos({ brands, excludeProjectId, limit = 12 }) {
   if (!brands || !brands.length) return [];
-  let q = supabaseClient.from('project_photos').select('id, url, tags, ai_caption, project_id, created_at')
-    .eq('ok_for_proposals', true).overlaps('tags', brands).order('created_at', { ascending: false }).limit(limit);
+  let q = supabaseClient.from('project_photos').select('id, url, tags, ai_caption, project_id, created_at, projects!inner(job_number, approved_at)')
+    .eq('ok_for_proposals', true).overlaps('tags', brands).not('projects.job_number', 'is', null).order('created_at', { ascending: false }).limit(limit * 2);
   if (excludeProjectId) q = q.neq('project_id', excludeProjectId);
   const { data, error } = await q;
   if (error) return []; // before the tags exist (migration 20261130100000) there is nothing to offer
-  return data || [];
+  return (data || []).filter(p => !p.projects.approved_at || p.created_at >= p.projects.approved_at).slice(0, limit);
 }

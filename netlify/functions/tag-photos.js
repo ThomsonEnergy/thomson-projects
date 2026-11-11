@@ -5,12 +5,13 @@
 // { ok, result: { id, url, tags, caption, ok_for_proposals, unreadable, error }, usage }.
 // save false is the dry run: nothing is written. save true writes project_photos (tags,
 // ai_caption, ok_for_proposals, tagged_at, tag_note), only once tagging has been switched on
-// (company_settings.photo_tagging_on), and only for a picture not read before. One picture a call
+// (company_settings.photo_tagging_on), and only for a picture not read before and not being read
+// by another run. A read that fails is tried again later, up to 3 times. One picture a call
 // keeps it inside the function's time limit; the page works through its list a few at a time.
 // New uploads are tagged by tag-photos-background.js, not here.
 
 const { requireAdmin } = require('./_shared/require-admin');
-const { tagPhotos } = require('./_shared/photo-tagger');
+const { tagPhotos, claimPhotos } = require('./_shared/photo-tagger');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 
@@ -27,10 +28,12 @@ exports.handler = async (event) => {
       const { data: settings } = await admin.from('company_settings').select('photo_tagging_on').eq('id', 1).maybeSingle();
       if (!settings || !settings.photo_tagging_on) return json(400, { ok: false, error: 'Picture tagging is switched off. Switch it on first.' });
     }
-    const { data: photo, error } = await admin.from('project_photos').select('id, url, project_id, tagged_at').eq('id', body.photo_id).maybeSingle();
+    const { data: row, error } = await admin.from('project_photos').select('id, url, project_id, tags, tag_tries').eq('id', body.photo_id).maybeSingle();
     if (error) throw new Error(error.message);
-    if (!photo) return json(404, { ok: false, error: 'That picture is gone.' });
-    if (save && photo.tagged_at) return json(200, { ok: true, result: { id: photo.id, url: photo.url, already: true }, usage: { input_tokens: 0, output_tokens: 0 } });
+    if (!row) return json(404, { ok: false, error: 'That picture is gone.' });
+    // saving: only a picture this call manages to claim (not done, not with another run)
+    const photo = save ? (await claimPhotos(admin, [row]))[0] : row;
+    if (!photo) return json(200, { ok: true, result: { id: row.id, url: row.url, already: true }, usage: { input_tokens: 0, output_tokens: 0 } });
     const { results, usage } = await tagPhotos(admin, [photo], { save });
     return json(200, { ok: true, result: results[0], usage });
   } catch (err) {

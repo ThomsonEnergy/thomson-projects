@@ -138,15 +138,16 @@
     },
     {
       // Job pictures by their tags (the picture tagger, item 73b) or captions: "sigenergy inverter"
-      // finds pictures carrying both tags; a row opens the job's Site Photos on that search.
+      // finds pictures with both; a row opens the job's Site Photos on that search.
       label: 'Pictures',
       run: async (q) => {
-        const words = q.toLowerCase().replace(/[{}]/g, ' ').split(' ').filter(Boolean);
+        const words = q.toLowerCase().replace(/[{}]/g, ' ').split(' ').filter(Boolean).slice(0, 5);
         if (!words.length) return [];
-        const data = must(await supabaseClient.from('project_photos')
-          .select('id, url, caption, ai_caption, project_id, projects(name, job_number, quote_number)')
-          .or(`tags.cs.{${words.map(w => `"${w}"`).join(',')}},tags.cs.{"${words.join(' ')}"},${ilikeOr(['ai_caption', 'caption'], q)}`)
-          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        let query = supabaseClient.from('project_photos')
+          .select('id, url, caption, ai_caption, project_id, projects(name, job_number, quote_number)');
+        // one or() a word, so "sigenergy solar panels" needs all three, each in the tags or a caption
+        words.forEach(w => { query = query.or(ilikeOr(['tags_text', 'ai_caption', 'caption'], w)); });
+        const data = must(await query.order('created_at', { ascending: false }).limit(PER_GROUP));
         return data.filter(p => !isVideoUrl(p.url)).map(p => ({
           title: p.ai_caption || p.caption || 'Picture',
           sub: [p.projects?.job_number ? `J${p.projects.job_number}` : (p.projects?.quote_number ? `Q${p.projects.quote_number}` : ''), p.projects?.name].filter(Boolean).join(' · '),

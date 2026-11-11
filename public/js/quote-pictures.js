@@ -56,7 +56,7 @@ function mountQuotePictures({ el, project, onSettled }) {
       // once things go quiet (the PDF is remade once, not on every tap)
       if (onSettled) settle = setTimeout(() => onSettled(rows), 4000);
     }).catch((err) => {
-      stateEl.innerHTML = `<span style="color:var(--red);">Not saved: ${escapeHtml(friendlyError(err))}</span> <button type="button" class="link-quiet qp-retry" style="background:none; border:none; padding:0; cursor:pointer;">Try again</button>`;
+      stateEl.innerHTML = `<span style="color:var(--red);">Not saved: ${escapeHtml(friendlyError(err))}</span> <button type="button" class="link-quiet qp-retry" style="background:none; border:none; padding:0; min-height:0; color:var(--link); cursor:pointer;">Try again</button>`;
       stateEl.querySelector('.qp-retry').addEventListener('click', save);
     }).finally(() => { inFlight--; });
     return queue;
@@ -72,7 +72,7 @@ function mountQuotePictures({ el, project, onSettled }) {
           <input type="text" class="qp-caption" maxlength="80" placeholder="Caption under the picture" value="${escapeHtml(p.caption)}" style="margin:0 0 6px;" />
           <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
             ${QUOTE_PICTURE_CAPTIONS.map(c => `<button type="button" class="${p.caption === c ? '' : 'secondary '}qp-chip" data-caption="${escapeHtml(c)}" style="font-size:12px; padding:4px 10px;">${escapeHtml(c)}</button>`).join('')}
-            <button type="button" class="link-quiet qp-remove" style="background:none; border:none; padding:0; margin-left:4px; font-size:12px; cursor:pointer;">Remove</button>
+            <button type="button" class="link-quiet qp-remove" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:4px; font-size:12px; cursor:pointer;">Remove</button>
           </div>
           <p class="subtitle qp-none" style="margin:4px 0 0; font-size:11.5px;${p.caption.trim() ? ' display:none;' : ''}">No caption: the client may take this for their own place.</p>
         </div>
@@ -139,11 +139,30 @@ function mountQuotePictures({ el, project, onSettled }) {
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px;">
         ${photos.map((p, i) => `<button type="button" class="qp-recent-add" data-i="${i}" title="${escapeHtml(p.ai_caption || '')}" style="padding:0; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:none; cursor:pointer;"><img src="${escapeHtml(supaImageVariant(p.url, 200, 60))}" alt="${escapeHtml(p.ai_caption || '')}" loading="lazy" style="width:100%; aspect-ratio:1; object-fit:cover; display:block;" /></button>`).join('')}
       </div>`;
-    recentEl.querySelectorAll('.qp-recent-add').forEach(b => b.addEventListener('click', async () => {
-      b.disabled = true;
-      say('Adding the picture...');
-      try { await copyIn([photos[Number(b.dataset.i)]], 'Similar system'); b.remove(); }
-      catch (err) { say(friendlyError(err), true); b.disabled = false; }
+    // a tap opens the whole picture first: it is another customer's place, so a person looks at it
+    // properly before it goes on a proposal, and can take it off the offer for good
+    recentEl.querySelectorAll('.qp-recent-add').forEach(b => b.addEventListener('click', () => {
+      const p = photos[Number(b.dataset.i)];
+      const overlay = openModal(`
+        <h2 style="margin-bottom:4px;">Add this picture?</h2>
+        <p class="subtitle" style="margin:0 0 10px;">It is from another job. Check there is nobody in it and nothing that says whose place it is (a street number, a number plate, paperwork).</p>
+        <img src="${escapeHtml(supaImageVariant(p.url, 1200, 75))}" alt="" style="width:100%; max-height:60vh; object-fit:contain; background:var(--surface-2); border-radius:8px; display:block;" />
+        <p class="subtitle" style="margin:8px 0 0; font-size:12.5px;">${escapeHtml(p.ai_caption || '')}</p>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button type="button" id="qp-recent-yes">Add to this proposal</button><button type="button" class="secondary" id="qp-recent-never">Not for other customers</button><button type="button" class="secondary" id="qp-recent-no">Cancel</button></div>
+        <div id="qp-recent-msg" style="font-size:12px;"></div>`, { maxWidth: 640, zIndex: 110 });
+      const fail = (err) => { overlay.querySelector('#qp-recent-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(err))}</div>`; };
+      overlay.querySelector('#qp-recent-no').addEventListener('click', () => overlay.remove());
+      overlay.querySelector('#qp-recent-yes').addEventListener('click', async (e) => {
+        e.target.disabled = true; e.target.textContent = 'Adding...';
+        try { await copyIn([p], 'Similar system'); overlay.remove(); b.remove(); }
+        catch (err) { fail(err); e.target.disabled = false; e.target.textContent = 'Add to this proposal'; }
+      });
+      overlay.querySelector('#qp-recent-never').addEventListener('click', async () => {
+        const { error } = await supabaseClient.from('project_photos').update({ ok_for_proposals: false }).eq('id', p.id);
+        if (error) { fail(error); return; }
+        overlay.remove(); b.remove();
+        showToast('That picture will not be offered again.');
+      });
     }));
   }).catch(() => {});
 

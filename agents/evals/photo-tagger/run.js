@@ -21,10 +21,12 @@ say(cleanReading(good).okForProposals === true, 'clean: a tidy finished install 
 say(cleanReading({ ...good, people: true }).okForProposals === false, 'clean: a person in the picture is never fine for proposals');
 say(cleanReading({ ...good, identifying: true }).okForProposals === false, 'clean: anything identifying is never fine for proposals');
 say(cleanReading({ ...good, kind: 'in progress' }).okForProposals === false, 'clean: only a finished install is fine for proposals');
+say(cleanReading({ ...good, people: undefined }).okForProposals === false && cleanReading({ ...good, identifying: 'false' }).okForProposals === false, 'clean: a missing or odd flag is a no');
+say(cleanReading({ ...good, things: ['inverter', 'vehicle'] }).okForProposals === false && cleanReading({ ...good, things: ['screen'] }).okForProposals === false, 'clean: a vehicle or a screen in shot is never fine for proposals');
 say(cleanReading({ ...good, things: ['inverter', 'spaceship'] }).tags.includes('spaceship') === false && THINGS.includes('inverter'), 'clean: a thing off the list is dropped');
 say(cleanReading({ ...good, kind: 'made up' }).kind === 'other', 'clean: a kind off the list becomes other');
 say(cleanReading({ unreadable: true }).unreadable === true && cleanReading(null).okForProposals === false, 'clean: an unreadable or empty answer stores nothing risky');
-say(jobEquipment({ pylon_data: { storage_types: [{ description: 'Sigenergy SigenStor BAT 10.0' }], module_types: [{}] } }).join('|') === 'Sigenergy SigenStor BAT 10.0', 'equipment: the Pylon models, blanks left out');
+say(jobEquipment({ pylon_data: { storage_types: [{ description: 'Sigenergy SigenStor BAT 10.0' }], module_types: [{}] } }).join('|') === 'battery: Sigenergy SigenStor BAT 10.0', 'equipment: the Pylon models with their kind, blanks left out');
 say(/\/render\/image\/public\/site-photos\/a\/1\.jpg\?width=1024/.test(tagImageUrl('https://x.supabase.co/storage/v1/object/public/site-photos/a/1.jpg')), 'image: the reader is given the resized copy');
 
 // 2. The model, over the cases.
@@ -47,13 +49,14 @@ say(/\/render\/image\/public\/site-photos\/a\/1\.jpg\?width=1024/.test(tagImageU
   };
   for (const c of cases.cases) {
     try {
-      const r = await tagPhoto({ url: cases.base_url + c.image, equipment: c.equipment || [], call });
+      const r = await tagPhoto({ url: cases.base_url + c.image, equipment: c.equipment || [], call, anyUrl: true });
       usage.input_tokens += (r.usage || {}).input_tokens || 0;
       usage.output_tokens += (r.usage || {}).output_tokens || 0;
       const missing = (c.expect.has || []).filter(t => !r.tags.includes(t));
       const wrong = (c.expect.not || []).filter(t => r.tags.includes(t));
       const kindOk = !c.expect.kind || c.expect.kind.includes(r.kind);
-      say(!missing.length && !wrong.length && kindOk, c.id, `tags: ${r.tags.join(', ')}${missing.length ? ` | missing: ${missing.join(', ')}` : ''}${wrong.length ? ` | should not have: ${wrong.join(', ')}` : ''}${kindOk ? '' : ` | kind ${r.kind}`}`);
+      const okOk = c.expect.ok === undefined || c.expect.ok === r.okForProposals;
+      say(!missing.length && !wrong.length && kindOk && okOk, c.id, `tags: ${r.tags.join(', ')}${missing.length ? ` | missing: ${missing.join(', ')}` : ''}${wrong.length ? ` | should not have: ${wrong.join(', ')}` : ''}${kindOk ? '' : ` | kind ${r.kind}`}${okOk ? '' : ` | fine for other customers was ${r.okForProposals}`}`);
     } catch (err) {
       say(false, c.id, `error: ${err.message}`);
     }
