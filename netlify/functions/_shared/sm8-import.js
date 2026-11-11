@@ -381,7 +381,7 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   // job's value is known).
   const invoiceOnly = isOn(job.invoiceSent) && !claimsUsed.length;
   if (!invoiceOnly) {
-    for (const d of deposits) claimsUsed.push({ number: d.number, status: 'Paid', valueExGst: d.amount, invoiced: true, date: d.date, paid: d.date, method: d.method });
+    for (const d of deposits) claimsUsed.push({ number: d.number, status: 'Paid', valueExGst: d.amount, amountIncGst: d.amountIncGst, invoiced: true, date: d.date, paid: d.date, method: d.method });
   }
 
   // Line items, in ServiceM8's order: each bundle followed by its

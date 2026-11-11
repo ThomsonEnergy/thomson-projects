@@ -2377,7 +2377,7 @@
       // first, no invoice page or Xero behind them.
       const importedInvoices = (Array.isArray(c.imported_claims) ? c.imported_claims : []).map((ic, i) => ({
         invoice_number: ic.number, invoice_token: null, sent_at: ic.date || null, created_at: ic.date || '1970-01-01', sortFirst: i,
-        paid_at: ic.paid || null, paid_method: ic.method || null, xero_invoice_id: null, id: null, isImported: true, source: ic.source || 'servicem8',
+        paid_at: ic.paid || null, paid_method: ic.method || null, xero_invoice_id: ic.xero_invoice_id || null, xero_invoice_number: ic.xero_invoice_number || null, xero_error: ic.xero_error || null, id: null, isImported: true, source: ic.source || 'servicem8',
         labour_amount: Number(ic.amount) || 0, material_amount: 0, stc_amount: 0, bstc_amount: 0,
       }));
       const stageInvoices = [...importedInvoices, ...[...legacyInvoices, ...claimInvoices, ...creditLines].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))];
@@ -4380,7 +4380,7 @@
                             <td data-label="Invoice">${escapeHtml(inv.invoice_number || '')} <span class="subtitle" style="font-size:11px;">ServiceM8</span></td>
                             <td class="num" data-label="Amount">${money(Number(inv.labour_amount) + Number(inv.material_amount))}</td>
                             <td data-label="Sent">${inv.sent_at ? new Date(inv.sent_at).toLocaleDateString('en-AU') : ''}</td>
-                            <td data-label="">${inv.paid_at ? `<span class="badge accepted" style="margin-right:6px;">Paid</span><span class="subtitle" style="font-size:11px;">Paid in ServiceM8 ${new Date(inv.paid_at).toLocaleDateString('en-AU')}${inv.paid_method ? ', ' + escapeHtml(inv.paid_method) : ''}</span>` : `<span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span>`}</td>
+                            <td data-label="">${inv.paid_at ? `<span class="badge accepted" style="margin-right:6px;">Paid</span><span class="subtitle" style="font-size:11px;">Paid in ServiceM8 ${new Date(inv.paid_at).toLocaleDateString('en-AU')}${inv.paid_method ? ', ' + escapeHtml(inv.paid_method) : ''}${inv.xero_invoice_number ? `, in Xero as ${escapeHtml(inv.xero_invoice_number)}` : ''}</span>${inv.xero_error ? `<div class="subtitle" style="font-size:11px; color:var(--red);">Xero: ${escapeHtml(inv.xero_error)}</div>` : ''}` : `<span class="subtitle" style="font-size:11px;">Invoiced in ServiceM8 before the move</span>`}</td>
                           </tr>` : inv.isCredit ? `
                           <tr>
                             <td data-label="Invoice">Credit note</td>
@@ -8633,7 +8633,29 @@
       const project = await loadProject();
       const myRole = await getMyRole();
       if (project) render(project, isPricingRole(myRole));
+      if (project && isPricingRole(myRole)) sendSm8DepositsToXero(project);
     })();
+
+    // A deposit paid in ServiceM8 (a paid claim on a stage, item 71) goes to Xero by itself the
+    // first time a pricing role opens the job: a deposit invoice with ServiceM8's prepayment
+    // allocated to it. One try per page open; the claims card shows the Xero number or why not.
+    async function sendSm8DepositsToXero(project) {
+      const waiting = (project.cost_centres || []).some(c => (Array.isArray(c.imported_claims) ? c.imported_claims : [])
+        .some(ic => ic.source === 'servicem8' && ic.paid && !ic.xero_prepayment_id && (!ic.xero_error || Date.now() - new Date(ic.xero_tried_at || 0).getTime() > 60 * 60 * 1000)));
+      if (!waiting) return;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/sync-sm8-deposits-to-xero', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ projectId: project.id }),
+        });
+        if (!res.ok) return;
+        const refreshed = await loadProject();
+        if (refreshed && !editMode) render(refreshed, true);
+      } catch (err) {
+        console.warn('deposit to Xero:', err.message);
+      }
+    }
   </script>
 </body>
 </html>
