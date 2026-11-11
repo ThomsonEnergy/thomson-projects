@@ -57,11 +57,12 @@ const ROI_ASSUMPTIONS = {
 // roi_inputs.assumptions by key; backlog item 72) laid over them. A value outside its sensible
 // range is ignored. The two kinds of day and the four seasons are kept averaging to the year.
 // The normal sun figure for a site (see ROI_ASSUMPTIONS.yieldPerKwPerDay). address is the quote's
-// site address: the last four digit number in it is taken as the postcode.
+// site address: the four digits it ends on (before "Australia", if that is there) are the postcode.
+// A street number is never taken for one; an address with no postcode keeps the zone's figure.
 function roiSiteYield(zoneRating, address) {
   const A = ROI_ASSUMPTIONS;
   const zone = A.yieldPerKwPerDay[zoneRating] ? Number(zoneRating) : A.defaultZoneRating;
-  const pc = Number((String(address || '').match(/\b\d{4}\b/g) || []).pop());
+  const pc = Number((String(address || '').match(/\b(\d{4})(?:\s*,?\s*Australia)?\s*$/i) || [])[1]);
   const north = (pc >= 4000 && pc <= 4999) || (pc >= 2460 && pc <= 2490);
   return zone === A.defaultZoneRating && north ? A.northYieldPerKwPerDay : A.yieldPerKwPerDay[zone];
 }
