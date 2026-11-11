@@ -77,7 +77,7 @@ exports.handler = async (event) => {
     const { supabaseAdmin, user } = auth;
 
     const [{ data: project, error: projErr }, { data: docs, error: docErr }] = await Promise.all([
-      supabaseAdmin.from('projects').select('id, quote_number, proposal_template, template_answers, stc_zone_rating, client_address').eq('id', projectId).single(),
+      supabaseAdmin.from('projects').select('id, quote_number, proposal_template, template_answers, stc_zone_rating, client_address, site_sun').eq('id', projectId).single(),
       supabaseAdmin.from('project_documents').select('id, file_path, file_name, mime_type').eq('project_id', projectId).eq('folder', BILL_FOLDER).order('created_at'),
     ]);
     if (projErr || !project) throw projErr || new Error('Quote not found');
@@ -123,7 +123,7 @@ exports.handler = async (event) => {
 
     const answers = project.template_answers || {};
     const zoneRating = Number(project.stc_zone_rating) || 1.382;
-    const sizing = suggestSizes({ reading: extracted, answers, zoneRating, siteAddress: project.client_address });
+    const sizing = suggestSizes({ reading: extracted, answers, zoneRating, siteAddress: project.client_address, siteSun: project.site_sun });
     const metrics = billMetrics(extracted);
     if (!metrics.dailyKwh) {
       return { statusCode: 422, body: JSON.stringify({ ok: false, error: `The pages were read but no usage in kWh was found on them. Add the page with the usage table (kWh and days) and try again.${leftOutNote}`, reading: extracted, left_out: leftOut }) };

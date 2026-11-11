@@ -274,6 +274,8 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
         // client approved (bug review F3).
         bill_reading: quote.bill_reading,
         roi_inputs: quote.roi_inputs,
+        // the site's sun figures the estimate ran on (item 75), and where the site is (weather, item 4)
+        site_sun: quote.site_sun, lat: quote.lat, lng: quote.lng,
         show_roi: quote.show_roi,
         show_investment_breakdown: quote.show_investment_breakdown,
         battery_kwh: quote.battery_kwh,
