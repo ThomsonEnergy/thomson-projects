@@ -424,7 +424,7 @@
       const claims = e.lines ? e.lines.claimsUsed.filter(c => c.invoiced) : [];
       return claims.map(c => {
         const m = String(r.notesText || '').match(new RegExp('\\[(\\d{4}-\\d{2}-\\d{2})\\] Partial invoice #' + String(c.number).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' created'));
-        return { number: c.number, amount: c.valueExGst, date: c.date || (m ? m[1] : null), paid: c.paid || null, method: c.method || null };
+        return { number: c.number, amount: c.valueExGst, amount_inc: c.amountIncGst || null, date: c.date || (m ? m[1] : null), paid: c.paid || null, method: c.method || null };
       });
     }
 
@@ -442,8 +442,10 @@
       // A ServiceM8 quote brought across earlier that is now a Work Order.
       const approveHint = e.result.skipped && r && r.kind === 'job' && !e.result.jobNumber && e.result.quoteNumber ? ' (brought across as a quote: approve it there to make it the job)' : '';
       const added = e.result.added || [];
-      if (e.result.skipped && added.length) return `<div class="imp-result ok">Added to ${link} as paid claim${added.length === 1 ? '' : 's'}: ${added.map(a => `${escapeHtml(a.number)} ${money(a.amount)} ex GST`).join(', ')}</div>`;
-      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}${approveHint}</div>`;
+      const xero = !e.xero ? '' : e.xero.pending ? '<div class="imp-meta">Xero: raising the deposit invoice and allocating the prepayment...</div>'
+        : e.xero.results.map(x => `<div class="imp-meta" ${x.ok ? '' : 'style="color:var(--red);"'}>Xero: ${x.ok ? `deposit invoice ${escapeHtml(x.invoiceNumber || '')} raised and the ${money(x.amountIncGst)} prepayment allocated` : escapeHtml(x.error)}</div>`).join('');
+      if (e.result.skipped && added.length) return `<div class="imp-result ok">Added to ${link} as paid claim${added.length === 1 ? '' : 's'}: ${added.map(a => `${escapeHtml(a.number)} ${money(a.amount)} ex GST`).join(', ')}${xero}</div>`;
+      return `<div class="imp-result ok">${e.result.skipped ? 'Already in the app as' : 'Imported as'} ${link}${approveHint}${xero}</div>`;
     }
 
     function renderList() {
@@ -574,7 +576,7 @@
                 invoicedExGst: r.alreadyImported ? r2(pendingDeposits(r, e).reduce((t, d) => t + d.amount, 0)) : Number(e.invoiced) || 0,
                 // only when the typed figure is still the claims' own total (a hand-edited figure has no claims behind it);
                 // a job already in the app sends just the deposits it is missing
-                claims: r.alreadyImported ? pendingDeposits(r, e).map(d => ({ number: d.number, amount: d.amount, date: d.date, paid: d.date, method: d.method }))
+                claims: r.alreadyImported ? pendingDeposits(r, e).map(d => ({ number: d.number, amount: d.amount, amount_inc: d.amountIncGst, date: d.date, paid: d.date, method: d.method }))
                   : Math.abs(claimsForImport(e, r).reduce((t, c) => t + c.amount, 0) - (Number(e.invoiced) || 0)) < 0.01 ? claimsForImport(e, r) : [],
                 stcs: e.lines ? e.lines.stcs || [] : [],
                 lines: linesOf(e).map(l => ({ item_type: l.item_type, description: l.description, quantity: l.quantity, cost: l.cost, price: l.price, group: l.group, base_quantity: l.base_quantity })),
@@ -590,6 +592,16 @@
               // the deposits just added are on the job now, so the row locks like any imported one
               const r = rows.find(x => x.sm8JobUuid === res.sm8JobUuid);
               if (res.ok && res.added && res.added.length && r && r.alreadyImported) r.alreadyImported.claimNumbers = [...(r.alreadyImported.claimNumbers || []), ...res.added.map(a => a.number)];
+              // its ServiceM8 deposits go to Xero by themselves: a deposit invoice with the prepayment allocated
+              const e = edits.get(res.sm8JobUuid);
+              const hasDeposit = res.ok && res.projectId && r && r.kind !== 'quote' && ((res.added && res.added.length) || (!res.skipped && claimsForImport(e, r).some(c => c.paid)));
+              if (hasDeposit) {
+                e.xero = { pending: true };
+                callFn('sync-sm8-deposits-to-xero', { projectId: res.projectId })
+                  .then(x => { e.xero = { results: x.results || [] }; })
+                  .catch(err => { e.xero = { results: [{ ok: false, error: err.message }] }; })
+                  .then(renderList);
+              }
             });
           } catch (err) {
             batch.forEach(b => { edits.get(b.sm8JobUuid).result = { ok: false, error: err.message }; });
