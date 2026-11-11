@@ -290,7 +290,23 @@
   "approval_method": null,
   "deposit_percent": 10,
   "stc_zone_rating": 1.382,
-  "reference_photos": [],
+  "reference_photos": [
+   {
+    "url": "/img/showcase/shed-ridge.jpg",
+    "caption": "Your site"
+   },
+   {
+    "url": "/img/showcase/battery.jpg",
+    "caption": "Similar system"
+   },
+   {
+    "url": "/img/showcase/mobile-solar.jpg",
+    "caption": "Indicative picture"
+   },
+   {
+    "url": "/img/showcase/school-roof.jpg"
+   }
+  ],
   "proposal_subtitle": "",
   "proposal_template": "solar",
   "client_office_address": "12 Example Rd, Testville QLD 4000",
