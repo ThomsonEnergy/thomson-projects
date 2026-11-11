@@ -19,7 +19,8 @@ Thomson Energy pays a bonus to employees who bring in work and who quote jobs th
 * One bonus per job. A lead that is already a Thomson Energy client with an open quote or job for that work, or your own household's job, does not count.
 
 4. The under budget bonus
-* If you quoted a job (you are shown as Quoted by on the quote) and the job finishes under budget, you earn $100.
+* If you quoted a job (you are shown as Quoted by on the quote) and the job finishes under budget, you earn a bonus: today a flat $100 (the owner may change this to a share of the saving, with a cap; the current rule is shown in TEops Settings and on your staff profile).
+* It is paid once the job is Complete and no defect or warranty job has been raised against it in the first 30 days.
 * Under budget means: when the job is marked Complete, what it cost Thomson Energy (labour at cost plus every material and purchase order on the job) is at or below what the quote allowed for (the labour and material costs the quote was priced on, plus any approved variations). TEops works this out by itself; nobody adds it up by hand.
 * A job that runs over budget earns nothing and costs you nothing.
 
@@ -31,4 +32,6 @@ Thomson Energy pays a bonus to employees who bring in work and who quote jobs th
 * Never promise a customer a price, a date or a rebate to get a lead. Say Thomson Energy will contact them.
 * Tell the person you are passing their details on. We tell them again on first contact, as the Privacy Act asks us to.
 * A lead entered under someone else's name, or a referral of work that was already coming to Thomson Energy, is not paid and may be treated as misconduct under the Code of Conduct.
-* Thomson Energy can change the amounts or this scheme, or withdraw it, at any time with notice. A bonus already earned is paid at the amount that applied on the day it was earned.
+* This scheme is discretionary. It is not a term of your employment contract, it sits on top of your award and contract entitlements, and Thomson Energy can change the amounts or the scheme, or withdraw it, at any time with notice. A bonus already earned is paid at the amount that applied on the day it was earned.
+* A bonus is paid through payroll like any other pay: tax is withheld and superannuation applies.
+* Thomson Energy pays bonuses to its own employees only. If you are referred work by someone who works for one of our clients, the reward goes to that client's account under the client scheme, never to the person privately.
