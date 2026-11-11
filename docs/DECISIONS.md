@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 12 Nov 2026
+
+- Owner's call (Thursday morning, "can we just go live with everything?", then "Done" to the release plan): release what this chat has waiting now, not on release night: items 73a and 73b (on `staging`) and item 75 (PR 378). Three production migrations: 20261130090000, 20261130100000, 20261201010000, all additions only. Item 74 (client portal, PR 377, a draft from another chat) is not part of it. Item 75's live calls (sun records, Pylon's site location) get their first real run on the live site: the owner opens one draft Solar quote and the chat reads what was saved. Detail: `docs/IDEAS_BACKLOG.md` items 73 and 75.
+
 ## 11 Nov 2026
 
 - Built, on its way to `staging` (owner's "Yes and use pylon api"; migration 20261201010000, SQL shown in the PR, on the staging database): item 75, site sun records for the savings estimate. A Solar or Battery quote now gets its sun figure, seasons and clear and dull days from ten years of sun records for its own site, by itself (Pylon's site location first, else the address). A quote already sent keeps its figures unless its address changes; new quotes and copies get the records. Pylon's API has no production figure, so Pylon gives the location only. The 72c question (7 or 8 clear days in 10) is answered by the records. Not proven live from the cloud session (NASA and Pylon hosts blocked): first check is on staging. Detail: `docs/IDEAS_BACKLOG.md` item 75, `docs/PROJECT_SPEC.md` A3.
