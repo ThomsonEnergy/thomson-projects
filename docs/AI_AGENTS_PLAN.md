@@ -82,7 +82,7 @@ Build on the existing feeds:
 
 Suggests electricity plans for a quote's address from the AER's Consumer Data Right plan data (downloaded daily by `sync-energy-plans`, listed on the ops manager's workers), costed with the savings estimate's own maths, not an AI web search; staff choose what goes on the proposal and nothing is sent automatically. Writes only its own `energy_plans` table. Wholesale-price plans are not estimated (the app says so); a proper wholesale estimate is backlogged as item 35. Detail in `docs/IDEAS_BACKLOG.md` item 34.
 
-## Picture tagger (built 11 Nov 2026, backlog item 73b, on `staging`)
+## Picture tagger (built 11 Nov 2026, backlog item 73b, live 12 Nov 2026, off until the owner switches it on)
 
 Reads every picture added to a job and tags it with what is in it: the brands it can see, what it shows (inverter, battery, solar panels, switchboard and so on, from a fixed list), models read off a label, and the kind of picture (finished install, in progress, before, damage, label, paperwork, site). It also writes one plain caption and marks a picture fine to show another customer only when it is a finished install with no people and nothing identifying in it (the code checks the model's own flags, it does not take the model's word alone).
 
