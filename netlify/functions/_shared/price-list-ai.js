@@ -16,12 +16,13 @@ const { claudeJson } = require('./claude-json');
 
 const MODEL = 'claude-sonnet-5-5';
 
-async function callClaude(content, maxTokens) {
+// opts.effort ('low' ... 'max'): how hard the model works on it; left out, the model's own default.
+async function callClaude(content, maxTokens, opts = {}) {
   const apiKey = await getIntegrationKey('anthropic');
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: claudeJson({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content }] }),
+    body: claudeJson({ model: MODEL, max_tokens: maxTokens, ...(opts.effort ? { output_config: { effort: opts.effort } } : {}), messages: [{ role: 'user', content }] }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');

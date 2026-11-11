@@ -1,0 +1,36 @@
+{
+  "agent": "photo-tagger",
+  "written": "2026-11-11",
+  "about": "The picture tagger (netlify/functions/_shared/photo-tagger.js, prompt agents/prompts/photo-tagger.js). Each case is one picture that ships with the app (public/img/showcase, no client's place in any of them), read from the live site, with the tags it must and must not get. Add a case whenever the tagger gets a real picture wrong: put a copy with nothing identifying in it under public/img/evals/ first.",
+  "base_url": "https://projects.thomsonenergy.com.au",
+  "cases": [
+    {
+      "id": "battery-on-wall",
+      "image": "/img/showcase/battery.jpg",
+      "equipment": ["Sigenergy SigenStor BAT 10.0", "Sigenergy Sigen Energy Controller SigenStor EC 15.0"],
+      "expect": { "has": ["battery"], "not": ["solar panels", "paperwork", "people"], "kind": ["finished install"] },
+      "why": "A finished battery install is the picture a quote most wants to offer as a similar system."
+    },
+    {
+      "id": "shed-roof-panels",
+      "image": "/img/showcase/shed-solar.jpg",
+      "equipment": ["WINAICO WBC Series Ultra Black"],
+      "expect": { "has": ["solar panels"], "not": ["battery", "inverter", "winaico"], "kind": ["finished install", "site"] },
+      "why": "Panels on a roof from the air: no brand can be read, so the hint must not become a brand tag."
+    },
+    {
+      "id": "no-equipment-hint-not-proof",
+      "image": "/img/showcase/led-lighting.jpg",
+      "equipment": ["Fronius Symo 10.0", "Tesla Powerwall 3"],
+      "expect": { "has": ["lighting"], "not": ["fronius", "tesla", "inverter", "battery"], "kind": ["finished install", "site", "other"] },
+      "why": "The job's equipment list names gear that is not in this picture: none of it may be tagged."
+    },
+    {
+      "id": "trailer-solar",
+      "image": "/img/showcase/mobile-solar.jpg",
+      "equipment": [],
+      "expect": { "has": ["solar panels"], "not": ["paperwork"], "kind": ["finished install", "in progress", "site", "other"] },
+      "why": "No equipment list at all still gets the plain what-it-shows tags."
+    }
+  ]
+}
