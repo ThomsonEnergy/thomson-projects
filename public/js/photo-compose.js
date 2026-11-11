@@ -57,7 +57,7 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   const overlay = openModal(`
       <h2 style="margin-bottom:4px;">Put the equipment on this picture</h2>
       <p class="subtitle" id="pc-hint" style="margin:0 0 8px; font-size:12.5px;">Opening the picture...</p>
-      <div id="pc-wrap" style="background:repeating-conic-gradient(#d9d9d9 0% 25%, #f4f4f4 0% 50%) 50% / 20px 20px; border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0;">
+      <div id="pc-wrap" style="border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0;">
         <canvas id="pc-stage" style="max-width:100%; touch-action:none; cursor:grab;"></canvas>
       </div>
       <div id="pc-tools" style="margin-top:10px;"></div>
@@ -78,6 +78,8 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   let stroke = null;        // the cut being drawn: { points: [[x, y]] } in the equipment picture's pixels, or a box in the stage's
   let busy = false;
   const pointers = new Map();
+  // the cut out view sits on a chequered ground, so what is see-through shows as see-through
+  const CHEQUERS = 'repeating-conic-gradient(#d9d9d9 0% 25%, #f4f4f4 0% 50%) 50% / 20px 20px';
 
   // ---------- drawing ----------
   // The picture on the stage in this view, and its size on the screen.
@@ -224,6 +226,7 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   function toolsPlace() {
     view = 'place'; if (mode !== 'cropbase') mode = 'move';
     stage.style.cursor = mode === 'cropbase' ? 'crosshair' : 'grab';
+    wrap.style.background = 'var(--surface-2)';
     hint.textContent = !ov ? 'Choose the equipment to show on this picture.'
       : mode === 'cropbase' ? 'Drag a box over the part of the wall picture to keep.'
         : 'Drag the equipment to where it will go. Size it with the slider, or with two fingers.';
@@ -252,6 +255,7 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   function toolsCut() {
     view = 'cut'; if (!['trace', 'box', 'rub', 'bring'].includes(mode)) mode = 'trace';
     stage.style.cursor = 'crosshair';
+    wrap.style.background = CHEQUERS;
     hint.textContent = { trace: 'Trace: draw around the equipment. Everything outside your line goes.', box: 'Box: drag a rectangle around the equipment. Everything outside it goes.', rub: 'Rub out: brush away what should not be there.', bring: 'Bring back: brush over a piece that was taken by mistake.' }[mode];
     const pick = (id, label) => btn(id, label, mode === id.slice(3) ? '' : 'secondary');
     tools.innerHTML = `
