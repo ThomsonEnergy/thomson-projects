@@ -148,6 +148,10 @@
   .roi-fig figcaption { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); margin-bottom: 4px; }
   .roi-fig svg { display: block; }
   .roi-table td, .roi-table th { padding-top: 7px; padding-bottom: 7px; font-size: 12.5px; }
+  .roi-headline { margin: 0 0 20px; }
+  .rows.roi-list { margin: 0; }
+  /* the working table's labels stay on one line on a sheet (not the plan options, whose first column is long text) */
+  @media (min-width: 701px) { .roi-table:not(.plan-table) td:first-child { white-space: nowrap; padding-right: 18px; } }
   .roi-table .roi-sec td { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); border-bottom: none; padding-top: 14px; padding-bottom: 2px; }
   /* Plan options: the name column takes what is left, the two figures wrap inside their own width,
      and the plan ID and what to check sit under the name, so the table fits a sheet and a phone. */
@@ -270,7 +274,7 @@
 
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
-  <script src="/js/solar-roi.js?v=14"></script>
+  <script src="/js/solar-roi.js?v=15"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -814,20 +818,17 @@
       // we need X" for what the customer can supply, and that accepting the proposal before then
       // is accepting it on what is shown. Nothing here stops the proposal being sent or accepted.
       const roiInputs = project.roi_inputs || {};
-      // the two prices as typed, else the default split (battery stage less the BSTC, solar the rest), as on the quote page
-      const roiPrices = roiPricesFor({ typedSolar: roiInputs.solar_price, typedBattery: roiInputs.battery_price, defaults: roiDefaultPrices({ centres: data.cost_centres, netCost: roiNetCost, bstcCredit: bstcOnly }) });
       // clientType sets the GST basis of the bill (a company's bill is ex GST unless roi_inputs.bill_gst says inc) (M10)
       const roiClientType = isCompanyClient ? 'company' : 'individual';
-      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiPrices.solar, batteryPrice: roiPrices.battery, clientType: roiClientType }) : { sections: [], asks: [], columns: [] };
+      const pres = roiWanted ? roiPresentation({ reading: project.bill_reading, answers: roiAnswers, template, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, netCost: roiNetCost, zoneRating: Number(project.stc_zone_rating) || 1.382, money, inputs: roiInputs, solarPrice: roiInputs.solar_price, batteryPrice: roiInputs.battery_price, clientType: roiClientType }) : { sections: [], asks: [], columns: [], fromBill: [], assumed: [] };
       const est = pres.est;
       const cur = est ? est.current : null;
       const br = project.bill_reading || {};
       const billLine = br.retailer ? ` (${esc(String(br.retailer))}${br.billing_days ? `, ${esc(String(br.billing_days))} days` : ''})` : '';
-      const systemText = est ? `${est.newSolarKw ? `${esc(String(est.newSolarKw))} kW of solar` : ''}${est.newSolarKw && est.batteryKwh ? ' with ' : ''}${est.batteryKwh ? `a ${esc(String(est.batteryKwh))} kWh battery` : ''}${est.existingKw ? ` on top of your existing ${esc(String(est.existingKw))} kW` : ''}` : '';
+      // the page opens with the three figures (roiHeadlineHtml); these words are for when there are none
       const savingsLead = !pres.sections.length
         ? 'We want your savings estimate to be accurate, not a guess, so there are no figures here yet.'
-        : cur && pres.dollars
-          ? `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day${pres.bills ? `, about ${money(cur.billNow)} a year at today's rates` : ''}. ${systemText} is estimated to save you <strong>${money(cur.totalSaving)} a year</strong>${cur.payback ? ` and pay for itself in about <strong>${esc(String(cur.payback))} years</strong>` : est.prices.total > 0 ? `. <strong>${esc(ROI_NOT_PAID_OFF)}</strong> at that saving` : ''}${est.newSolarKw && est.batteryKwh && cur.solarPayback && cur.batteryPayback ? ` (the solar in ${esc(String(cur.solarPayback))} years, the battery in ${esc(String(cur.batteryPayback))})` : ''}.${est.alt ? ` On ${esc(est.alt.name)} the same system would save about ${money(est.alt.totalSaving)} a year.` : ''}`
+        : pres.headline ? ''
           : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
       const asksHtml = pres.asks.length ? `
             <div class="sec-title" style="margin-top:22px;">What we still need from you</div>
@@ -835,6 +836,7 @@
             <p class="pg-lead">Send it to us (a photo of each page is fine) and we will update this proposal. If you accept this proposal before we have it, you are accepting it on the figures and information shown here.</p>` : '';
       const roiCols = pres.columns || [];
       const roiTableHtml = pres.sections.length ? `
+            ${pres.headline ? '<div class="sec-title" style="margin-top:24px;">How we worked it out</div>' : ''}
             <table class="qtable roi-table split">
               <thead><tr><th>Each year</th>${roiCols.length > 1 ? roiCols.map(c => `<th class="num">${esc(c)}</th>`).join('') : '<th class="num">Estimate</th>'}</tr></thead>
               <tbody>${pres.sections.map(sec => `<tr class="roi-sec"><td colspan="${roiCols.length + 1}">${esc(sec.title)}</td></tr>${sec.rows.map(([k, vals]) => `<tr><td>${esc(k)}</td>${vals.map(v => `<td class="num" style="white-space:normal;">${esc(v)}</td>`).join('')}</tr>`).join('')}`).join('')}</tbody>
@@ -866,12 +868,13 @@
           ${headHtml}
           <div class="pg-body">
             <h1 class="pg-title">Your<br>savings</h1>
-            <p class="pg-lead">${savingsLead}</p>
+            ${savingsLead ? `<p class="pg-lead">${savingsLead}</p>` : ''}
+            ${roiHeadlineHtml(pres)}
             ${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}
-            ${roiTableHtml}
+            ${roiListsHtml(pres)}
             ${asksHtml}
+            ${roiTableHtml}
             ${planOptsHtml}
-            ${est ? `<p class="note-line">${esc(roiAssumptionsText(est))}</p>` : ''}
           </div>
         </section>` : '';
 

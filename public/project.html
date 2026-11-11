@@ -31,13 +31,16 @@
   </div>
 
   <script src="/js/supabase-client.js?v=131"></script>
-  <script src="/js/template-questions.js?v=4"></script>
-  <script src="/js/solar-roi.js?v=14"></script>
+  <script src="/js/template-questions.js?v=5"></script>
+  <script src="/js/solar-roi.js?v=15"></script>
+  <script src="/js/solar-roi-staff.js?v=1"></script>
   <script src="/js/quote-plan-list.js?v=1"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
     .roi-preview .roi-fig { margin:0; }
+    .roi-preview .roi-paper { background:#fff; color:#0a0a0a; padding:12px; border-radius:8px; margin:8px 0; }
+    .roi-preview .roi-paper:empty { display:none; }
     .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin-bottom:4px; }
   </style>
   <script src="/js/prebuild-form.js?v=4"></script>
@@ -1069,8 +1072,6 @@
         const v = (project.roi_inputs || {})[`${which}_price`];
         return v == null ? null : Number(v);
       }
-      function defaultPrices() { return roiDefaultPrices({ centres: project.cost_centres, netCost: currentNetCost(), bstcCredit: creditAsShown(project.bstc_total) }); }
-      function currentPrices() { return roiPricesFor({ typedSolar: typedPrice('solar'), typedBattery: typedPrice('battery'), defaults: defaultPrices() }); }
 
       // ----- the bill's figures, correctable in place -----
       const BILL_FIELDS = [
@@ -1219,7 +1220,6 @@
         const lines = linesBatteryKwh();
         const hasBattery = quoteHasBattery(currentTemplate, liveAnswers()) || battery > 0;
         const total = currentNetCost();
-        const d = defaultPrices();
         const both = solar > 0 && battery > 0;
         byId('bc-solar-wrap').style.display = currentTemplate === 'battery' ? 'none' : '';
         byId('bc-solar-kw').textContent = solar ? `${solar} kW` : 'not set';
@@ -1227,12 +1227,12 @@
         byId('bc-solar-price-wrap').style.display = both ? '' : 'none';
         byId('bc-battery-price-wrap').style.display = both ? '' : 'none';
         byId('bc-battery-kwh').placeholder = lines ? `${lines} (from the line items)` : 'e.g. 13.5';
-        byId('bc-solar-price').placeholder = d.solar != null ? `${d.solar} (the rest)` : 'blank: one price';
-        byId('bc-battery-price').placeholder = d.battery != null ? `${d.battery} (battery stage)` : 'blank: one price';
+        byId('bc-solar-price').placeholder = 'blank: one payback';
+        byId('bc-battery-price').placeholder = 'blank: one payback';
         const notes = [];
         if (hasBattery && !typedBatteryKwh()) notes.push(lines ? `Battery blank: ${lines} kWh from the battery lines on the quote.` : 'Battery blank and no battery kWh in the line items: type the battery\'s usable kWh.');
         if (both) notes.push(typedPrice('solar') == null && typedPrice('battery') == null
-          ? (d.battery != null ? `Prices blank: battery ${money(d.battery)} (its stage less the BSTC), solar ${money(d.solar)} (everything else), adding up to the quote's ${money(total)} after credits.` : `Prices blank: one payback on the quote's ${money(total)} after credits.`)
+          ? `Prices blank: one payback for the whole system on the quote's ${money(total)} after credits. Type both prices to show a payback for the solar and one for the battery.`
           : `The two prices should add up to the quote's ${money(total)} after credits.`);
         else notes.push(total ? `Price: the quote's ${money(total)} after credits.` : 'No price yet: price the stages on step 3.');
         byId('bc-quoting-note').textContent = notes.join(' ');
@@ -1503,9 +1503,8 @@
 
       function estimateArgs() {
         const inputs = readRoiInputs(false);
-        const prices = currentPrices();
         // clientType sets the GST basis of the bill when roi_inputs.bill_gst is blank (M10): a company's bill is ex GST
-        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: prices.solar, batteryPrice: prices.battery, linesBatteryKwh: linesBatteryKwh(), clientType: clientIsCompany ? 'company' : 'individual' };
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
       }
 
       // ----- the estimate as the proposal shows it, what is missing, what to check, and step 5's line -----
@@ -1537,10 +1536,10 @@
           ${boxHtml}
           <div style="margin-top:12px; ${project.show_roi === false ? 'opacity:0.55;' : ''}">
             <label style="margin-top:0; font-weight:600;">${project.show_roi === false ? 'Savings estimate (switched off: not on the proposal)' : 'Savings estimate, exactly as the customer sees it'}</label>
-            <div class="roi-preview">${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}</div>
+            <div class="roi-preview"><div class="roi-paper">${roiHeadlineHtml(pres)}</div>${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}<div class="roi-paper">${roiListsHtml(pres)}</div></div>
             <table style="font-size:13px;">${head}<tbody>${body}</tbody></table>
             ${pres.asks.length && project.show_roi !== false ? `<p class="subtitle" style="margin:6px 0 0; font-size:12px;">Under the table the proposal says: ${pres.asks.map(a => `"To give you ${escapeHtml(a.gives)}, we need ${escapeHtml(a.need)}."`).join(' ')}</p>` : ''}
-            ${working.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px;">Show the working</summary>${working.map(w => `<p style="margin:8px 0 2px; font-size:12px; font-weight:600;">${escapeHtml(w.title)}</p><table style="font-size:12px;"><tbody>${w.rows.map(([k, v]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px; vertical-align:top;">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`).join('')}<p class="subtitle" style="margin:8px 0 0; font-size:12px;">A typical day in each season, hour by hour, 70% clear days and 30% overcast; ${ROI_ASSUMPTIONS.yieldPerKwPerDay[currentZone()] || 3.9} kWh per kW per day over the year; the battery at ${Math.round(ROI_ASSUMPTIONS.batteryRoundTrip * 100)}% round trip. Full detail: public/js/solar-roi.js.</p></details>` : ''}
+            ${working.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:13px;">Show the working</summary>${working.map(w => `<p style="margin:8px 0 2px; font-size:12px; font-weight:600;">${escapeHtml(w.title)}</p><table style="font-size:12px;"><tbody>${w.rows.map(([k, v]) => `<tr><td style="white-space:nowrap; color:var(--muted); padding-right:10px; vertical-align:top;">${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</tbody></table>`).join('')}<p class="subtitle" style="margin:8px 0 0; font-size:12px;">A typical day in each season, hour by hour, at today's prices. What is assumed is listed above, as the customer sees it. Full detail: public/js/solar-roi.js.</p></details>` : ''}
           </div>`;
       }
 

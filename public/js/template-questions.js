@@ -22,7 +22,13 @@ const GENERAL_QUESTIONS = [
 // One question for an existing system on both Solar and Battery quotes (it replaced the older
 // existing_system and existing_system_detail answers, item 70; solar-roi.js still reads the old
 // detail answer on older quotes). Required on a Battery quote: the battery couples to it.
-const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; add "to be removed" if it is coming off; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+
+// The export limit, typed in kW in total across the phases (or one tap for the usual ones). The
+// savings estimate caps what goes to the grid at it (solar-roi.js, roiExportLimitKw); blank or
+// "No limit" applies none. A bare number is saved as "7.5 kW". Asked once on a Solar quote with
+// Batteries as well.
+const EXPORT_LIMIT_QUESTION = { id: 'export_limit', type: 'kw', label: 'Export limit in kW, in total across the phases (blank if not known)', placeholder: 'e.g. 7.5', quick: ['No limit', 'Zero export', '5 kW', '10 kW'] };
 
 // Only questions something reads: the ready-to-send gate (required), the job's tasks, the
 // savings estimate, or the "What the customer gets" lines sent to the AI scope of works.
@@ -36,7 +42,7 @@ const SOLAR_QUESTIONS = [
   { id: 'phases', type: 'select', label: 'Supply (filled from the bill when it shows)', options: ['Single phase', 'Three phase', 'Not sure'] },
   { id: 'nmi', type: 'text', label: 'NMI (filled from the bill; copied to the job)', placeholder: '10 or 11 characters' },
   { id: 'dnsp', type: 'select', label: 'Network (DNSP, filled from the bill)', options: ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Other'] },
-  { id: 'export_limit', type: 'select', label: 'Export limit', options: ['Not known yet', 'No limit', '5 kW', '10 kW', 'Zero export'] },
+  EXPORT_LIMIT_QUESTION,
 ];
 
 // Battery proposal, and a Solar proposal with "Batteries as well". The battery quoted is the
@@ -53,6 +59,7 @@ const BATTERY_QUESTIONS = [
   { id: 'battery_location', type: 'select', label: 'Where the battery goes', options: ['Garage', 'External wall', 'Under cover outside', 'Dedicated room', 'Other'] },
   { id: 'state_rebate', type: 'yesno', label: 'State rebate or loan as well?' },
   { id: 'internet', type: 'yesno', label: 'Internet at the site for monitoring?' },
+  EXPORT_LIMIT_QUESTION,
 ];
 
 const TEMPLATE_QUESTIONS = {
@@ -149,6 +156,10 @@ function questionInputHtml(q, value, template) {
     </select>`;
   } else if (q.type === 'textarea') {
     input = `<textarea class="tq-input" data-qid="${q.id}" placeholder="${attr(q.placeholder)}" style="min-height:70px;">${attr(value)}</textarea>`;
+  } else if (q.type === 'kw') {
+    // a typed number of kW, with the usual answers one tap away (the buttons fill the box)
+    input = `<input class="tq-input" type="text" inputmode="decimal" data-qid="${q.id}" data-kw="1" placeholder="${attr(q.placeholder)}" value="${attr(value)}" />
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${(q.quick || []).map(o => `<button type="button" class="secondary tq-quick" data-qid="${q.id}" data-value="${attr(o)}" style="font-size:12px; padding:4px 10px;">${attr(o)}</button>`).join('')}</div>`;
   } else {
     const type = q.type === 'date' ? 'date' : q.type === 'number' ? 'number' : 'text';
     const extra = q.type === 'number' ? ' step="0.1" inputmode="decimal"' : '';
@@ -167,12 +178,23 @@ function renderTemplateQuestions(container, template, answers) {
     </div>
     ${g.questions.map(q => questionInputHtml(q, answers[q.id] ?? '', template)).join('')}
   `).join('');
+  // a one-tap answer fills its box and counts as a change (the page listens for change on .tq-input)
+  container.onclick = (e) => {
+    const b = e.target.closest('.tq-quick');
+    if (!b) return;
+    const box = container.querySelector(`.tq-input[data-qid="${b.dataset.qid}"]`);
+    if (!box) return;
+    box.value = b.dataset.value;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
 }
 
 function readTemplateAnswers(container) {
   const answers = {};
   container.querySelectorAll('.tq-input').forEach(el => {
-    const v = el.value.trim();
+    let v = el.value.trim();
+    // a kW box: a bare number is saved with its unit ("7.5" becomes "7.5 kW")
+    if (el.dataset.kw && /^\d+(\.\d+)?$/.test(v)) v = `${v} kW`;
     if (v) answers[el.dataset.qid] = v;
   });
   return answers;
