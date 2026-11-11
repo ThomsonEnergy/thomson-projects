@@ -33,6 +33,7 @@
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/template-questions.js?v=4"></script>
   <script src="/js/solar-roi.js?v=14"></script>
+  <script src="/js/quote-plan-list.js?v=1"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -1647,30 +1648,19 @@
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));
         // one row per retailer (its cheapest plan for this home), so one retailer's many plans cannot fill the list
-        const retailers = roiPlansByRetailer(res.rows, (key) => byId2[key].brand_name, (key) => byId2[key].display_name);
+        const retailers = roiPlansByRetailer(res.rows, (key) => byId2[key].brand_name, (key) => `${byId2[key].display_name} ${(byId2[key].roi_plan || {}).tariff || ''}`);
         const top = retailers.slice(0, 10);
         const chosenIds = new Set(planOptions.map(o => o.plan_id));
-        const diff = (n) => (n === 0 ? 'same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`);
-        const things = (p) => [...((p.notes || {}).eligibility || []), ...((p.notes || {}).conditions || [])].slice(0, 3).join('; ');
         el.innerHTML = `
           <p class="subtitle" style="margin:8px 0 4px; font-size:12px;">${escapeHtml(planResults.fetchedNote)} ${res.rows.length} plans costed${(() => {
             const isWholesale = (p) => ((p.notes || {}).cannot_cost || []).includes(ROI_WHOLESALE_REASON);
             const wholesale = planResults.uncostable.filter(isWholesale).length;
             const other = planResults.uncostable.length - wholesale;
             return `${other ? `, ${other} left out (demand charges, or rates that could not be read)` : ''}${wholesale ? `, ${wholesale} wholesale-price plans sold here not listed (we don't do estimates for wholesale rates)` : ''}`;
-          })()}. ${retailers.length} retailers, each one's cheapest plan for this home, cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
+          })()}. ${top.length < retailers.length ? `The ${top.length} cheapest of ${retailers.length} retailers` : `${retailers.length} retailer${retailers.length === 1 ? '' : 's'}`}, each one's cheapest plan for this home, cheapest with the system first; current plan on the same basis: ${money(res.current.billNow)} now, ${money(res.current.billAfter)} with the system.</p>
           <div style="overflow-x:auto;"><table style="font-size:12.5px; min-width:640px;">
             <thead><tr><th>Show</th><th style="text-align:left;">Retailer and plan</th><th>Yearly bill now</th><th>With the system</th><th>Vs current plan</th><th>Feed-in</th><th style="text-align:left;">Things to check</th></tr></thead>
-            <tbody>${top.map(g => {
-              const row = (r, extra) => { const p = byId2[r.key]; return `<tr${extra ? ' style="background:var(--surface-2);"' : ''}>
-              <td><input type="checkbox" class="bc-plan-pick" data-id="${escapeHtml(r.key)}" style="width:auto;" ${chosenIds.has(r.key) ? 'checked' : ''} /></td>
-              <td>${escapeHtml(p.brand_name || '')}: ${escapeHtml(p.display_name || '')}<br><span class="subtitle" style="font-size:11px;">${escapeHtml(r.key)}</span></td>
-              <td>${money(r.billNow)}</td><td><strong>${money(r.billAfter)}</strong></td><td>${diff(r.vsCurrentAfter)}</td><td>${r.feedIn} c</td>
-              <td style="font-size:11.5px;">${escapeHtml(things(p) || '-')}</td></tr>`; };
-              const open = planOpenBrands.has(g.brand);
-              const moreRow = g.more.length ? `<tr><td></td><td colspan="6" style="padding-top:0;"><button type="button" class="link-quiet bc-plan-more" data-brand="${escapeHtml(g.brand)}" style="background:none; border:none; padding:0; font-size:12px; cursor:pointer;">${open ? 'Hide' : `${g.more.length} more`} from ${escapeHtml(g.brand)}</button></td></tr>` : '';
-              return row(g.best) + moreRow + (open ? g.more.slice(0, 8).map(r => row(r, true)).join('') : '');
-            }).join('')}</tbody>
+            <tbody>${planFinderRowsHtml({ groups: top, planOf: (key) => byId2[key], chosenIds, openBrands: planOpenBrands, money })}</tbody>
           </table></div>`;
         el.querySelectorAll('.bc-plan-more').forEach(b => b.addEventListener('click', () => {
           if (planOpenBrands.has(b.dataset.brand)) planOpenBrands.delete(b.dataset.brand); else planOpenBrands.add(b.dataset.brand);

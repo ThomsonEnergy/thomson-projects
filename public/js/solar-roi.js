@@ -779,7 +779,8 @@ function roiComparePlans(argsIn) {
 
 // The plan list staff pick from: one group per retailer, in the order of its cheapest plan for this
 // home, so a retailer with many near-identical plans cannot fill the list. rows are roiComparePlans
-// rows (cheapest with the system first); brandOf(key) and nameOf(key) name the retailer and the plan.
+// rows (cheapest with the system first); brandOf(key) and nameOf(key) name the retailer and the plan
+// (the caller adds the tariff type to the name, so a flat and a time-of-use plan of one name both stay).
 // Returns [{ brand, best, more }]: `more` is that retailer's other plans, the cheapest of each name.
 function roiPlansByRetailer(rows, brandOf, nameOf) {
   const groups = new Map();

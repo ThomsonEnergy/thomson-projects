@@ -1492,6 +1492,13 @@ Touches: `netlify/functions/_shared/sm8-import.js` (payments per job, the deposi
 
 Building in: `claude/simplify-quoting-form-0it08b` (72a first, then 72b, then item 73 on the same branch name).
 
+**72a as built (11 Nov 2026, LIVE, no migration):** points 1, 5 and 6. Proof: `node scripts/proposal-fits.js` fails on the old code (a page 384 px past its sheet, 98 px too wide, 442 px too wide on a phone) and passes on the new; a fresh reviewer swept every page break on 14 quote variants. Calls made in the build:
+- Find plans keeps a flat and a time-of-use plan of the same name (a meter allows one or the other); only a dearer plan of the same name and tariff is left out.
+- The savings sheets lost their corner graphic, so figures never sit on it.
+- Not checked: whether Pylon's API gives the proposal link (app.getpylon.com is blocked from cloud sessions). The link is still pasted on step 3.
+- Found while reading for 72b, not fixed here: the client's proposal is only given five of the savings inputs (`get_quote_by_token` passes `solar_price`, `battery_price`, `current`, `alt`, `plan_options`), so night charging from the grid, selling from the battery and the bill's GST setting typed on the bill card never reach the proposal. No quote uses them today. Fixing it, and passing the new assumptions, needs that function redefined: one migration in 72b, SQL to the owner first.
+- Left as they are (same on the old code, outside this change): the Your system table and a variation's price table do not carry over past one sheet (26 equipment rows or 34 variation lines), the investment breakdown stops after 12 sheets, and a quick estimate's rates table is 30 px too wide on a phone.
+
 Owner's ask (11 Nov 2026): "The quote doc needs fixing. The calc page runs off the page. So does the plan options. Only Red Energy came up as an option and there was heaps of Red Energy plans, nothing else. The Your savings page needs to be looked over and made sure it's correct. Be upfront about the guesses in the calcs. Make it super simple for the owner to read and understand." Then: "Pylon isn't showing in the solar proposal too."
 
 Looked at on Q1014 (31.04 kW with a battery, Energex, 4211), rendered in a local browser from its real figures, and the maths re-run in node by a second reviewer.

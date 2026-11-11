@@ -215,8 +215,9 @@
     /* the three savings pictures one under the other, each wide enough to read */
     .roi-charts, .roi-charts:has(> :only-child) { grid-template-columns: 1fr; gap: 22px; }
     .roi-fig svg { max-width: 340px; }
-    .qtable th { font-size: 13px; }
-    .roi-table td.num { white-space: normal; }
+    .qtable:not(.roi-table) th { font-size: 13px; }
+    /* a savings table with a second plan column: its headings and figures wrap inside the screen */
+    .roi-table th.num, .roi-table td.num { white-space: normal; }
   }
 
   /* Phone: a fixed bottom bar with the total and the approve button while there is something to approve.
@@ -854,7 +855,7 @@
               <thead><tr><th>Retailer and plan</th><th class="num">Yearly bill${planCmp.withSystem ? ' with your new system' : ''}</th><th class="num">Against your plan now</th></tr></thead>
               <tbody>
                 <tr><td>Your current plan (estimated the same way)<span class="plan-sub">Solar feed-in ${esc(String(planCmp.current.feedIn))} c/kWh</span></td><td class="num">${money(planCmp.current.billAfter)}</td><td class="num">-</td></tr>
-                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; '); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${money(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
+                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; ').slice(0, 300); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${money(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
               </tbody>
             </table>
             <p class="note-line">${esc(ROI_PLAN_DISCLAIMER)} ${esc(ROI_WHOLESALE_NOTE)}${asAt ? ` Plans as published on ${new Date(asAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}; look a plan up on energymadeeasy.gov.au by its plan ID.` : ''}</p>`;

@@ -37,9 +37,29 @@
   "pylon_link": "https://app.getpylon.com/proposals/EXAMPLE123",
   "roi_inputs": {
    "alt": {
-    "name": "",
-    "tariff": "flat",
-    "enabled": false
+    "enabled": true,
+    "name": "Example Go Variable",
+    "tariff": "tou",
+    "peak": 48.5,
+    "shoulder": 28,
+    "off_peak": 18,
+    "supply": 150,
+    "feed_in": 7,
+    "windows": [
+     {
+      "band": "peak",
+      "hours": "16:00-20:00",
+      "days": "all",
+      "months": ""
+     },
+     {
+      "band": "shoulder",
+      "hours": "07:00-16:00",
+      "days": "all",
+      "months": ""
+     }
+    ],
+    "other": "off_peak"
    },
    "current": {},
    "solar_price": null,
