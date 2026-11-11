@@ -23,6 +23,18 @@ const GENERAL_QUESTIONS = [
 // existing_system and existing_system_detail answers, item 70; solar-roi.js still reads the old
 // detail answer on older quotes). Required on a Battery quote: the battery couples to it.
 const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+// Whether that existing system stays once this job is done. The savings estimate counts a system
+// that is coming off in the home as it is now and not after (solar-roi.js, roiExistingRemoved; the
+// two answers are ROI_EXISTING_STAYS and ROI_EXISTING_GOES there). Saved under existing_system,
+// the key the proposal is already given (older quotes hold "Existing solar" and the like under it,
+// which read as not answered).
+const EXISTING_AFTER_QUESTION = { id: 'existing_system', type: 'select', label: 'Existing system after this job (when there is one)', options: ['Stays on the roof', 'Coming off the roof'] };
+
+// The export limit, typed in kW in total across the phases (or one tap for the usual ones). The
+// savings estimate caps what goes to the grid at it (solar-roi.js, roiExportLimitKw); blank or
+// "No limit" applies none. A bare number is saved as "7.5 kW". Asked once on a Solar quote with
+// Batteries as well.
+const EXPORT_LIMIT_QUESTION = { id: 'export_limit', type: 'kw', label: 'Export limit in kW, in total across the phases (blank if not known)', placeholder: 'e.g. 7.5', quick: ['No limit', 'Zero export', '5 kW', '10 kW'] };
 
 // Only questions something reads: the ready-to-send gate (required), the job's tasks, the
 // savings estimate, or the "What the customer gets" lines sent to the AI scope of works.
@@ -31,12 +43,13 @@ const SOLAR_QUESTIONS = [
   { id: 'with_battery', type: 'yesno', label: 'Batteries as well? (adds the battery questions and rules)', required: true },
   { id: 'life_support', type: 'yesno', label: 'Anyone on site on medical or life-support equipment? (Yes adds a job task to tell the network)', required: true },
   EXISTING_PV_QUESTION,
+  EXISTING_AFTER_QUESTION,
   { id: 'grid_type', type: 'select', label: 'Grid connection', options: ['Grid connected', 'Grid connected, VPP interest', 'Off grid'] },
   { id: 'roof_type', type: 'select', label: 'Roof type', options: ['Tin (Colorbond)', 'Tile', 'Klip-lok', 'Flat or membrane', 'Ground mount', 'Other'] },
   { id: 'phases', type: 'select', label: 'Supply (filled from the bill when it shows)', options: ['Single phase', 'Three phase', 'Not sure'] },
   { id: 'nmi', type: 'text', label: 'NMI (filled from the bill; copied to the job)', placeholder: '10 or 11 characters' },
   { id: 'dnsp', type: 'select', label: 'Network (DNSP, filled from the bill)', options: ['Essential Energy', 'Ausgrid', 'Endeavour Energy', 'Energex', 'Other'] },
-  { id: 'export_limit', type: 'select', label: 'Export limit', options: ['Not known yet', 'No limit', '5 kW', '10 kW', 'Zero export'] },
+  EXPORT_LIMIT_QUESTION,
 ];
 
 // Battery proposal, and a Solar proposal with "Batteries as well". The battery quoted is the
@@ -44,6 +57,7 @@ const SOLAR_QUESTIONS = [
 const BATTERY_QUESTIONS = [
   { id: 'backup_needs', type: 'text', label: 'What must stay on in a blackout', placeholder: 'e.g. fridge, lights, pump, nothing', required: true },
   EXISTING_PV_QUESTION,
+  EXISTING_AFTER_QUESTION,
   { id: 'location_clear', type: 'yesno', label: 'Location clear of habitable rooms, exits and heat, with AS/NZS 5139 clearances?', required: true },
   { id: 'vpp_capable', type: 'yesno', label: 'Battery (or its inverter) VPP capable?', required: true },
   { id: 'cec_listed', type: 'yesno', label: 'Battery on the CEC approved product list?', required: true },
@@ -53,6 +67,7 @@ const BATTERY_QUESTIONS = [
   { id: 'battery_location', type: 'select', label: 'Where the battery goes', options: ['Garage', 'External wall', 'Under cover outside', 'Dedicated room', 'Other'] },
   { id: 'state_rebate', type: 'yesno', label: 'State rebate or loan as well?' },
   { id: 'internet', type: 'yesno', label: 'Internet at the site for monitoring?' },
+  EXPORT_LIMIT_QUESTION,
 ];
 
 const TEMPLATE_QUESTIONS = {
@@ -89,10 +104,26 @@ const RETIRED_QUESTION_LABELS = {
   walls_open: 'Wall and ceiling access',
 };
 
-// Answers to retired questions this quote still carries, as { label, value }.
-function earlierAnswers(answers) {
+// True when a saved answer is one this question can still give. A choice question whose saved value
+// is not among its choices holds an older answer under the same key (existing_system was "Existing
+// solar" and the like before it became "Existing system after this job"): that value belongs to the
+// retired label below, not to the question.
+function answerFitsQuestion(q, value) {
+  if (!String(value ?? '').trim()) return false;
+  if (q.type === 'yesno') return value === 'Yes' || value === 'No';
+  if (q.type === 'select') return q.options.includes(value);
+  return true;
+}
+
+// Answers to retired questions this quote still carries, as { label, value }: every retired key with
+// a value, unless a current question of that key can give that value (then it prints there).
+function earlierAnswers(answers, template) {
   answers = answers || {};
-  return Object.keys(RETIRED_QUESTION_LABELS).filter(id => String(answers[id] ?? '').trim()).map(id => ({ label: RETIRED_QUESTION_LABELS[id], value: answers[id] }));
+  const live = new Map();
+  questionGroupsForQuote(template, answers).forEach(g => g.questions.forEach(q => live.set(q.id, q)));
+  return Object.keys(RETIRED_QUESTION_LABELS)
+    .filter(id => String(answers[id] ?? '').trim() && !(live.has(id) && answerFitsQuestion(live.get(id), answers[id])))
+    .map(id => ({ label: RETIRED_QUESTION_LABELS[id], value: answers[id] }));
 }
 
 const TEMPLATE_QUESTION_TITLES = {
@@ -149,6 +180,10 @@ function questionInputHtml(q, value, template) {
     </select>`;
   } else if (q.type === 'textarea') {
     input = `<textarea class="tq-input" data-qid="${q.id}" placeholder="${attr(q.placeholder)}" style="min-height:70px;">${attr(value)}</textarea>`;
+  } else if (q.type === 'kw') {
+    // a typed number of kW, with the usual answers one tap away (the buttons fill the box)
+    input = `<input class="tq-input" type="text" inputmode="decimal" data-qid="${q.id}" data-kw="1" placeholder="${attr(q.placeholder)}" value="${attr(value)}" />
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${(q.quick || []).map(o => `<button type="button" class="secondary tq-quick" data-qid="${q.id}" data-value="${attr(o)}" style="font-size:12px; padding:4px 10px;">${attr(o)}</button>`).join('')}</div>`;
   } else {
     const type = q.type === 'date' ? 'date' : q.type === 'number' ? 'number' : 'text';
     const extra = q.type === 'number' ? ' step="0.1" inputmode="decimal"' : '';
@@ -167,12 +202,23 @@ function renderTemplateQuestions(container, template, answers) {
     </div>
     ${g.questions.map(q => questionInputHtml(q, answers[q.id] ?? '', template)).join('')}
   `).join('');
+  // a one-tap answer fills its box and counts as a change (the page listens for change on .tq-input)
+  container.onclick = (e) => {
+    const b = e.target.closest('.tq-quick');
+    if (!b) return;
+    const box = container.querySelector(`.tq-input[data-qid="${b.dataset.qid}"]`);
+    if (!box) return;
+    box.value = b.dataset.value;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+  };
 }
 
 function readTemplateAnswers(container) {
   const answers = {};
   container.querySelectorAll('.tq-input').forEach(el => {
-    const v = el.value.trim();
+    let v = el.value.trim();
+    // a kW box: a bare number is saved with its unit ("7.5" becomes "7.5 kW")
+    if (el.dataset.kw && /^\d+(\.\d+)?$/.test(v)) v = `${v} kW`;
     if (v) answers[el.dataset.qid] = v;
   });
   return answers;
@@ -182,11 +228,11 @@ function templateAnswersSummaryHtml(template, answers) {
   answers = answers || {};
   const rows = [];
   questionGroupsForQuote(template, answers).forEach(g => {
-    g.questions.filter(q => answers[q.id]).forEach(q => {
+    g.questions.filter(q => answerFitsQuestion(q, answers[q.id])).forEach(q => {
       rows.push(`<tr><td>${q.label.replace(/</g, '&lt;')}</td><td>${String(answers[q.id]).replace(/</g, '&lt;')}</td></tr>`);
     });
   });
-  earlierAnswers(answers).forEach(a => rows.push(`<tr><td>${a.label.replace(/</g, '&lt;')}</td><td>${String(a.value).replace(/</g, '&lt;')}</td></tr>`));
+  earlierAnswers(answers, template).forEach(a => rows.push(`<tr><td>${a.label.replace(/</g, '&lt;')}</td><td>${String(a.value).replace(/</g, '&lt;')}</td></tr>`));
   return rows.length ? `<table><tbody>${rows.join('')}</tbody></table>` : `<p class="subtitle">No answers recorded yet.</p>`;
 }
 
@@ -195,9 +241,9 @@ function templateAnswersText(template, answers) {
   answers = answers || {};
   const lines = [];
   questionGroupsForQuote(template, answers).forEach(g => {
-    g.questions.filter(q => answers[q.id]).forEach(q => lines.push(`${q.label}: ${answers[q.id]}`));
+    g.questions.filter(q => answerFitsQuestion(q, answers[q.id])).forEach(q => lines.push(`${q.label}: ${answers[q.id]}`));
   });
-  earlierAnswers(answers).forEach(a => lines.push(`${a.label}: ${a.value}`));
+  earlierAnswers(answers, template).forEach(a => lines.push(`${a.label}: ${a.value}`));
   return lines.join('\n');
 }
 
