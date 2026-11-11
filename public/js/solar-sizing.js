@@ -9,7 +9,7 @@
 const suggestSizes = (() => {
   const roi = (typeof module !== 'undefined' && module.exports)
     ? require('./solar-roi.js')
-    : { ROI_ASSUMPTIONS, billMetrics, existingSolarKw, roiExportLimitKw };
+    : { ROI_ASSUMPTIONS, billMetrics, existingSolarKw, roiExportLimitKw, roiSiteYield };
 
   // What sizing assumes, on top of the estimate's own values
   const SIZING = {
@@ -35,10 +35,10 @@ const suggestSizes = (() => {
   }
 
   // Suggested solar kW and battery kWh from the bill and the pre-quote answers. Deterministic.
-  function sizesFor({ reading, answers, zoneRating }) {
+  function sizesFor({ reading, answers, zoneRating, siteAddress }) {
     const m = roi.billMetrics(reading);
     const a = answers || {};
-    const yieldPerKw = roi.ROI_ASSUMPTIONS.yieldPerKwPerDay[zoneRating] || roi.ROI_ASSUMPTIONS.yieldPerKwPerDay[roi.ROI_ASSUMPTIONS.defaultZoneRating];
+    const yieldPerKw = roi.roiSiteYield(zoneRating, siteAddress);
     const existingKw = roi.existingSolarKw(a);
     const notes = [];
     let solarKw = null, solarRaw = null;
