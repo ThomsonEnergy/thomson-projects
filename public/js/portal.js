@@ -189,7 +189,7 @@
 
       <h2 class="pl-h">Photos</h2>
       <div class="pl-card">
-        ${d.photos.length ? `<div class="pl-grid">${d.photos.map((p, i) => `<div><img src="${esc(p.url)}" data-i="${i}" loading="lazy" alt="" /><div class="cap">${esc(p.caption || p.when)}</div></div>`).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`}
+        ${d.photos.length ? `<div class="pl-grid">${d.photos.map((p, i) => `<div>${p.video ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>` : `<img src="${esc(p.url)}" data-i="${i}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`}
       </div>
 
       <h2 class="pl-h">Documents</h2>
@@ -197,7 +197,8 @@
         ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
         ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener">Open</a></div>` : ''}
       </div>`;
-    main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(d.photos, Number(img.dataset.i))));
+    const pictures = d.photos.filter((p) => !p.video);
+    main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, pictures.indexOf(d.photos[Number(img.dataset.i)]))));
     if (d.money && d.direct && d.kind === 'job') showWork(id);
   }
 

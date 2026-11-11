@@ -6,7 +6,9 @@
 // portal-data.js carries it.
 //
 //   requirePortalSession(event) -> { admin, session, scope } or null (not logged in)
-//   portalScope(admin, email)   -> { email, clients: [{ id, name, main, offAt }], contactJobIds, staffUser }
+//   portalScope(admin, email, { staffCheck })
+//                               -> { email, clients: [{ id, name, main, offAt }], contactJobIds, staffUser }
+//     staffCheck (one Auth listUsers call) only at login; a session's scope skips it.
 //     clients: every client record the email is on (the client's own email, or a ticked contact);
 //       main is true on the client's own email (it may let others in, PR 2). A client with
 //       portal_off_at set is left out of the scope (so a shut-out client sees nothing).
@@ -27,20 +29,23 @@ const SEEN_REFRESH_MINUTES = 10;
 
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
 const normEmail = (s) => String(s || '').trim().toLowerCase();
+// ilike treats % and _ as wildcards: an email is matched letter for letter
+const likeSafe = (s) => String(s).replace(/[\\%_]/g, '\\$&');
 const tokenHash = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 // the code's hash is salted with the email, so two people sent the same digits never share a hash
 const codeHash = (email, code) => crypto.createHash('sha256').update(`${normEmail(email)}:${String(code).replace(/\D/g, '')}`).digest('hex');
 
-async function portalScope(admin, emailIn) {
+async function portalScope(admin, emailIn, { staffCheck = true } = {}) {
   const email = normEmail(emailIn);
   if (!email) return { email, clients: [], contactJobIds: [], staffUser: false };
+  const like = likeSafe(email);
   const [{ data: own }, { data: ticked }, { data: jobContacts }, staffUser] = await Promise.all([
-    admin.from('clients').select('id, name, portal_off_at').ilike('email', email),
-    admin.from('client_contacts').select('client_id, clients(id, name, portal_off_at)').ilike('email', email).eq('portal_access', true),
-    admin.from('job_contacts').select('project_id').ilike('email', email),
-    isStaffEmail(admin, email),
+    admin.from('clients').select('id, name, portal_off_at').ilike('email', like),
+    admin.from('client_contacts').select('client_id, clients(id, name, portal_off_at)').ilike('email', like).eq('portal_access', true),
+    admin.from('job_contacts').select('project_id').ilike('email', like),
+    staffCheck ? isStaffEmail(admin, email) : Promise.resolve(false),
   ]);
   const byId = {};
   (own || []).forEach((c) => { byId[c.id] = { id: c.id, name: c.name, main: true, offAt: c.portal_off_at }; });
@@ -78,8 +83,8 @@ async function requirePortalSession(event) {
   const admin = getAdminClient();
   const { data: session } = await admin.from('portal_sessions').select('*').eq('token_hash', tokenHash(token)).maybeSingle();
   if (!session || session.ended_at || new Date(session.expires_at).getTime() < Date.now()) return null;
-  const scope = await portalScope(admin, session.email);
-  if (scope.staffUser || (!scope.clients.length && !scope.contactJobIds.length)) return null;
+  const scope = await portalScope(admin, session.email, { staffCheck: false });
+  if (!scope.clients.length && !scope.contactJobIds.length) return null;
   const seenAgo = Date.now() - new Date(session.last_seen_at).getTime();
   if (seenAgo > SEEN_REFRESH_MINUTES * 60 * 1000) {
     await admin.from('portal_sessions').update({ last_seen_at: new Date().toISOString() }).eq('id', session.id);
@@ -87,4 +92,4 @@ async function requirePortalSession(event) {
   return { admin, session, scope };
 }
 
-module.exports = { requirePortalSession, portalScope, tokenHash, newToken, codeHash, newCode, json, normEmail, SESSION_DAYS };
+module.exports = { requirePortalSession, portalScope, bearer, tokenHash, newToken, codeHash, newCode, json, normEmail, SESSION_DAYS };

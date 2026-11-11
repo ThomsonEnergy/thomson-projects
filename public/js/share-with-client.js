@@ -21,7 +21,7 @@
   async function toggle(kind, id, on, projectId, refresh) {
     const table = kind === 'photo' ? 'project_photos' : 'project_documents';
     const { error } = await supabaseClient.from(table).update({ client_visible: on }).eq('id', id);
-    if (error) { showToast(friendlyError(error), { error: true }); refresh(); return; }
+    if (error) { showToast(friendlyError(error), { error: true }); const box = document.querySelector(`input[data-swc-kind="${kind}"][data-swc-id="${id}"]`); if (box) box.checked = !on; refresh(); return; }
     logActivity('project', projectId, on ? 'client_share' : 'client_unshare', `${on ? 'Shared' : 'Hid'} a ${kind} ${on ? 'with' : 'from'} the client`).catch(() => {});
     refresh();
   }

@@ -19,6 +19,9 @@ const { RULES } = require('./labour-bands');
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'Someone';
 const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+// the Sydney date of a timestamp (never the UTC date: 9am Sydney is the day before in UTC)
+const sydneyKey = (iso) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
 const DAY = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Australia/Sydney' });
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
 const dayText = (dateKey) => DAY.format(new Date(`${dateKey}T12:00:00+10:00`));
@@ -69,11 +72,13 @@ async function bookingsFor(admin, projectIds, { from, limit } = {}) {
   return Object.values(byKey).map(({ startRaw, endRaw, ...b }) => b);
 }
 
-// Who is clocked in on these jobs right now.
+// Who is clocked in on these jobs right now: clocked in today (Sydney); a clock-out forgotten
+// on an earlier day is not "on site now".
 async function onSiteFor(admin, projectIds) {
   if (!projectIds.length) return [];
   const { data } = await admin.from('time_entries').select('project_id, clock_in, profiles(full_name)').in('project_id', projectIds).is('clock_out', null).order('clock_in');
-  return (data || []).map((e) => ({ projectId: e.project_id, who: firstName(e.profiles?.full_name), since: timeText(e.clock_in) }));
+  const today = sydneyToday();
+  return (data || []).filter((e) => sydneyKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: firstName(e.profiles?.full_name), since: timeText(e.clock_in) }));
 }
 
 // Invoices the client has been sent (made but not sent stay hidden), with a plain status word.
@@ -91,7 +96,7 @@ async function invoicesFor(admin, projectIds, { onlyOpen } = {}) {
       const overdue = !paid && i.due_date && i.due_date < today;
       return {
         id: i.id, projectId: i.project_id, number: i.invoice_number, description: i.description || (i.is_deposit ? 'Deposit' : ''),
-        sent: i.sent_at ? dayText(i.sent_at.slice(0, 10)) : '', due: i.due_date ? dayText(i.due_date) : '', dueKey: i.due_date || '',
+        sent: i.sent_at ? dayText(sydneyKey(i.sent_at)) : '', due: i.due_date ? dayText(i.due_date) : '', dueKey: i.due_date || '',
         balance, status: paid ? 'paid' : overdue ? 'overdue' : 'awaiting',
         label: paid ? 'Paid' : overdue ? 'Overdue' : 'Awaiting payment',
         url: `/invoice.html?token=${i.invoice_token}`,
@@ -193,7 +198,7 @@ async function portalProject(admin, scope, projectId) {
     p.money ? invoicesFor(admin, [p.id]) : Promise.resolve([]),
     admin.from('project_photos').select('id, url, caption, created_at').eq('project_id', p.id).eq('client_visible', true).order('created_at', { ascending: false }),
     admin.from('project_documents').select('id, file_path, file_name, mime_type, created_at').eq('project_id', p.id).eq('client_visible', true).order('created_at', { ascending: false }),
-    admin.from('job_contacts').select('role, side, profiles(full_name)').eq('project_id', p.id).eq('side', 'thomson'),
+    admin.from('job_contacts').select('role, side, profiles!job_contacts_profile_id_fkey(full_name)').eq('project_id', p.id).eq('side', 'thomson'),
     p.money ? admin.from('job_variation_entries').select('id, variation_number, variation_token, description, approval_status, variation_type, pdf_path, created_at').eq('project_id', p.id).eq('variation_type', 'fixed').in('approval_status', ['sent', 'approved']).order('created_at') : Promise.resolve({ data: [] }),
     company(admin),
     p.money ? admin.from('clients').select('id, agreement_token, agreement_sent_at, agreement_withdrawn_at, agreement_document_path, rate_cards(name, percent)').eq('id', p.client_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -203,12 +208,12 @@ async function portalProject(admin, scope, projectId) {
 
   // Documents: the ticked ones, plus what we have already sent them (the quote PDF once sent,
   // approved variations, the agreement letter). Signed links last an hour.
-  const files = (docs.data || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: dayText(d.created_at.slice(0, 10)) }));
-  if (p.money && p.sent_at && p.quote_pdf_path) files.unshift({ path: p.quote_pdf_path, name: `${projectRef(p)} quote.pdf`, mime: 'application/pdf', when: dayText(p.sent_at.slice(0, 10)) });
-  (variations.data || []).filter((v) => v.approval_status === 'approved' && v.pdf_path).forEach((v) => files.push({ path: v.pdf_path, name: `Variation ${v.variation_number || ''}.pdf`.replace(/\s+\./, '.'), mime: 'application/pdf', when: dayText(v.created_at.slice(0, 10)) }));
+  const files = (docs.data || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: dayText(sydneyKey(d.created_at)) }));
+  if (p.money && p.sent_at && p.quote_pdf_path) files.unshift({ path: p.quote_pdf_path, name: `${projectRef(p)} quote.pdf`, mime: 'application/pdf', when: dayText(sydneyKey(p.sent_at)) });
+  (variations.data || []).filter((v) => v.approval_status === 'approved' && v.pdf_path).forEach((v) => files.push({ path: v.pdf_path, name: `Variation ${v.variation_number || ''}.pdf`.replace(/\s+\./, '.'), mime: 'application/pdf', when: dayText(sydneyKey(v.created_at)) }));
   const cl = client.data;
   const agreementOn = !!(cl && cl.agreement_sent_at && !cl.agreement_withdrawn_at && cl.agreement_token);
-  if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: dayText(cl.agreement_sent_at.slice(0, 10)) });
+  if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: dayText(sydneyKey(cl.agreement_sent_at)) });
   const signed = files.length ? await admin.storage.from('project-documents').createSignedUrls(files.map((f) => f.path), 3600) : { data: [] };
   const urlByPath = {};
   (signed.data || []).forEach((s) => { if (s.signedUrl && !s.error) urlByPath[s.path] = s.signedUrl; });
@@ -225,7 +230,7 @@ async function portalProject(admin, scope, projectId) {
     bookings: bookings.map(({ projectId, ...b }) => b),
     pastBookings: pastBookings.map(({ projectId, ...b }) => b),
     onSite: onSite.map(({ projectId, ...o }) => o),
-    photos: (photos.data || []).map((ph) => ({ url: ph.url, caption: ph.caption || '', when: dayText(ph.created_at.slice(0, 10)) })),
+    photos: (photos.data || []).map((ph) => ({ url: ph.url, caption: ph.caption || '', when: dayText(sydneyKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices: invoices.map(({ projectId, ...i }) => i),
     variations: (variations.data || []).map((v) => ({ number: v.variation_number, description: v.description, status: v.approval_status === 'sent' ? 'To sign' : 'Signed', url: v.approval_status === 'sent' ? `/quote.html?variation=${v.variation_token}` : null })),
@@ -261,7 +266,7 @@ async function portalWork(admin, scope, projectId) {
   const materials = [];
   d.centres.forEach((c) => c.materialLines.forEach((m) => {
     if (!m.billable && !m.invoiced) return;
-    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? dayText(m.createdAt.slice(0, 10)) : '' });
+    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? dayText(sydneyKey(m.createdAt)) : '' });
   }));
   const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0] || { markupPercent: 0 }).markupPercent;
   const purchaseOrders = (pos || []).filter((po) => po.po_kind !== 'tools').map((po) => {

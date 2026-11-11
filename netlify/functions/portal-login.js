@@ -101,11 +101,14 @@ async function verify(admin, event, email, codeIn, device) {
   return S.json(200, { ok: true, token, expiresAt: new Date(now.getTime() + S.SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString() });
 }
 
+// By the token alone (no scope check), so a client who was shut out can still end their sessions.
 async function logout(event, admin, everywhere) {
-  const auth = await S.requirePortalSession(event);
-  if (!auth) return S.json(200, { ok: true });
+  const token = S.bearer(event);
+  if (!token) return S.json(200, { ok: true });
+  const { data: session } = await admin.from('portal_sessions').select('id, email').eq('token_hash', S.tokenHash(token)).maybeSingle();
+  if (!session) return S.json(200, { ok: true });
   const ended = new Date().toISOString();
-  if (everywhere) await admin.from('portal_sessions').update({ ended_at: ended }).eq('email', auth.session.email).is('ended_at', null);
-  else await admin.from('portal_sessions').update({ ended_at: ended }).eq('id', auth.session.id);
+  if (everywhere) await admin.from('portal_sessions').update({ ended_at: ended }).eq('email', session.email).is('ended_at', null);
+  else await admin.from('portal_sessions').update({ ended_at: ended }).eq('id', session.id);
   return S.json(200, { ok: true });
 }

@@ -98,3 +98,38 @@ begin
     (v_inv3, 'paid', 'Paid in Xero ($5,500.00 received)', null, 'Xero', now() - interval '30 days');
   update public.cost_centres set invoiced_amount = coalesce(invoiced_amount, 0) + 9500 where id = v_centre;
 end $$;
+
+-- Client portal smoke data (item 74, scripts/steps/client-portal.js): Acme Builders (TEST) logged in on a
+-- known token, J9002 as a do and charge job with a clocked shift last week, a booking the client was told
+-- about, one shared and one hidden photo, and PO9901 waiting for pickup. The token is
+-- smoke-portal-token-acme-0001 (only its hash is here), staging only.
+do $$
+declare
+  v_job uuid := '00000000-0000-4000-c000-000000000002';
+  v_staff uuid;
+  v_centre uuid;
+  v_po uuid;
+begin
+  if exists (select 1 from public.portal_sessions where token_hash = 'e51e7c03e21d2eb2f63a5e62b72b2ddbebf453bc779fbbc674d5da52e44a42c9') then return; end if;
+  select id into v_staff from public.profiles where role = 'staff' and active order by created_at limit 1;
+  if v_staff is null then select id into v_staff from public.profiles where active order by created_at limit 1; end if;
+  select id into v_centre from public.cost_centres where project_id = v_job order by sort_order limit 1;
+  if v_centre is null then
+    insert into public.cost_centres (project_id, name, sort_order, quoted_amount, invoiced_amount, estimated_labour_cost, estimated_material_cost, markup_percent)
+      values (v_job, 'Labour & Materials', 1, 78417.35, 0, 30000, 30000, 20) returning id into v_centre;
+  end if;
+  insert into public.portal_sessions (token_hash, email, device, expires_at)
+    values ('e51e7c03e21d2eb2f63a5e62b72b2ddbebf453bc779fbbc674d5da52e44a42c9', 'accounts@acme.example.test', 'smoke', now() + interval '10 years');
+  insert into public.time_entries (staff_id, project_id, clock_in, clock_out, cost_centre_id, time_category, notes, billable)
+    values (v_staff, v_job, (date_trunc('day', now() at time zone 'Australia/Sydney') - interval '6 days' + interval '7 hours') at time zone 'Australia/Sydney', (date_trunc('day', now() at time zone 'Australia/Sydney') - interval '6 days' + interval '15 hours 30 minutes') at time zone 'Australia/Sydney', v_centre, 'job', 'portal smoke', true);
+  insert into public.schedule_assignments (staff_id, project_id, assignment_date, start_time, end_time, block_type, note, client_informed_at)
+    values (v_staff, v_job, (now() at time zone 'Australia/Sydney')::date + 3, '07:00', '15:30', 'job', 'portal smoke', now());
+  update public.projects set proposal_template = 'direct_job', client_address = coalesce(client_address, '3 Fake Avenue, Mocktown NSW 2001'), pipeline_stage = 'job_booked' where id = v_job;
+  insert into public.project_photos (project_id, staff_id, url, caption, client_visible) values
+    (v_job, v_staff, 'https://jpmaudhhsahjhnrufzez.supabase.co/storage/v1/object/public/site-photos/portal-smoke/switchboard.jpg', 'Switchboard before (portal smoke)', true),
+    (v_job, v_staff, 'https://jpmaudhhsahjhnrufzez.supabase.co/storage/v1/object/public/site-photos/portal-smoke/hidden.jpg', 'Internal (portal smoke)', false);
+  insert into public.purchase_orders (project_id, cost_centre_id, supplier_name, po_number, description, amount, status, order_date)
+    values (v_job, v_centre, 'Haymans (TEST)', 'PO9901', 'Switchboard gear', 640, 'ordered', (now() at time zone 'Australia/Sydney')::date - 2) returning id into v_po;
+  insert into public.purchase_order_line_items (po_id, description, quantity, unit_cost, received) values
+    (v_po, '18 pole switchboard enclosure', 1, 320, false), (v_po, 'RCBO 20A', 8, 40, false);
+end $$;

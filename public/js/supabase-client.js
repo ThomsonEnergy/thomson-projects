@@ -8141,7 +8141,7 @@ function xeroBreakdownHtml(invoice, mappings, clientType) {
 // still here; login and home load the animated version themselves. Left off
 // the client-facing pages, which also keeps it out of quote and invoice PDFs.
 (function () {
-  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates', 'po', 'portal'];
+  const clientPages = ['quote', 'invoice', 'review', 'letter', 'share-licences', 'rates', 'po'];
   const page = (location.pathname.split('/').pop() || '').replace(/\.html$/, '');
   if (clientPages.includes(page)) return;
   const start = () => {
