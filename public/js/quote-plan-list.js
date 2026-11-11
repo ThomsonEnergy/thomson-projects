@@ -6,7 +6,7 @@
 // groups: roiPlansByRetailer(...) from solar-roi.js, already cut to the retailers to show.
 // planOf(key): the energy_plans row; chosenIds: Set of ticked plan ids; openBrands: Set of open retailers.
 function planFinderRowsHtml({ groups, planOf, chosenIds, openBrands, money }) {
-  const diff = (n) => (n === 0 ? 'same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`);
+  const diff = (n) => (Math.abs(n) < 5 ? 'about the same' : n < 0 ? `${money(-n)} less` : `${money(n)} more`); // a few dollars either way is rounding
   const things = (p) => [...((p.notes || {}).eligibility || []), ...((p.notes || {}).conditions || [])].slice(0, 3).join('; ');
   const tariffText = (p) => (((p.roi_plan || {}).tariff === 'tou') ? 'time of use' : 'flat rate');
   const row = (r, inner) => {
