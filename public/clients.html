@@ -111,6 +111,7 @@
                 <div id="client-agreement" style="margin-top:8px;"></div>
               </div>
             </div>
+            <div id="client-portal" style="margin-top:10px;"></div>
             <label>Notes</label>
             <textarea id="c-notes" style="min-height:70px;"></textarea>
 
@@ -179,9 +180,10 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=2"></script>
+  <script src="/js/clients-portal.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
@@ -217,13 +219,13 @@
     }
 
     // --- contacts sub-form ---
-    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '' } = {}) {
+    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
       const row = document.createElement('div');
       row.className = 'contact-row';
       // Existing contacts keep their id on save, so job_contacts and the projects contact columns stay linked (F45)
       if (id) row.dataset.id = id;
-      row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <select class="ct-type" style="font-size:13px;">
           <option value="job" ${contact_type === 'job' ? 'selected' : ''}>Job contact</option>
@@ -235,6 +237,7 @@
         <input class="ct-name" placeholder="Name" value="${escapeHtml(name)}" style="font-size:13px;" />
         <input class="ct-phone" type="tel" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
         <input class="ct-email" type="email" autocapitalize="off" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
+        <label title="This person can log in to the client portal with this email" style="display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; margin:0;"><input type="checkbox" class="ct-portal" ${portal_access ? 'checked' : ''} style="margin:0;" /> Portal</label>
         <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
@@ -274,6 +277,7 @@
       document.getElementById('c-terms').value = 'cod';
       document.getElementById('c-rate-card').value = defaultRateCardId;
       renderClientAgreement(null);
+      renderClientPortal(null);
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -464,6 +468,7 @@
       document.getElementById('c-terms').value = c.payment_terms || 'cod';
       document.getElementById('c-rate-card').value = c.rate_card_id || '';
       renderClientAgreement(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
+      renderClientPortal(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
       document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -519,6 +524,7 @@
         name: row.querySelector('.ct-name').value.trim(),
         phone: row.querySelector('.ct-phone').value.trim(),
         email: row.querySelector('.ct-email').value.trim(),
+        portal_access: row.querySelector('.ct-portal').checked,
         sort_order: i,
       })).filter(c => c.name || c.phone || c.email);
       const contactsBefore = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_contacts || []) : [];
