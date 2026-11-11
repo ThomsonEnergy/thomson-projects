@@ -28,8 +28,8 @@ Thomson Energy rewards clients who send us work. When you pass on someone who ne
 * One reward per job. If the same person is referred twice, the first referral counts.
 
 4. When you earn it
-* The reward is earned the day the customer approves our quote. Nothing is earned for a quote that is declined or expires.
-* You can see every referral and its progress in your Thomson Energy client portal: Received, Being quoted, Quoted, Won, Credited or Paid, or Not won.
+* The reward is earned the day the customer approves our quote, and becomes payable once they have paid their deposit (or their first invoice, when the job has no deposit). Nothing is earned for a quote that is declined or expires, or for a job that falls over before the deposit is paid.
+* You can see every referral and its progress in your Thomson Energy client portal: Received, Being quoted, Quoted, Won, Credit due, Credited or Paid, or Not won.
 
 5. How you receive it
 * As a credit: the amount is taken off your next Thomson Energy invoice as its own line. This is the usual way.
