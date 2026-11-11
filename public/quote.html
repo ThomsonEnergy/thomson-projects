@@ -66,7 +66,6 @@
 
   .qdoc .pg-title { font-weight: 500; font-size: 66px; line-height: 0.98; letter-spacing: -0.02em; margin-bottom: 40px; }
   .qdoc .pg.cover .pg-title { font-size: 92px; margin: 70px 0 56px; }
-  .pg-sub { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 17px; text-transform: uppercase; margin: 0 0 14px; letter-spacing: 0; }
   .qdoc .pg-lead { font-size: 13.5px; line-height: 1.62; text-align: justify; margin-bottom: 14px; }
 
   .cover-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
@@ -82,8 +81,6 @@
   .logo-light.logo-cover, .logo-pill.logo-cover img { height: 150px; max-height: none; max-width: none; }
   .logo-light.logo-invest, .logo-pill.logo-invest img { height: 84px; max-height: none; max-width: none; }
 
-  .dots { position: absolute; z-index: 1; width: 86px; height: 52px; background-image: radial-gradient(circle, #8a93a2 1px, transparent 1.6px); background-size: 17px 17px; }
-  .pg.dark .dots { background-image: radial-gradient(circle, #cfd6e2 1px, transparent 1.6px); }
   .slabs { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
   .slabs.corner { inset: auto; right: 0; bottom: 0; width: 30%; height: auto; aspect-ratio: 554 / 710; }
   .band-panel .slabs.corner { width: 250px; z-index: 1; }
@@ -207,7 +204,6 @@
     .cover-meta { position: relative; left: auto; bottom: auto; margin-top: 40px; }
     .pg.cover.fixed { min-height: 860px; }
     .pg.cover .slabs { top: auto; bottom: 0; height: 36%; }
-    .pg.cover .dots { display: none; }
     .terms-cols h4:first-child { margin-top: 0; }
     .band-photo { position: static; height: 240px; }
     .band-panel { position: static; background: #000; padding: 26px 22px 120px; margin: 0 -22px -48px; }
@@ -276,7 +272,7 @@
 
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
-  <script src="/js/solar-roi.js?v=15"></script>
+  <script src="/js/solar-roi.js?v=17"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -665,9 +661,6 @@
       const photo = (i, w) => supaImageVariant(scopePool[i % scopePool.length], w || 1100, 72);
 
       const lightLogo = await makeLightLogo(s.logo_url);
-      const logoHtml = s.logo_url
-        ?`<span class="logo-pill"><img src="${s.logo_url}" alt="${esc(s.company_name || '')}" /></span>`
-        : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`;
       // company details for the top of every page except the title page
       const QUOTE_EMAIL = 'sales@thomsonenergy.com.au';
       const licenceText = (s.licenses || '').split('|').map(x => x.trim()).filter(Boolean).join(' | ');
@@ -692,14 +685,6 @@
       const darkContactHeadHtml = () => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml('logo-invest') : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div>${contactHtml}</div>`;
       const darkHeadHtml = (cls) => `<div class="pg-head"><div>${s.logo_url ? darkLogoHtml(cls) : `<span class="pg-brand-name">${esc(s.company_name || '')}</span>`}</div><div class="pg-date">${esc(docDate)}</div></div>`;
 
-      const detailLines = [s.abn ? `ABN ${s.abn}` : '', s.address, s.phone, s.website].filter(Boolean);
-      // the contact details on the intro page are links (they stay clickable in the PDF)
-      const detailLinesHtml = [
-        s.abn ? esc(`ABN ${s.abn}`) : '',
-        s.address ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}">${esc(s.address)}</a>` : '',
-        s.phone ? `<a href="tel:${esc(String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a>` : '',
-        s.website ? `<a href="${esc(/^https?:/i.test(s.website) ? s.website : 'https://' + s.website)}">${esc(s.website)}</a>` : '',
-      ].filter(Boolean).join('<br>');
       const licenseParts = (s.licenses || '').trim();
       // Company block shown on the cover (with who prepared it) and again in the
       // investment summary header: legal name, ABN, address and licence numbers.
@@ -831,7 +816,8 @@
       const savingsLead = !pres.sections.length
         ? 'We want your savings estimate to be accurate, not a guess, so there are no figures here yet.'
         : pres.headline ? ''
-          : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
+          : (!project.bill_reading || pres.gaps.some(g => g.key === 'usage' && g.overridden)) ? `Worked out from our estimate of your use: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say so far.`
+            : `Worked out from your electricity bill${billLine}: ${esc(String(pres.metrics.dailyKwh))} kWh a day. The figures below are what we can say from the pages we have.`;
       const asksHtml = pres.asks.length ? `
             <div class="sec-title" style="margin-top:22px;">What we still need from you</div>
             ${pres.asks.map(a => `<p class="pg-lead" style="margin-bottom:8px;">To give you ${esc(a.gives)}, we need ${esc(a.need)}.</p>`).join('')}
@@ -853,14 +839,15 @@
         const byKey = Object.fromEntries(planOpts.map(o => [o.plan_id, o]));
         // estimates: whole dollars, and a few dollars either way is the same
         const diff = (n) => (Math.abs(n) < 5 ? 'about the same' : n < 0 ? `about ${roiDollars(-n)} a year less` : `about ${roiDollars(n)} a year more`);
+        const yearly = (n) => (n < 0 ? `${roiDollars(-n)} in credit` : roiDollars(n));
         const asAt = planOpts.map(o => o.fetched_at).filter(Boolean).sort()[0];
         return `
             <div class="sec-title" style="margin-top:22px;">Plan options in your area (a suggestion only)</div>
             <table class="qtable roi-table plan-table split">
               <thead><tr><th>Retailer and plan</th><th class="num">Yearly bill${planCmp.withSystem ? ' with your new system' : ''}</th><th class="num">Against your plan now</th></tr></thead>
               <tbody>
-                <tr><td>Your current plan (estimated the same way)<span class="plan-sub">Solar feed-in ${esc(String(planCmp.current.feedIn))} c/kWh</span></td><td class="num">${roiDollars(planCmp.current.billAfter)}</td><td class="num">-</td></tr>
-                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; ').slice(0, 300); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${roiDollars(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
+                <tr><td>Your current plan (estimated the same way)<span class="plan-sub">Solar feed-in ${esc(String(planCmp.current.feedIn))} c/kWh</span></td><td class="num">${yearly(planCmp.current.billAfter)}</td><td class="num">-</td></tr>
+                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; ').slice(0, 300); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${yearly(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
               </tbody>
             </table>
             <p class="note-line">${esc(ROI_PLAN_DISCLAIMER)} ${esc(ROI_WHOLESALE_NOTE)}${asAt ? ` Plans as published on ${new Date(asAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}; look a plan up on energymadeeasy.gov.au by its plan ID.` : ''}</p>`;

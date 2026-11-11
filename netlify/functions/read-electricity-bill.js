@@ -10,7 +10,8 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { suggestSizes, billMetrics } = require('../../public/js/solar-roi.js');
+const { billMetrics } = require('../../public/js/solar-roi.js');
+const { suggestSizes } = require('../../public/js/solar-sizing.js');
 const { claudeJson } = require('./_shared/claude-json');
 
 const BILL_FOLDER = 'Electricity bill';
@@ -51,6 +52,10 @@ const PROMPT = `These are the pages of a customer's electricity bill from an Aus
 - supply_charge_c_per_day: the daily supply charge in cents per day
 - bill_total: the total amount of this bill in dollars (the amount due for this period, not the account balance carried forward)
 - usage_charges_total: the dollars charged for usage in the period, if shown separately
+- usage_discount_percent: a percentage discount this bill takes off the usage charges (for example "10% off usage" or a pay on time discount already applied on this bill), as a number; null if none
+- bill_discount_percent: a percentage discount this bill takes off the whole bill, usage and supply together, as a number; null if none
+- fixed_credits_total: the dollars of credits, rebates and concessions on this bill that are not a percentage discount and not a solar feed-in credit (for example a government energy rebate or a concession), as a positive number; null if none
+- other_charges_total: the dollars of charges on this bill that are not usage, not the daily supply charge and not GST (for example a late fee, a card fee, a metering charge or GreenPower), as a positive number; null if none
 - phases: "single" or "three" only when the bill makes it clear (for example a three-phase meter or three meter registers with the same tariff), otherwise null
 - tariff_type: "flat", "time_of_use", "demand" or null
 - same_period_last_year_kwh: last year's use for the same period if the bill compares it

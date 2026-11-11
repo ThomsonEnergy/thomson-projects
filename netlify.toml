@@ -10,7 +10,7 @@
 # (ready-to-send gate, job tasks), and the agent prompts live outside the functions folder:
 # make sure the bundler ships them with every function.
 [functions]
-  included_files = ["public/js/template-questions.js", "public/js/solar-roi.js", "agents/prompts/*.js"]
+  included_files = ["public/js/template-questions.js", "public/js/solar-roi.js", "public/js/solar-sizing.js", "agents/prompts/*.js"]
 
 # Headless Chromium (quote/invoice PDF rendering) needs more headroom than
 # the default Lambda allocation - it was OOM-killing consistently even
