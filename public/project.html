@@ -30,11 +30,11 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/template-questions.js?v=7"></script>
-  <script src="/js/solar-roi.js?v=17"></script>
+  <script src="/js/solar-roi.js?v=18"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
-  <script src="/js/solar-sizing.js?v=1"></script>
+  <script src="/js/solar-sizing.js?v=2"></script>
   <script src="/js/quote-plan-list.js?v=2"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
@@ -1149,7 +1149,7 @@
         if (!out) return;
         const r = project.bill_reading;
         if (!r) { out.innerHTML = ''; return; }
-        const s = suggestSizes({ reading: r, answers: liveAnswers(), zoneRating: currentZone() });
+        const s = suggestSizes({ reading: r, answers: liveAnswers(), zoneRating: currentZone(), siteAddress: project.client_address });
         if (!s.dailyKwh) { out.innerHTML = ''; return; }
         const wantsBattery = quoteHasBattery(currentTemplate, liveAnswers());
         out.innerHTML = `
@@ -1509,12 +1509,12 @@
       function estimateArgs() {
         const inputs = readRoiInputs(false);
         // clientType sets the GST basis of the bill when roi_inputs.bill_gst is blank (M10): a company's bill is ex GST
-        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
+        return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), siteAddress: project.client_address, money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
       }
 
       // ----- the Savings assumptions page: change an assumed value, or show the figures past a hard block -----
       let lastGaps = [];
-      const openAssumptions = () => loadJsOnce('/js/quote-savings-assumptions.js?v=1', () => typeof openSavingsAssumptions === 'function')
+      const openAssumptions = () => loadJsOnce('/js/quote-savings-assumptions.js?v=2', () => typeof openSavingsAssumptions === 'function')
         .then(() => openSavingsAssumptions({ project, gaps: lastGaps, zoneRating: currentZone(), onSaved: (inputs) => { project.roi_inputs = inputs; scheduleRender(0); schedulePdf(); } }))
         .catch(err => showToast(friendlyError(err), { error: true }));
       if (byId('bc-assumptions-btn')) byId('bc-assumptions-btn').addEventListener('click', openAssumptions);
@@ -1657,7 +1657,7 @@
         const el = byId('bc-plan-results');
         if (!el || !planResults) return;
         const args = estimateArgs();
-        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, template: args.template, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, clientType: args.clientType,
+        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, template: args.template, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, siteAddress: args.siteAddress, clientType: args.clientType,
           candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));
@@ -3807,7 +3807,7 @@
         // ----- step 4: scope of works -----
         renderEditSowDocList();
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
-        loadJsOnce('/js/quote-pictures.js?v=1', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+        loadJsOnce('/js/quote-pictures.js?v=2', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
@@ -4678,6 +4678,7 @@
                     <button type="button" class="secondary" id="site-photo-select-cancel">Cancel</button>
                   </span>
                 </div>
+                <div id="site-photo-search"></div>
                 <div id="site-photos-list" style="margin-top:14px;"><p class="subtitle">Loading...</p></div>
               </div>
             </div>
@@ -4781,7 +4782,8 @@
 
       tabLoaders.documents = () => { loadDocuments(project.id); wireCompanyDocs(project); };
       wireDocumentUpload(project);
-      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
+      // the tags and the search box are js/photo-tags.js; the pictures still load if it does not
+      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadJsOnce('/js/photo-tags.js?v=1', () => typeof wireSitePhotoTags === 'function').then(() => wireSitePhotoTags(() => loadSitePhotos(project.id))).catch(() => {}).then(() => loadSitePhotos(project.id)); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('clock-here-card')) loadClockHereCard(project);
@@ -6592,6 +6594,7 @@
               project_id: state().projectId, staff_id: user.id, url, task_id: t.id, caption: `#task ${t.description}`.slice(0, 200),
             })));
             if (error) throw error;
+            requestPhotoTags(state().projectId);
             jtExpanded.add(t.id);
             await reload();
           } catch (err) {
@@ -7975,7 +7978,7 @@
       let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
         supabaseClient
           .from('project_photos')
-          .select('id, url, caption, staff_id, created_at, task_id, client_visible, profiles(full_name)')
+          .select('id, url, caption, staff_id, created_at, task_id, tags, ai_caption, client_visible, profiles(full_name)')
           .eq('project_id', projectId)
           .order('created_at', { ascending: false }),
         getMyRole(),
@@ -8001,7 +8004,7 @@
       const yesterdayKey = sydneyDateKey(yd);
       const dayHeading = (key) => key === todayKey ? 'Today' : key === yesterdayKey ? 'Yesterday' : dayKeyLabel(key) + (key.slice(0, 4) === todayKey.slice(0, 4) ? '' : ' ' + key.slice(0, 4));
       const groups = [];
-      allPhotos.forEach(p => {
+      (typeof sitePhotoSearchFilter === 'function' ? sitePhotoSearchFilter(allPhotos) : allPhotos).forEach(p => { // the search box above the list (js/photo-tags.js)
         const key = sydneyDateKey(new Date(p.created_at));
         if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, items: [] });
         groups[groups.length - 1].items.push(p);
@@ -8013,8 +8016,10 @@
                 : `<img src="${escapeHtml(supaImageVariant(p.url, 240, 70))}" loading="lazy" decoding="async" data-i="${photos.indexOf(p)}" data-photo-id="${p.id}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />`}
               <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
                 ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${escapeHtml(p.profiles?.full_name || 'Unknown')} &middot; ${new Date(p.created_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: 'Australia/Sydney' })}
+                ${typeof photoTagsLineHtml === 'function' && !isVideoUrl(p.url) ? photoTagsLineHtml(p) : ''}
               </div>
             </div>`;
+      if (!groups.length) { listEl.innerHTML = '<p class="subtitle">No pictures match that search.</p>'; return; }
       listEl.innerHTML = groups.map((g, gi) => `
         <h3 class="site-photo-day" style="font-size:14px; margin:${gi ? '18px' : '0'} 0 8px;">${escapeHtml(dayHeading(g.key))} <span class="subtitle" style="font-weight:400; font-size:12px;">${g.items.length} photo${g.items.length === 1 ? '' : 's'}</span></h3>
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">${g.items.map(tileHtml).join('')}</div>`).join('');
@@ -8072,6 +8077,7 @@
               project_id: projectId, staff_id: user.id, url: pub.publicUrl, caption: `${base} (marked up)`,
             });
             if (insErr) throw insErr;
+            requestPhotoTags(projectId);
           },
           onClose: () => loadSitePhotos(projectId),
         }));

@@ -38,7 +38,7 @@ function loadProposalPicturesCard(settings) {
       <label style="display:inline-block; margin:0; font-weight:600; font-size:12px; padding:6px 10px; cursor:pointer; border:1px solid var(--border); border-radius:6px;">
         ${url ? 'Change picture' : 'Choose a picture'}<input type="file" class="pp-file" accept="image/*" style="display:none;" />
       </label>
-      ${url ? '<button type="button" class="link-quiet pp-clear" style="background:none; border:none; padding:0; margin-left:8px; font-size:12px; cursor:pointer;">Use the built-in picture</button>' : ''}
+      ${url ? '<button type="button" class="link-quiet pp-clear" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:8px; font-size:12px; cursor:pointer;">Use the built-in picture</button>' : ''}
       <div class="pp-msg" style="font-size:12px;">${failed[id] ? `<div class="error-box" style="margin-top:6px;">${escapeHtml(failed[id])}</div>` : ''}</div>
     </div>`;
 

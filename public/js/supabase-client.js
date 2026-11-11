@@ -1113,6 +1113,15 @@ async function uploadPhotos(fileList, folder, bucket = 'proposal-photos', opts =
   return urls;
 }
 
+// Asks the picture tagger to read a job's new pictures (tag-photos-background.js, item 73b).
+// Fire and forget: tagging never holds up an upload, and a failure here is nobody's problem.
+function requestPhotoTags(projectId) {
+  supabaseClient.auth.getSession().then(({ data: { session } }) => session && fetch('/.netlify/functions/tag-photos-background', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, keepalive: true,
+    body: JSON.stringify({ project_id: projectId }),
+  })).catch(() => {});
+}
+
 // Wires a multi-file input to upload site photos into the 'site-photos'
 // bucket under `${projectId}/`, inserting one project_photos row per file as
 // it lands. Shows "Uploading n of N...", disables the input while running, then
@@ -1146,6 +1155,7 @@ function wireSitePhotoInput(fileInput, msgEl, { projectId, staffId, onAdded } = 
         if (error) throw error;
       },
     });
+    if (urls.length) requestPhotoTags(projectId);
     fileInput.disabled = false;
     fileInput.value = '';
     pending = failed.map(f => f.file);
@@ -2723,7 +2733,7 @@ function loadGlobalSearch() {
   if (window.__globalSearchScript || !document.querySelector('.topbar-right')) return;
   window.__globalSearchScript = true;
   const s = document.createElement('script');
-  s.src = '/js/global-search.js?v=5';
+  s.src = '/js/global-search.js?v=6';
   document.head.appendChild(s);
 }
 
