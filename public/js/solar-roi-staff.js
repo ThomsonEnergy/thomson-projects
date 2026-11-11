@@ -72,6 +72,8 @@ function roiChecks(argsIn) {
       if (diff == null || Math.abs(diff) > 0.2) add('model_vs_bill', `These rates on this use come to ${fmt(c.modelledNow)} a year but the bill says ${fmt(c.billNow)}${diff == null ? '' : ` (${diff > 0 ? '+' : ''}${Math.round(diff * 100)}%)`}: check the rates, the supply charge and the kWh split, or a discount or credit on the bill.`);
     }
   }
+  const pctOff = [['usage_discount_percent', 'off usage'], ['bill_discount_percent', 'off the bill']].filter(([k]) => { const n = roiNum((reading || {})[k]); return n != null && (n < 0 || n > 60); });
+  if (pctOff.length) add('discount_unused', `The bill's discount ${pctOff.map(([k, t]) => `${reading[k]}% ${t}`).join(' and ')} is outside 0 to 60% and is not used: check it on the bill card.`);
   if (roiExportLimitUnclear(a)) add('export_limit_unclear', `The export limit answer "${a.export_limit}" is not a number of kW, so no limit is applied: type the kW in total across the phases (for 5 kW a phase on three phases, 15).`);
   // the battery against the Pylon design, when its models say their size
   const pylon = roiPylonBatteryKwh(pylonStorage);
@@ -188,8 +190,8 @@ function roiGapStaffText(gap) {
 
 // One line for the bill card on where the quote's Savings assumptions stand ('' when every value is
 // the normal one and no block is shown anyway). The page itself is quote-savings-assumptions.js.
-function savingsAssumptionsNote(roiInputs) {
+function savingsAssumptionsNote(roiInputs, gaps) {
   const typed = Object.keys((roiInputs && roiInputs.assumptions) || {}).length;
-  const shown = Object.values((roiInputs && roiInputs.overrides) || {}).filter(o => o && o.on).length;
+  const shown = (gaps || []).filter(g => g.overridden).length; // only the ones in force: a block whose gap has gone counts for nothing
   return [typed ? `${typed} assumed value${typed === 1 ? '' : 's'} changed` : '', shown ? `${shown} block${shown === 1 ? '' : 's'} shown anyway` : ''].filter(Boolean).join(', ');
 }

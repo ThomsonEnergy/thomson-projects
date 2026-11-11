@@ -1,5 +1,5 @@
 // The Savings assumptions page of a quote (backlog item 72): one panel, opened from the bill card
-// (step 1) and from step 5, with two parts.
+// on step 1 (step 5 lists what is held back and links there), with two parts.
 //   1. Every value the savings estimate assumes, with its normal value and a box to change it for
 //      this quote only. Blank means the normal value.
 //   2. Every hard block that is holding figures off the proposal (no bill read, no kWh, no rate,
@@ -23,7 +23,7 @@ const SAVINGS_FIELDS = [
   { key: 'annual_kwh', label: 'Power the home uses in a year, kWh', min: 100, max: 5000000, step: 1, scale: 1, normalText: 'from the bill', hint: 'Only when the bill\'s period is not typical of the year.' },
   { key: 'battery_round_trip', label: 'Battery gives back, % of the power put into it', min: 50, max: 100, step: 1, scale: 100, normal: (n) => n.batteryRoundTrip },
   { key: 'battery_charge_rate', label: 'Battery charges or discharges in an hour, % of its size', min: 10, max: 200, step: 5, scale: 100, normal: (n) => n.batteryMaxChargeC },
-  { key: 'battery_life_years', label: 'Years the battery\'s saving is counted for', min: 1, max: 25, step: 1, scale: 1, normal: (n) => n.batteryLifeYears },
+  { key: 'battery_life_years', label: 'Years the battery\'s saving is counted for', min: 1, max: 25, step: 1, scale: 1, whole: true, normal: (n) => n.batteryLifeYears },
   { key: 'price_rise', label: 'Power prices rise a year, % (for the "if prices rise" figures)', min: 0, max: 15, step: 0.5, scale: 100, normal: (n) => n.priceRise },
   { key: 'panel_loss', label: 'Panels make less each year, %', min: 0, max: 5, step: 0.1, scale: 100, normal: (n) => n.panelLoss },
   { key: 'grid_emissions', label: 'Grid emissions, kg of CO2 for each kWh', min: 0, max: 2, step: 0.01, scale: 1, normal: (n) => n.emissions },
@@ -105,7 +105,7 @@ async function openSavingsAssumptions({ project, gaps, zoneRating, onSaved }) {
         const raw = overlay.querySelector(`.sa-field[data-key="${f.key}"]`).value.trim();
         if (raw === '') { if (typed[f.key] != null) changes.push(`${f.label}: back to normal`); return; }
         const n = Number(raw);
-        if (!Number.isFinite(n) || n < f.min || n > f.max) throw new Error(`${f.label}: type a number from ${f.min} to ${f.max}, or leave it blank.`);
+        if (!Number.isFinite(n) || n < f.min || n > f.max || (f.whole && !Number.isInteger(n))) throw new Error(`${f.label}: type a ${f.whole ? 'whole ' : ''}number from ${f.min} to ${f.max}, or leave it blank.`);
         assumptions[f.key] = Math.round(n / f.scale * 1e6) / 1e6;
         if (show(f, typed[f.key]) !== String(Math.round(n * 1000) / 1000)) changes.push(`${f.label}: ${n}`);
       });

@@ -144,7 +144,7 @@ function roiReadingIncGst(reading) {
   return {
     ...reading,
     bill_total: roiLiftGst(reading.bill_total), usage_charges_total: roiLiftGst(reading.usage_charges_total),
-    fixed_credits_total: roiLiftGst(reading.fixed_credits_total), other_charges_total: roiLiftGst(reading.other_charges_total),
+    other_charges_total: roiLiftGst(reading.other_charges_total), // credits and rebates carry no GST
     usage_rate_c_per_kwh: roiLiftGst(reading.usage_rate_c_per_kwh), usage_rates: rates,
     supply_charge_c_per_day: roiLiftGst(reading.supply_charge_c_per_day),
   };
@@ -187,7 +187,7 @@ function roiApplyOverrides(a) {
       notes.push(['Your use', `Not on the pages of your bill we have. ${daily} kWh a day is our estimate`]);
     }
     const rate = val('rate', 'rate_c');
-    if (on('rate') && rate > 0 && roiNum(reading.usage_rate_c_per_kwh) == null) {
+    if (on('rate') && rate > 0 && !roiPlan((a.inputs || {}).current, reading, '').hasRate) {
       reading = { ...reading, usage_rate_c_per_kwh: rate };
       overridden.push('rate');
       notes.push(['Your rate', `Not on the pages of your bill we have. ${rate} c/kWh is our estimate`]);
@@ -197,13 +197,12 @@ function roiApplyOverrides(a) {
       notes.push(['Your bill total', 'Not on the pages of your bill we have, so your bills are worked out from your rates and your use']);
     }
   }
-  if (on('existing') && !existingSolarKw(answers)) {
+  if (on('existing') && reading && (billMetrics(reading).hasSolarAlready || a.template === 'battery') && !existingSolarKw(answers)) {
     const kw = val('existing', 'kw');
     overridden.push('existing');
-    if (kw > 0) {
-      answers = { ...answers, existing_pv: `${kw} kW` };
-      notes.push(['Your existing solar', `We do not have its size. ${kw} kW is our estimate`]);
-    } else notes.push(['Your existing solar', 'We do not have its size, so it is left out of these figures']);
+    // the size goes in front of the words already there ("to be removed" still counts); the list says it is ours
+    if (kw > 0) answers = { ...answers, existing_pv: `${kw} kW ${answers.existing_pv || ''}`.trim() };
+    else notes.push(['Your existing solar', 'We do not have its size, so it is left out of these figures']);
   }
   return { reading, answers, overridden, overrideNotes: notes };
 }
@@ -214,7 +213,7 @@ function roiApplyOverrides(a) {
 function roiIncGstArgs(args) {
   if (args && args.billGst) return args;
   const a = { ...(args || {}), ...roiApplyOverrides(args || {}) };
-  const billGst = roiBillGst(a.inputs, a.clientType);
+  const billGst = a.reading && a.reading.estimated ? 'inc' : roiBillGst(a.inputs, a.clientType);
   const billGstTyped = /^(ex|inc)$/i.test(String((a.inputs || {}).bill_gst || ''));
   if (billGst !== 'ex') return { ...a, billGst, billGstTyped };
   return { ...a, billGst, billGstTyped, reading: roiReadingIncGst(a.reading), inputs: roiInputsIncGst(a.inputs) };
@@ -720,7 +719,7 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
 function roiBillAdjust(reading, metrics) {
   const r = reading || {};
   const pct = (v) => { const n = roiNum(v); return n != null && n > 0 && n <= 60 ? n / 100 : 0; };
-  const fixed = metrics.days ? ((roiNum(r.other_charges_total) || 0) - (roiNum(r.fixed_credits_total) || 0)) * 365 / metrics.days : 0;
+  const fixed = metrics.days ? (Math.abs(roiNum(r.other_charges_total) || 0) - Math.abs(roiNum(r.fixed_credits_total) || 0)) * 365 / metrics.days : 0;
   return { percentOfUse: pct(r.usage_discount_percent), percentOfBill: pct(r.bill_discount_percent), annualFixed: Math.round(fixed) };
 }
 
@@ -930,7 +929,8 @@ function roiComparePlans(argsIn) {
   const rows = (candidates || []).map(c => {
     const plan = roiPlan(c.roi_plan, null, c.key);
     const r = cost(plan, c.adjust);
-    const billNow = Math.round(r.billNow + offset), billAfter = Math.round(r.billAfter + offset);
+    const moved = offset + home.current.adjust.annualFixed; // the bill's own credits and charges (a rebate, a concession) follow the customer
+    const billNow = Math.round(r.billNow + moved), billAfter = Math.round(r.billAfter + moved);
     return { key: c.key, plan, ...r, billNow, billAfter, vsCurrentAfter: billAfter - currentCost.billAfter, vsCurrentNow: billNow - currentCost.billNow };
   });
   rows.sort((x, y) => x.billAfter - y.billAfter);
@@ -964,16 +964,18 @@ function roiGaps(argsIn) {
   // any detail the staff wording needs (roiGapStaffText in solar-roi-staff.js)
   const add = (key, blocking, client, info) => gaps.push({ key, blocking, client: client || null, info: info || {} });
   const noBill = !r || r.estimated; // estimated: figures typed in place of a bill (roiApplyOverrides)
+  // a block the quote shows anyway stays listed (a typed use or rate fills its gap, so it is asked for by key)
+  const shown = new Set(overridden || []);
   if (noBill) add('bill', true, 'a recent electricity bill, every page, so we can see how much power you use and what you pay for it');
   if (r && !noBill) {
-    if (!m.dailyKwh) add('usage', true, 'the page of your bill with the usage table (kWh used and the number of days in the period)');
-    if (!plan.hasRate) add('rate', true, 'the page of your bill that shows your rates (cents per kWh, and the daily supply charge)');
+    if (!m.dailyKwh || shown.has('usage')) add('usage', true, 'the page of your bill with the usage table (kWh used and the number of days in the period)');
+    if (!plan.hasRate || shown.has('rate')) add('rate', true, 'the page of your bill that shows your rates (cents per kWh, and the daily supply charge)');
     if (roiNum(r.bill_total) == null) add('total', true, 'the page of your bill with the total amount for the period');
     if (m.days && m.days < 28) add('short', false, 'a full quarterly bill if you have one (the one we have covers only a short period)', { days: m.days });
     if (!m.split) add('tou', false);
   }
   if (r) {
-    if ((m.hasSolarAlready || template === 'battery') && !existingSolarKw(a)) add('existing', true, 'the size of your existing solar system in kW (on the inverter label or your original paperwork)', { battery: template === 'battery' });
+    if ((m.hasSolarAlready || template === 'battery') && (!existingSolarKw(a) || shown.has('existing'))) add('existing', true, 'the size of your existing solar system in kW (on the inverter label or your original paperwork)', { battery: template === 'battery' });
     if (!plan.supplyKnown) add('supply', false);
     if (!plan.feedInKnown && (roiNum(newSolarKw) > 0 || m.hasSolarAlready)) add('feedin', false);
     if (billGst === 'ex') add('gst', false, null, { typed: billGstTyped });
@@ -982,9 +984,8 @@ function roiGaps(argsIn) {
   if (hasBattery && !(roiNum(batteryKwh) > 0)) add('battery', false);
   if (!(roiNum(netCost) > 0)) add('price', true);
   else if (roiNum(newSolarKw) > 0 && roiNum(batteryKwh) > 0 && roiNum(solarPrice) == null && roiNum(batteryPrice) == null) add('split_prices', false);
-  // a block the quote shows anyway (the Savings assumptions page) stays listed, but holds nothing back;
-  // the staff wording is added where the staff file is loaded (the quote page), not on the proposal
-  const shown = new Set(overridden || []);
+  // a block shown anyway holds nothing back; the staff wording is added where the staff file is
+  // loaded (the quote page), not on the proposal
   return gaps.map(g => ({ ...g, ...(shown.has(g.key) ? { blocking: false, overridden: true } : {}), staff: typeof roiGapStaffText === 'function' ? roiGapStaffText(g) : '' }));
 }
 
@@ -1047,8 +1048,9 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
     const rates = plan.tariff === 'tou' ? ROI_BANDS.filter(b => (plan.bandShare[b.key] || 0) > 0 && plan.rateKnown[b.key]).map(b => `${b.label.toLowerCase()} ${plan[b.key]}`).join(', ') : `${plan.rate}`;
     if (rates) fromBill.push(['What you pay', `${rates} c/kWh`]);
   }
-  if (plan.supplyKnown) fromBill.push(['Daily supply charge', `${plan.supply} c a day`]);
-  if (plan.feedInKnown) fromBill.push(['Solar feed-in', `${plan.feed_in} c/kWh`]);
+  const ours = r.estimated ? ', our estimate' : '';
+  if (plan.supplyKnown) (ours ? assumed : fromBill).push(['Daily supply charge', `${plan.supply} c a day${ours}`]);
+  if (plan.feedInKnown) (ours ? assumed : fromBill).push(['Solar feed-in', `${plan.feed_in} c/kWh${ours}`]);
   if (m.hasSolarAlready) fromBill.push(['Solar you sent to the grid', roiKwh(m.exportKwh)]);
   if (plan.tariff === 'tou' && plan.timesFrom !== 'assumed') fromBill.push(['When each rate applies', roiScheduleText(plan)]);
   if (home.shapeFrom === 'bill') fromBill.push(['When you use power', 'Matched to the peak, shoulder and off-peak kWh on your bill']);
@@ -1058,7 +1060,7 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
   else if (!r.estimated && !typedIn.has('usage')) assumed.push(['Your year', `The ${days || 'period'} on your bill ${days ? 'stand' : 'stands'} for your whole year`]);
   if (est.newSolarKw > 0 || home.existingKw > 0) assumed.push(['Sun', `${S.yieldPerKw} kWh a day from each kW of panels, averaged over the year, with ${Math.round(S.clearShare * 10)} days in 10 clear and the rest overcast${S.typed.overcast_output != null ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}`]);
   if (Object.keys(S.typed).some(k => /^season_/.test(k))) assumed.push(['Seasons', `Against the yearly average, summer, autumn, winter and spring: panels make ${S.seasons.map(sn => `${Math.round(sn.gen * 100)}%`).join(', ')}; the home uses ${S.seasons.map(sn => `${Math.round(sn.load * 100)}%`).join(', ')}`]);
-  if (home.existingKw > 0) assumed.push(['Your existing solar', `${home.existingKw} kW${home.ownSolarKwh > 0 ? `, supplying about ${roiKwh(home.ownSolarKwh)} a year that your bill does not show` : ''}. ${home.existingRemoved ? 'It comes off the roof with this job' : 'It stays and keeps working'}`]);
+  if (home.existingKw > 0) assumed.push(['Your existing solar', `${home.existingKw} kW${typedIn.has('existing') ? ' (our estimate: we do not have its size)' : ''}${home.ownSolarKwh > 0 ? `, supplying about ${roiKwh(home.ownSolarKwh)} a year that your bill does not show` : ''}. ${home.existingRemoved ? 'It comes off the roof with this job' : 'It stays and keeps working'}`]);
   if (est.newSolarKw > 0 || home.existingKw > 0) assumed.push(['Export limit', home.exportLimitKw == null ? 'None applied: all spare solar is taken as sold to the grid' : home.exportLimitKw === 0 ? 'Nothing is sent to the grid' : `No more than ${home.exportLimitKw} kW goes to the grid at any time`]);
   if (est.batteryKwh > 0) assumed.push(['Battery', `Gives back ${Math.round(S.batteryRoundTrip * 100)}% of the power put into it${S.typed.battery_charge_rate != null ? `, charging or discharging up to ${Math.round(S.batteryMaxChargeC * 100)}% of its size in an hour` : ''}. Its saving is counted for ${S.batteryLifeYears} years`]);
   if (dollars) {
@@ -1106,7 +1108,7 @@ function roiPresentation(argsIn) {
   if (!canModel) {
     const sections = [{ title: 'Your home now', rows: [['Power bought', [`${roiKwh(m.annualKwh)} a year (${m.dailyKwh} kWh a day)`]]] }];
     if (has('total') && m.annualBill) sections[0].rows.push(['Bills now', [roiBillText(m.annualBill)]]);
-    return { ...empty, sections, columns: ['Estimate'], rows: sections[0].rows.map(([k, v]) => [k, v[0]]) };
+    return { ...empty, sections, columns: ['Estimate'], rows: sections[0].rows.map(([k, v]) => [k, v[0]]), assumed: overrideNotes || [] };
   }
   const estArgs = { reading, answers, template, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };
   const est = roiEstimate(estArgs);

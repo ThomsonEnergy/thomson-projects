@@ -32,8 +32,8 @@
 
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/template-questions.js?v=7"></script>
-  <script src="/js/solar-roi.js?v=16"></script>
-  <script src="/js/solar-roi-staff.js?v=2"></script>
+  <script src="/js/solar-roi.js?v=17"></script>
+  <script src="/js/solar-roi-staff.js?v=3"></script>
   <script src="/js/solar-sizing.js?v=1"></script>
   <script src="/js/quote-plan-list.js?v=2"></script>
   <style>
@@ -1527,7 +1527,7 @@
         const pres = roiPresentation(estimateArgs());
         lastGaps = pres.gaps;
         const saNote = byId('bc-assumptions-note');
-        if (saNote) saNote.textContent = savingsAssumptionsNote(project.roi_inputs);
+        if (saNote) saNote.textContent = savingsAssumptionsNote(project.roi_inputs, pres.gaps);
         const missing = pres.gaps.filter(g => g.blocking);
         const assumed = pres.gaps.filter(g => !g.blocking);
         const checks = pres.checks || [];
@@ -1618,7 +1618,7 @@
         const pc = val('bc-plan-pc');
         const net = val('bc-plan-net');
         const type = val('bc-plan-type');
-        if (!project.bill_reading || !billMetrics(project.bill_reading).dailyKwh) { msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">Read the bill first: the plans are costed on this home's use.</p>`; return; }
+        if (!project.bill_reading || !billMetrics(roiApplyOverrides({ reading: project.bill_reading, inputs: project.roi_inputs }).reading).dailyKwh) { msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">Read the bill first: the plans are costed on this home's use.</p>`; return; }
         if (!/^\d{4}$/.test(pc) && !net) { msgEl.innerHTML = `<p style="font-size:12px; color:${AMBER};">Type the site's postcode or pick the network.</p>`; return; }
         const btn = byId('bc-plan-find');
         btn.disabled = true; btn.textContent = 'Finding...';
@@ -1746,7 +1746,8 @@
           try {
             await copyBillDocs(o.id, project.id);
             const reading = { ...o.bill_reading, copied_from: label, copied_at: new Date().toISOString() };
-            const roiInputs = { ...(o.roi_inputs || {}), solar_price: (project.roi_inputs || {}).solar_price ?? null, battery_price: (project.roi_inputs || {}).battery_price ?? null };
+            const mine = project.roi_inputs || {}; // the rates come across; this quote keeps its own prices, assumed values and overrides
+            const roiInputs = { ...(o.roi_inputs || {}), solar_price: mine.solar_price ?? null, battery_price: mine.battery_price ?? null, assumptions: mine.assumptions, overrides: mine.overrides };
             const { error: pErr } = await supabaseClient.from('projects').update({ bill_reading: reading, roi_inputs: roiInputs }).eq('id', project.id);
             if (pErr) throw pErr;
             project.bill_reading = reading;

@@ -8,7 +8,8 @@
 -- staff. They are passed now, with the two new ones the Savings assumptions page writes:
 -- assumptions (an assumed value changed for this quote) and overrides (a hard block shown anyway,
 -- with the figure used in its place). The bill reading gains the discounts and credits the bill
--- reader now picks up. Nothing private is added: these are rates, sizes and settings, no notes.
+-- reader now picks up. Nothing private is added: these are rates, sizes and settings. An override
+-- is passed as its switch and its figures only; the reason typed for it and who set it are not.
 --
 -- The function is otherwise word for word the one from migration 20261128090000.
 
@@ -44,7 +45,14 @@ begin
           'storage_types', p.pylon_data -> 'storage_types',
           'summary', jsonb_build_object('dc_output_kw', p.pylon_data -> 'summary' -> 'dc_output_kw')) end,
         'roi_inputs', case when p.roi_inputs is null then null else (
-          select jsonb_object_agg(e.key, e.value) from jsonb_each(p.roi_inputs) e
+          select jsonb_object_agg(e.key, case
+            -- an override goes out as its switch and its figures only: the reason and who set it stay with staff
+            when e.key = 'overrides' then (
+              select coalesce(jsonb_object_agg(o.key, jsonb_build_object('on', o.value -> 'on', 'values', o.value -> 'values')), '{}'::jsonb)
+              from jsonb_each(case when jsonb_typeof(e.value) = 'object' then e.value else '{}'::jsonb end) o
+              where jsonb_typeof(o.value) = 'object')
+            else e.value end)
+          from jsonb_each(p.roi_inputs) e
           where e.key = any (array['solar_price', 'battery_price', 'current', 'alt', 'plan_options',
             'export', 'grid_charge', 'bill_gst', 'assumptions', 'overrides'])) end
       )
