@@ -32,8 +32,9 @@
 
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/template-questions.js?v=6"></script>
-  <script src="/js/solar-roi.js?v=15"></script>
-  <script src="/js/solar-roi-staff.js?v=1"></script>
+  <script src="/js/solar-roi.js?v=16"></script>
+  <script src="/js/solar-roi-staff.js?v=2"></script>
+  <script src="/js/solar-sizing.js?v=1"></script>
   <script src="/js/quote-plan-list.js?v=2"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
@@ -1077,6 +1078,7 @@
       const BILL_FIELDS = [
         ['billing_days', 'Days on the bill'], ['total_kwh', 'kWh used (total)'], ['bill_total', 'Bill total ($)'], ['solar_export_kwh', 'Solar exported (kWh)'],
         ['peak_kwh', 'Peak kWh'], ['shoulder_kwh', 'Shoulder kWh'], ['off_peak_kwh', 'Off-peak kWh'], ['controlled_load_kwh', 'Controlled load kWh'],
+        ['usage_discount_percent', 'Discount off usage (%)'], ['bill_discount_percent', 'Discount off the bill (%)'], ['fixed_credits_total', 'Credits and rebates ($)'], ['other_charges_total', 'Other charges ($)'],
       ];
       // A bill figure lands in value="...": a finite number or nothing. The reading comes from the AI's
       // reply to a document a client supplied, so it is never trusted to be a number.
@@ -1338,6 +1340,9 @@
           grid_charge: grid,
           solar_price: price('solar'),
           battery_price: price('battery'),
+          // set on the Savings assumptions page (js/quote-savings-assumptions.js), carried through every save here
+          ...(saved.assumptions ? { assumptions: saved.assumptions } : {}),
+          ...(saved.overrides ? { overrides: saved.overrides } : {}),
         };
       }
       // The strip, the plain-words summary and where the times came from, for one plan.
@@ -1507,12 +1512,22 @@
         return { reading: project.bill_reading, answers: liveAnswers(), template: currentTemplate, newSolarKw: currentSolarKw(), batteryKwh: currentBatteryKwh(), netCost: currentNetCost(), zoneRating: currentZone(), money, inputs, solarPrice: typedPrice('solar'), batteryPrice: typedPrice('battery'), linesBatteryKwh: linesBatteryKwh(), pylonStorage: (lastPylonData || project.pylon_data || {}).storage_types, clientType: clientIsCompany ? 'company' : 'individual' };
       }
 
+      // ----- the Savings assumptions page: change an assumed value, or show the figures past a hard block -----
+      let lastGaps = [];
+      const openAssumptions = () => loadJsOnce('/js/quote-savings-assumptions.js?v=1', () => typeof openSavingsAssumptions === 'function')
+        .then(() => openSavingsAssumptions({ project, gaps: lastGaps, zoneRating: currentZone(), onSaved: (inputs) => { project.roi_inputs = inputs; scheduleRender(0); schedulePdf(); } }))
+        .catch(err => showToast(friendlyError(err), { error: true }));
+      if (byId('bc-assumptions-btn')) byId('bc-assumptions-btn').addEventListener('click', openAssumptions);
+
       // ----- the estimate as the proposal shows it, what is missing, what to check, and step 5's line -----
       function renderEstimate() {
         refreshQuoting();
         const out = byId('roi-estimate');
         if (!out) return;
         const pres = roiPresentation(estimateArgs());
+        lastGaps = pres.gaps;
+        const saNote = byId('bc-assumptions-note');
+        if (saNote) saNote.textContent = savingsAssumptionsNote(project.roi_inputs);
         const missing = pres.gaps.filter(g => g.blocking);
         const assumed = pres.gaps.filter(g => !g.blocking);
         const checks = pres.checks || [];
@@ -1524,7 +1539,7 @@
             ${missing.length ? `<strong style="font-size:13px; color:${RED};">Missing</strong>${list(missing.map(g => `<li>${escapeHtml(g.staff)}${g.client && project.show_roi !== false ? ` <span class="subtitle">The proposal asks the customer for ${escapeHtml(g.client)}.</span>` : ''}</li>`), '', 13)}` : ''}
             ${checks.length ? `<strong style="font-size:13px; color:${AMBER};">Check these</strong>${list(checks.map(c => `<li>${escapeHtml(c.staff)}</li>`), '', 13)}` : ''}
             ${assumed.length ? `<strong style="font-size:13px;">Assumed</strong>${list(assumed.map(g => `<li>${escapeHtml(g.staff)}</li>`), 'var(--muted)', 12)}` : ''}
-            ${missing.length && project.show_roi !== false ? `<p class="subtitle" style="margin:0; font-size:12px;">The proposal still goes out: it shows only the figures we can stand behind and says that accepting before we have the rest is accepting on what is shown.</p>` : ''}
+            ${missing.length && project.show_roi !== false ? `<p class="subtitle" style="margin:0; font-size:12px;">The proposal still goes out: it shows only the figures we can stand behind and says that accepting before we have the rest is accepting on what is shown. To show the figures anyway, use Savings assumptions and overrides above.</p>` : ''}
           </div>` : '';
         if (!pres.sections.length) { out.innerHTML = boxHtml; return; }
         const est = pres.est;
@@ -1684,7 +1699,7 @@
         if (!el) return;
         if (!['solar', 'battery'].includes(currentTemplate)) { el.innerHTML = ''; return; }
         if (project.show_roi === false) { el.innerHTML = `<p class="subtitle" style="margin:10px 0 0; font-size:13px;">Savings page on the proposal: <strong>off</strong>. Switch it on in the bill card on step 1.</p>`; return; }
-        if (!project.bill_reading) { el.innerHTML = `<p style="margin:10px 0 0; font-size:13px; color:${AMBER};">Savings page on the proposal: no bill read yet, so it only asks the customer for their bill. <a href="#bill-card" class="link-quiet">Add the bill on step 1 &rarr;</a></p>`; return; }
+        if (!project.bill_reading && missing.some(g => g.key === 'bill')) { el.innerHTML = `<p style="margin:10px 0 0; font-size:13px; color:${AMBER};">Savings page on the proposal: no bill read yet, so it only asks the customer for their bill. <a href="#bill-card" class="link-quiet">Add the bill on step 1 &rarr;</a></p>`; return; }
         if (!missing.length && !checks.length) { el.innerHTML = `<p style="margin:10px 0 0; font-size:13px;"><span style="color:var(--green);">&#10003;</span> Savings page on the proposal: on, nothing to fix.</p>`; return; }
         const parts = [missing.length ? `${missing.length} missing` : null, checks.length ? `${checks.length} to check` : null].filter(Boolean).join(', ');
         el.innerHTML = `
@@ -3286,6 +3301,7 @@
                   <div id="bc-recommend"></div>
                   <div id="bc-quoting"></div>
                   <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-weight:400; cursor:pointer;"><input type="checkbox" id="bill-show-roi" style="width:auto; margin:0;" ${project.show_roi === false ? '' : 'checked'} /> Show the savings estimate on the proposal</label>
+                  <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;"><button type="button" class="secondary" id="bc-assumptions-btn" style="font-size:12px; padding:6px 10px;">Savings assumptions and overrides</button><span class="subtitle" id="bc-assumptions-note" style="font-size:12px;"></span></div>
                   <div id="roi-estimate"></div>
                   <div id="bc-plans"></div>
                 </div>

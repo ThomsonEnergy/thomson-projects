@@ -159,3 +159,35 @@ function roiPlansByRetailer(rows, brandOf, nameOf) {
   });
   return [...groups.values()].map(g => ({ brand: g.brand, best: g.best, more: g.more }));
 }
+
+// The staff wording of each thing the estimate is missing (roiGaps in solar-roi.js gives the key and
+// any detail). Blocking ones hold figures off the proposal until fixed or shown anyway on the
+// Savings assumptions page; the rest are assumptions the figures run on.
+function roiGapStaffText(gap) {
+  const info = gap.info || {};
+  const text = {
+    bill: 'No electricity bill read yet: add every page above and press Read bill with AI.',
+    usage: 'The bill gives no usage in kWh (no total kWh with the number of days, and no daily average).',
+    rate: 'No usage rate (c/kWh) on the bill and none typed in the rates below.',
+    total: 'No bill total found: "your bills now and after" are left off; the savings still show from the usage and the rates.',
+    short: `A ${info.days} day bill: the yearly figures are scaled up from it. A full quarterly bill is better.`,
+    existing: `${info.battery ? 'A battery quote' : 'The bill shows solar export'} but no existing solar size in the answers (Existing solar or battery, in kW).`,
+    supply: `No daily supply charge on the bill or typed below; ${ROI_ASSUMPTIONS.defaultSupplyChargeCents} c/day assumed.`,
+    feedin: `No feed-in rate on the bill or typed below; ${ROI_ASSUMPTIONS.defaultFeedInCents} c/kWh assumed for what is exported.`,
+    tou: 'No peak / shoulder / off-peak split on the bill: a normal household day shape is used for when the power is used.',
+    gst: `The bill is taken as ex GST (${info.typed ? 'set under the rates' : 'a company client; change it under the rates if the bill shows inc GST figures'}): its total, rates and supply charge are lifted 10% so they compare with the plans and the price, which are inc GST.`,
+    size: 'No system size: set it on step 3 (STC system size) or pull the Pylon design.',
+    battery: 'No battery quoted and no battery kWh in the line items, so the estimate runs without one. Type the battery (usable kWh) under What we are quoting, or answer "Batteries as well?" No if this quote has no battery.',
+    price: 'No price yet: the payback needs a priced stage on step 3.',
+    split_prices: 'No separate solar and battery prices under What we are quoting, so one payback shows for the whole system (not one for each).',
+  }[gap.key] || '';
+  return gap.overridden ? `${text} Shown anyway (Savings assumptions).` : text;
+}
+
+// One line for the bill card on where the quote's Savings assumptions stand ('' when every value is
+// the normal one and no block is shown anyway). The page itself is quote-savings-assumptions.js.
+function savingsAssumptionsNote(roiInputs) {
+  const typed = Object.keys((roiInputs && roiInputs.assumptions) || {}).length;
+  const shown = Object.values((roiInputs && roiInputs.overrides) || {}).filter(o => o && o.on).length;
+  return [typed ? `${typed} assumed value${typed === 1 ? '' : 's'} changed` : '', shown ? `${shown} block${shown === 1 ? '' : 's'} shown anyway` : ''].filter(Boolean).join(', ');
+}
