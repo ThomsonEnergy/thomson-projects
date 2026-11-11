@@ -110,6 +110,7 @@ const RETIRED_QUESTION_LABELS = {
 // retired label below, not to the question.
 function answerFitsQuestion(q, value) {
   if (!String(value ?? '').trim()) return false;
+  if (!(q.id in RETIRED_QUESTION_LABELS)) return true; // only a key that was once another question can hold an older answer
   if (q.type === 'yesno') return value === 'Yes' || value === 'No';
   if (q.type === 'select') return q.options.includes(value);
   return true;
@@ -220,6 +221,9 @@ function readTemplateAnswers(container) {
     // a kW box: a bare number is saved with its unit ("7.5" becomes "7.5 kW")
     if (el.dataset.kw && /^\d+(\.\d+)?$/.test(v)) v = `${v} kW`;
     if (v) answers[el.dataset.qid] = v;
+    // a typed box that was cleared gives up its saved answer (undefined is never saved); a choice left
+    // on its blank option keeps what was saved, which may be an older answer the list no longer has
+    else if (el.tagName !== 'SELECT') answers[el.dataset.qid] = undefined;
   });
   return answers;
 }

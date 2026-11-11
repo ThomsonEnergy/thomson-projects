@@ -11,6 +11,14 @@ const suggestSizes = (() => {
     ? require('./solar-roi.js')
     : { ROI_ASSUMPTIONS, billMetrics, existingSolarKw, roiExportLimitKw };
 
+  // What sizing assumes, on top of the estimate's own values
+  const SIZING = {
+    daytimeShare: 0.40,        // share of a home's use in daylight when the bill gives no time-of-use split
+    batteryUsableCycle: 0.85,  // share of usable capacity cycled on an average day
+    solarSizesKw: [6.6, 8, 10, 13.2, 15, 20, 26.6, 30],
+    batterySizesKwh: [5, 10, 13.5, 16, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100],
+  };
+
   function roiRoundUpTo(value, sizes) {
     for (const s of sizes) if (s >= value - 0.001) return s;
     return sizes[sizes.length - 1];
@@ -19,9 +27,9 @@ const suggestSizes = (() => {
   // Share of use outside daylight: the off-peak plus peak share where the bill splits it (peak is the
   // evening on NSW tariffs), else the default. Sizing only.
   function eveningShare(metrics) {
-    if (!metrics.split) return 1 - roi.ROI_ASSUMPTIONS.daytimeShare;
+    if (!metrics.split) return 1 - SIZING.daytimeShare;
     const total = metrics.split.peak + metrics.split.shoulder + metrics.split.offPeak;
-    if (!total) return 1 - roi.ROI_ASSUMPTIONS.daytimeShare;
+    if (!total) return 1 - SIZING.daytimeShare;
     const share = (metrics.split.peak + metrics.split.offPeak) / total;
     return Math.min(0.85, Math.max(0.45, share));
   }
@@ -37,7 +45,7 @@ const suggestSizes = (() => {
     if (m.dailyKwh) {
       solarRaw = m.dailyKwh / yieldPerKw;
       const wanted = Math.max(0, solarRaw - existingKw);
-      solarKw = wanted > 0 ? roiRoundUpTo(wanted, roi.ROI_ASSUMPTIONS.solarSizesKw) : 0;
+      solarKw = wanted > 0 ? roiRoundUpTo(wanted, SIZING.solarSizesKw) : 0;
       notes.push(`${m.dailyKwh} kWh a day divided by ${yieldPerKw} kWh per kW per day = ${solarRaw.toFixed(1)} kW to cover the whole year's use${existingKw ? `, less ${existingKw} kW already on the roof` : ''}, rounded up to a common size.`);
       if (roi.roiExportLimitKw(a) != null && roi.roiExportLimitKw(a) <= 5) notes.push(`Export limit "${a.export_limit}": a bigger system mostly feeds a battery, not the grid.`);
     }
@@ -45,13 +53,13 @@ const suggestSizes = (() => {
     if (m.dailyKwh) {
       const share = eveningShare(m);
       eveningKwh = m.dailyKwh * share;
-      let wanted = eveningKwh / roi.ROI_ASSUMPTIONS.batteryUsableCycle;
+      let wanted = eveningKwh / SIZING.batteryUsableCycle;
       const backup = String(a.backup_needs || '').toLowerCase();
       if (backup && !/^(nothing|none|no)\b/.test(backup) && /pump|air|aircon|ducted|whole|everything|all/.test(backup)) {
         wanted *= 1.25;
         notes.push('Backup needs include heavy loads, so the battery is sized a quarter larger.');
       }
-      batteryKwh = Math.min(roi.ROI_ASSUMPTIONS.maxBatteryKwh, Math.max(roi.ROI_ASSUMPTIONS.minBatteryKwh, roiRoundUpTo(wanted, roi.ROI_ASSUMPTIONS.batterySizesKwh)));
+      batteryKwh = Math.min(roi.ROI_ASSUMPTIONS.maxBatteryKwh, Math.max(roi.ROI_ASSUMPTIONS.minBatteryKwh, roiRoundUpTo(wanted, SIZING.batterySizesKwh)));
       notes.push(`${Math.round(share * 100)}% of use is outside daylight (${eveningKwh.toFixed(1)} kWh a day${m.split ? ', from the bill\'s peak and off-peak split' : ', assumed'}), rounded up to a common battery size within the 5 to 100 kWh federal discount band.`);
       if (wanted > roi.ROI_ASSUMPTIONS.maxBatteryKwh) notes.push(`The evening use alone would take about ${Math.round(wanted)} kWh of battery; 100 kWh is the top of the discount band (the discount covers the first 50 kWh), so a bigger system is a commercial job sized by hand.`);
     }

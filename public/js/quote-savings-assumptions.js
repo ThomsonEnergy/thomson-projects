@@ -120,8 +120,8 @@ async function openSavingsAssumptions({ project, gaps, zoneRating, onSaved }) {
         b.fields.forEach(f => {
           const raw = el.querySelector(`.sa-value[data-field="${f.key}"]`).value.trim();
           const n = raw === '' ? null : Number(raw);
-          if (f.required && !(n > 0)) throw new Error(`${b.title}: type ${f.label.toLowerCase()}.`);
-          if (n != null && (!Number.isFinite(n) || n < 0)) throw new Error(`${b.title}: ${f.label.toLowerCase()} cannot be below zero.`);
+          if (f.required && !(n > 0)) throw new Error(`${b.title}: fill in "${f.label}".`);
+          if (n != null && (!Number.isFinite(n) || n < 0)) throw new Error(`${b.title}: "${f.label}" cannot be below zero.`);
           if (n != null) values[f.key] = n;
         });
         const reason = el.querySelector('.sa-reason').value.trim();

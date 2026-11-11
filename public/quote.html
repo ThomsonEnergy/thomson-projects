@@ -66,7 +66,6 @@
 
   .qdoc .pg-title { font-weight: 500; font-size: 66px; line-height: 0.98; letter-spacing: -0.02em; margin-bottom: 40px; }
   .qdoc .pg.cover .pg-title { font-size: 92px; margin: 70px 0 56px; }
-  .pg-sub { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 17px; text-transform: uppercase; margin: 0 0 14px; letter-spacing: 0; }
   .qdoc .pg-lead { font-size: 13.5px; line-height: 1.62; text-align: justify; margin-bottom: 14px; }
 
   .cover-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
@@ -82,8 +81,6 @@
   .logo-light.logo-cover, .logo-pill.logo-cover img { height: 150px; max-height: none; max-width: none; }
   .logo-light.logo-invest, .logo-pill.logo-invest img { height: 84px; max-height: none; max-width: none; }
 
-  .dots { position: absolute; z-index: 1; width: 86px; height: 52px; background-image: radial-gradient(circle, #8a93a2 1px, transparent 1.6px); background-size: 17px 17px; }
-  .pg.dark .dots { background-image: radial-gradient(circle, #cfd6e2 1px, transparent 1.6px); }
   .slabs { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
   .slabs.corner { inset: auto; right: 0; bottom: 0; width: 30%; height: auto; aspect-ratio: 554 / 710; }
   .band-panel .slabs.corner { width: 250px; z-index: 1; }
@@ -207,7 +204,6 @@
     .cover-meta { position: relative; left: auto; bottom: auto; margin-top: 40px; }
     .pg.cover.fixed { min-height: 860px; }
     .pg.cover .slabs { top: auto; bottom: 0; height: 36%; }
-    .pg.cover .dots { display: none; }
     .terms-cols h4:first-child { margin-top: 0; }
     .band-photo { position: static; height: 240px; }
     .band-panel { position: static; background: #000; padding: 26px 22px 120px; margin: 0 -22px -48px; }
@@ -853,14 +849,15 @@
         const byKey = Object.fromEntries(planOpts.map(o => [o.plan_id, o]));
         // estimates: whole dollars, and a few dollars either way is the same
         const diff = (n) => (Math.abs(n) < 5 ? 'about the same' : n < 0 ? `about ${roiDollars(-n)} a year less` : `about ${roiDollars(n)} a year more`);
+        const yearly = (n) => (n < 0 ? `${roiDollars(-n)} in credit` : roiDollars(n));
         const asAt = planOpts.map(o => o.fetched_at).filter(Boolean).sort()[0];
         return `
             <div class="sec-title" style="margin-top:22px;">Plan options in your area (a suggestion only)</div>
             <table class="qtable roi-table plan-table split">
               <thead><tr><th>Retailer and plan</th><th class="num">Yearly bill${planCmp.withSystem ? ' with your new system' : ''}</th><th class="num">Against your plan now</th></tr></thead>
               <tbody>
-                <tr><td>Your current plan (estimated the same way)<span class="plan-sub">Solar feed-in ${esc(String(planCmp.current.feedIn))} c/kWh</span></td><td class="num">${roiDollars(planCmp.current.billAfter)}</td><td class="num">-</td></tr>
-                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; ').slice(0, 300); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${roiDollars(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
+                <tr><td>Your current plan (estimated the same way)<span class="plan-sub">Solar feed-in ${esc(String(planCmp.current.feedIn))} c/kWh</span></td><td class="num">${yearly(planCmp.current.billAfter)}</td><td class="num">-</td></tr>
+                ${planCmp.rows.map(r => { const o = byKey[r.key] || {}; const check = [...((o.notes || {}).eligibility || []), ...((o.notes || {}).conditions || [])].slice(0, 2).join('; ').slice(0, 300); return `<tr><td>${esc(o.brand_name || '')}: ${esc(o.display_name || '')}<span class="plan-sub">Solar feed-in ${esc(String(r.feedIn))} c/kWh. Plan ID ${esc(r.key)}${check ? `. Check: ${esc(check)}` : ''}</span></td><td class="num">${yearly(r.billAfter)}</td><td class="num">${diff(r.vsCurrentAfter)}</td></tr>`; }).join('')}
               </tbody>
             </table>
             <p class="note-line">${esc(ROI_PLAN_DISCLAIMER)} ${esc(ROI_WHOLESALE_NOTE)}${asAt ? ` Plans as published on ${new Date(asAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}; look a plan up on energymadeeasy.gov.au by its plan ID.` : ''}</p>`;

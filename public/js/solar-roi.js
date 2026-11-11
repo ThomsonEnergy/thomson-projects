@@ -1,36 +1,22 @@
-// Solar and battery sizing plus the savings estimate shown on a proposal. One file shared by the
-// browser (quote page preview, the proposal) and the functions (read-electricity-bill.js), so the
-// staff preview and what the client sees are the same maths. Plain script plus the module.exports
-// guard at the bottom: no DOM access at load time.
+// The savings estimate shown on a proposal. One file shared by the browser (the quote page's
+// preview, the client's proposal) and the functions, so the staff and the client see the same
+// maths. Plain script plus the module.exports guard at the bottom: no DOM access at load time.
+// The size suggestion is in solar-sizing.js; the staff-only checks are in solar-roi-staff.js.
 //
-// Inputs: the AI reading of the customer's electricity bill (projects.bill_reading), the rates
-// (projects.roi_inputs: the bill's rates, editable, plus an optional second plan to compare and an
-// optional battery export window), the quoted solar kW, battery kWh and prices. Every figure is an
-// estimate from the assumptions below; the proposal says so. docs/IDEAS_BACKLOG.md item 29.
+// Inputs: the reading of the customer's electricity bill (projects.bill_reading), projects.roi_inputs
+// (the rates, a second plan, night charging, a battery export window, and this quote's assumed
+// values and overrides), the quoted solar kW, battery kWh and prices. Every figure is an estimate
+// from the assumptions below, and the proposal lists them. docs/IDEAS_BACKLOG.md items 29 and 72.
 //
-// How the estimate is worked out (roiEstimate):
-//   1. A typical day in each of four seasons, hour by hour: the home's load follows a normal
-//      household shape (morning bump, evening peak), stretched to match the bill's peak / shoulder /
-//      off-peak split when it has one; the panels follow a daylight curve scaled by the zone's yield
-//      and the season.
-//   2. Solar first: each hour the panels cover the load, the rest is exported at the feed-in rate,
-//      any shortfall is bought at that hour's rate (peak, shoulder, off-peak or flat).
-//   3. Then the battery: it charges from what would have been exported, and discharges into the
-//      shortfall at that hour's rate. With an export window set, it sells to the grid in that window
-//      at the window's rate first when that rate beats the import rate.
-//   4. Bills are added up at the plan's rates for three stages (as the home is now, with the solar,
-//      with the solar and the battery) so each step's saving and payback is its own difference.
-//   5. The second plan runs the same three stages at its rates.
+// How it is worked out: the home is fixed once (roiHome), then each stage (as it is now, with the
+// solar, with the solar and the battery) is run hour by hour and billed at the plan's rates
+// (roiRunStage), so each step's saving is its own difference (roiEstimate).
 
 const ROI_ASSUMPTIONS = {
   // kWh generated per kW of panels per day, by STC zone rating (Clean Energy Council guide figures).
   yieldPerKwPerDay: { 1.622: 4.4, 1.536: 4.2, 1.382: 3.9, 1.185: 3.5 },
   defaultZoneRating: 1.382,
-  // Share of a home's use that falls in daylight hours when the bill gives no time-of-use split
-  // (sizing only; the estimate uses the hourly shape below).
-  daytimeShare: 0.40,
   batteryRoundTrip: 0.90,     // kWh out per kWh in (split evenly between charging and discharging)
-  batteryUsableCycle: 0.85,   // share of usable capacity cycled on an average day (sizing)
   batteryMaxChargeC: 0.5,     // charges or discharges at most half its usable capacity in an hour
   priceRisePerYear: 0.03,     // electricity price growth for the "if prices rise" figures (the main figures stay at today's prices)
   batteryLifeYears: 15,       // the battery's saving is counted for this many years in the long-run figures
@@ -39,8 +25,6 @@ const ROI_ASSUMPTIONS = {
   defaultUsageRateCents: 33,
   defaultFeedInCents: 5,
   defaultSupplyChargeCents: 110,
-  solarSizesKw: [6.6, 8, 10, 13.2, 15, 20, 26.6, 30],
-  batterySizesKwh: [5, 10, 13.5, 16, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100],
   minBatteryKwh: 5,
   maxBatteryKwh: 100,
   // Four seasons, each a quarter of the year: how much the panels make and the home uses against
@@ -107,7 +91,8 @@ function roiExportLimitRead(answers) {
   if (!text || /^(no limit|none|unlimited|not known( yet)?|unknown)$/.test(text)) return { kw: null, unclear: false };
   if (/^(zero( export)?|no export|nil)$/.test(text)) return { kw: 0, unclear: false };
   const m = text.match(/^(\d+(?:\.\d+)?)\s*(kw)?(\s*(in\s+)?total)?$/);
-  return m ? { kw: parseFloat(m[1]), unclear: false } : { kw: null, unclear: true };
+  // over 1,000 is watts typed for kW ("5000"): not guessed at either
+  return m && parseFloat(m[1]) <= 1000 ? { kw: parseFloat(m[1]), unclear: false } : { kw: null, unclear: true };
 }
 const roiExportLimitKw = (answers) => roiExportLimitRead(answers).kw;
 const roiExportLimitUnclear = (answers) => roiExportLimitRead(answers).unclear;
@@ -124,7 +109,7 @@ function roiExistingRemovedFromWords(answers, template) {
   const text = `${a.existing_pv || ''} ${a.existing_system_detail || ''}`;
   const m = text.match(/\b(to be removed|being removed|will be removed|removing|remove (it|the|existing|old)|decommission\w*|coming off|taken (off|down))\b/i);
   if (!m) return false;
-  return !/\b(not|no|never|isn't|won't|don't|do not)\s+(be\s+)?$/i.test(text.slice(0, m.index));
+  return !/\b(not|no|never|isn['’]?t|won['’]?t|don['’]?t|do not|no need)\s+(to\s+)?(be\s+)?$/i.test(text.slice(0, m.index));
 }
 function roiExistingRemoved(answers, template) {
   const a = answers || {};
@@ -758,31 +743,45 @@ function roiHome({ reading, answers, inputs, zoneRating, template }) {
   const exportLimitKw = roiExportLimitKw(answers);
   let fit = roiLoadShape(metrics, current, S);
   let dailyKwh = metrics.dailyKwh;
-  if (S.annualKwh) dailyKwh = S.annualKwh / 365;
+  // false when the day was fitted to the bill's bands but, with the existing solar on the roof, the
+  // model does not end up buying the bill's split (the page then says "our closest fit")
+  let matched = true;
+  if (S.annualKwh) { dailyKwh = S.annualKwh / 365; matched = !(existingKw > 0); }
   else if (existingKw > 0) {
     // what the home uses in each band, starting from what it bought in each (the bill's split)
     const sp = metrics.split;
     const bands = fit.fitted ? { peak: sp.peak, shoulder: sp.shoulder, offPeak: sp.offPeak, solarSoak: sp.solarSoak || 0 } : null;
     const billBand = bands ? { peak: sp.peak, shoulder: sp.shoulder, off_peak: sp.offPeak, solar_soak: sp.solarSoak || 0 } : null;
+    const billTotal = bands ? Object.values(billBand).reduce((t, v) => t + v, 0) : 0;
     const key = { peak: 'peak', shoulder: 'shoulder', off_peak: 'offPeak', solar_soak: 'solarSoak' };
     const floor = metrics.controlledDailyKwh || 0;
-    for (let i = 0; i < 12; i++) {
-      const st = roiRunStage({ metrics, plan: current, loadShape: fit.shape, solarShape, solarKw: existingKw, batteryKwh: 0, settings: S, dailyKwh, exportLimitKw });
-      const gap = metrics.dailyKwh - (st.imported + st.controlledKwh) / 365;
-      let bandsOff = 0;
-      if (bands && st.imported > 0) {
-        const billTotal = Object.values(billBand).reduce((t, v) => t + v, 0);
-        Object.keys(billBand).forEach(b => {
-          const want = billBand[b] / billTotal, got = (st.importBy[b] || 0) / st.imported;
-          if (!(want > 0) || !(got > 0)) return;
-          bandsOff = Math.max(bandsOff, Math.abs(want - got));
-          bands[key[b]] *= Math.min(2, Math.max(0.5, want / got));
-        });
-        const refit = roiLoadShape(metrics, current, S, bands);
-        if (refit.fitted) fit = refit;
-      }
-      if (Math.abs(gap) < 0.02 && bandsOff < 0.01) break;
-      dailyKwh = Math.max(floor, dailyKwh + gap);
+    const buy = () => roiRunStage({ metrics, plan: current, loadShape: fit.shape, solarShape, solarKw: existingKw, batteryKwh: 0, settings: S, dailyKwh, exportLimitKw });
+    const gapOf = (st) => metrics.dailyKwh - (st.imported + st.controlledKwh) / 365;
+    // how far the share bought in any band is from the bill's; with move, each band's use is nudged toward it
+    const bandsOffOf = (st, move) => {
+      let off = 0;
+      if (!bands || !(st.imported > 0)) return off;
+      Object.keys(billBand).forEach(b => {
+        const want = billBand[b] / billTotal, got = (st.importBy[b] || 0) / st.imported;
+        if (!(want > 0) || !(got > 0)) return;
+        off = Math.max(off, Math.abs(want - got));
+        if (move) bands[key[b]] *= Math.min(2, Math.max(0.5, want / got));
+      });
+      return off;
+    };
+    let settled = false;
+    for (let i = 0; i < 12 && !settled; i++) {
+      const st = buy(), gap = gapOf(st), off = bandsOffOf(st, true);
+      if (bands) { const refit = roiLoadShape(metrics, current, S, bands); if (refit.fitted) fit = refit; }
+      settled = Math.abs(gap) < 0.02 && off < 0.01;
+      if (!settled) dailyKwh = Math.max(floor, dailyKwh + gap);
+    }
+    if (!settled) {
+      // a midday band can leave the bands chasing each other: hold the shape, bring the total back
+      // to what the bill bought, and call it matched only when the bands ended close
+      let st = buy();
+      for (let i = 0; i < 8 && Math.abs(gapOf(st)) >= 0.02; i++) { dailyKwh = Math.max(floor, dailyKwh + gapOf(st)); st = buy(); }
+      matched = bandsOffOf(st, false) < 0.03;
     }
   }
   const usesBill = !S.annualKwh && !(existingKw > 0); // the home's use is just what the bill says it bought
@@ -794,7 +793,7 @@ function roiHome({ reading, answers, inputs, zoneRating, template }) {
     ownSolarKwh: existingKw > 0 && !S.annualKwh ? Math.max(0, useKwh - metrics.annualKwh) : 0, // what the existing solar supplies direct
     useTyped: !!S.annualKwh,
     daylightShare: roiDaylightShare(fit.shape),
-    shapeFrom: fit.fitted ? 'bill' : (S.daylightShare != null ? 'typed' : 'assumed'),
+    shapeFrom: fit.fitted ? (matched ? 'bill' : 'near') : (S.daylightShare != null ? 'typed' : 'assumed'),
   };
 }
 
@@ -964,17 +963,19 @@ function roiGaps(argsIn) {
   // key, whether it holds figures back, what to ask the customer for (null: the staff's to fix), and
   // any detail the staff wording needs (roiGapStaffText in solar-roi-staff.js)
   const add = (key, blocking, client, info) => gaps.push({ key, blocking, client: client || null, info: info || {} });
-  if (!r) {
-    add('bill', true, 'a recent electricity bill, every page, so we can see how much power you use and what you pay for it');
-  } else {
+  const noBill = !r || r.estimated; // estimated: figures typed in place of a bill (roiApplyOverrides)
+  if (noBill) add('bill', true, 'a recent electricity bill, every page, so we can see how much power you use and what you pay for it');
+  if (r && !noBill) {
     if (!m.dailyKwh) add('usage', true, 'the page of your bill with the usage table (kWh used and the number of days in the period)');
     if (!plan.hasRate) add('rate', true, 'the page of your bill that shows your rates (cents per kWh, and the daily supply charge)');
     if (roiNum(r.bill_total) == null) add('total', true, 'the page of your bill with the total amount for the period');
     if (m.days && m.days < 28) add('short', false, 'a full quarterly bill if you have one (the one we have covers only a short period)', { days: m.days });
+    if (!m.split) add('tou', false);
+  }
+  if (r) {
     if ((m.hasSolarAlready || template === 'battery') && !existingSolarKw(a)) add('existing', true, 'the size of your existing solar system in kW (on the inverter label or your original paperwork)', { battery: template === 'battery' });
     if (!plan.supplyKnown) add('supply', false);
     if (!plan.feedInKnown && (roiNum(newSolarKw) > 0 || m.hasSolarAlready)) add('feedin', false);
-    if (!m.split) add('tou', false);
     if (billGst === 'ex') add('gst', false, null, { typed: billGstTyped });
   }
   if (template !== 'battery' && !(roiNum(newSolarKw) > 0)) add('size', true);
@@ -1024,7 +1025,7 @@ function roiSavingRange(estArgs, est) {
     tryWith({ daylight_share: Math.min(0.9, day + 0.1) }),
     tryWith({ daylight_share: Math.max(0.1, day - 0.1) }),
   ].filter(v => v != null);
-  return { low: Math.floor(Math.min(...values) / 50) * 50, high: Math.ceil(Math.max(...values) / 50) * 50 };
+  return { low: Math.max(0, Math.floor(Math.min(...values) / 50) * 50), high: Math.ceil(Math.max(...values) / 50) * 50 };
 }
 
 const ROI_WHAT_CHANGES = 'These figures change if your power use changes (an electric car, a pool, working from home), if you move to a different electricity plan, or if the panels are shaded.';
@@ -1052,7 +1053,7 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
   if (plan.tariff === 'tou' && plan.timesFrom !== 'assumed') fromBill.push(['When each rate applies', roiScheduleText(plan)]);
   if (home.shapeFrom === 'bill') fromBill.push(['When you use power', 'Matched to the peak, shoulder and off-peak kWh on your bill']);
 
-  if (home.shapeFrom !== 'bill') assumed.push(['When you use power', `We do not have meter readings for your home, so we used ${home.shapeFrom === 'typed' ? 'a day with' : 'a typical household day:'} about ${Math.round(home.daylightShare * 100)}% of your power between 6am and 6pm`]);
+  if (home.shapeFrom !== 'bill') assumed.push(['When you use power', `${home.shapeFrom === 'near' ? 'Our closest fit to the peak, shoulder and off-peak kWh on your bill, allowing for your existing solar:' : `We do not have meter readings for your home, so we used ${home.shapeFrom === 'typed' ? 'a day with' : 'a typical household day:'}`} about ${Math.round(home.daylightShare * 100)}% of your power between 6am and 6pm`]);
   if (home.useTyped) assumed.push(['Your year', `${roiKwh(home.useKwh)} a year, our estimate of your yearly use`]);
   else if (!r.estimated && !typedIn.has('usage')) assumed.push(['Your year', `The ${days || 'period'} on your bill ${days ? 'stand' : 'stands'} for your whole year`]);
   if (est.newSolarKw > 0 || home.existingKw > 0) assumed.push(['Sun', `${S.yieldPerKw} kWh a day from each kW of panels, averaged over the year, with ${Math.round(S.clearShare * 10)} days in 10 clear and the rest overcast${S.typed.overcast_output != null ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}`]);
@@ -1061,11 +1062,12 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
   if (est.newSolarKw > 0 || home.existingKw > 0) assumed.push(['Export limit', home.exportLimitKw == null ? 'None applied: all spare solar is taken as sold to the grid' : home.exportLimitKw === 0 ? 'Nothing is sent to the grid' : `No more than ${home.exportLimitKw} kW goes to the grid at any time`]);
   if (est.batteryKwh > 0) assumed.push(['Battery', `Gives back ${Math.round(S.batteryRoundTrip * 100)}% of the power put into it${S.typed.battery_charge_rate != null ? `, charging or discharging up to ${Math.round(S.batteryMaxChargeC * 100)}% of its size in an hour` : ''}. Its saving is counted for ${S.batteryLifeYears} years`]);
   if (dollars) {
-    assumed.push(['Prices', `Today's prices in every figure${S.priceRise > 0 ? `. If power prices rise ${roiPct(S.priceRise)} a year, the saving is about ${roiAbout(cur.saving10Rise)} over 10 years and ${roiAbout(cur.saving25Rise)} over 25` : ''}`]);
+    assumed.push(['Prices', `Today's prices in every figure${S.priceRise > 0 && cur.totalSaving > 0 ? `. If power prices rise ${roiPct(S.priceRise)} a year, the saving is about ${roiAbout(cur.saving10Rise)} over 10 years and ${roiAbout(cur.saving25Rise)} over 25` : ''}`]);
     if (est.newSolarKw > 0) assumed.push(['Panels', `Make ${roiPct(S.panelLoss)} less power each year`]);
     if (S.typed.grid_emissions != null) assumed.push(['Grid emissions', `${S.emissions} kg of CO2 for each kWh from the grid`]);
-    if (!plan.supplyKnown) assumed.push(['Daily supply charge', `Not on your bill: ${plan.supply} c a day assumed`]);
-    if (!plan.feedInKnown && (est.newSolarKw > 0 || home.existingKw > 0)) assumed.push(['Solar feed-in', `Not on your bill: ${plan.feed_in} c/kWh assumed`]);
+    const gone = r.estimated ? '' : 'Not on your bill: ';
+    if (!plan.supplyKnown) assumed.push(['Daily supply charge', `${gone}${plan.supply} c a day assumed`]);
+    if (!plan.feedInKnown && (est.newSolarKw > 0 || home.existingKw > 0)) assumed.push(['Solar feed-in', `${gone}${plan.feed_in} c/kWh assumed`]);
     if (plan.tariff === 'tou') {
       const guessed = ROI_BANDS.filter(b => (plan.bandShare[b.key] || 0) > 0 && !plan.rateKnown[b.key]);
       if (guessed.length) assumed.push(['Rates not on your bill', `${guessed.map(b => `${b.label.toLowerCase()} ${plan[b.key]} c/kWh`).join(', ')} assumed`]);
@@ -1093,7 +1095,7 @@ function roiPresentation(argsIn) {
   const { reading, answers, template, newSolarKw, batteryKwh, netCost, zoneRating, money, inputs, solarPrice, batteryPrice, linesBatteryKwh, pylonStorage, billGst, billGstTyped, clientType, overridden, overrideNotes } = args;
   const gaps = roiGaps({ reading, answers, template, newSolarKw, batteryKwh, netCost, inputs, solarPrice, batteryPrice, billGst, billGstTyped, clientType, overridden });
   const has = (k) => !gaps.some(g => g.key === k && !g.overridden);
-  const asks = gaps.filter(g => g.client).map(g => ({ key: g.key, need: g.client, gives: ROI_GAP_GIVES[g.key] || 'a more accurate estimate', blocking: g.blocking }));
+  const asks = gaps.filter(g => g.client).map(g => ({ key: g.key, need: g.client, gives: (!g.overridden && ROI_GAP_GIVES[g.key]) || 'a more accurate estimate', blocking: g.blocking }));
   const m = billMetrics(reading);
   const checkArgs = { reading, answers, template, newSolarKw, batteryKwh, netCost, inputs, solarPrice, batteryPrice, linesBatteryKwh, pylonStorage, money, billGst, billGstTyped, clientType };
   // the mistake checks are staff only: they run where solar-roi-staff.js is loaded (the quote page), not on the proposal
@@ -1113,6 +1115,7 @@ function roiPresentation(argsIn) {
   const bills = dollars && has('total');
   const cols = est.scenarios.map(s => s.name);
   const per = (fn) => est.scenarios.map(fn);
+  const saves = (fn) => per(s => (s.totalSaving > 0 ? fn(s) : '-'));
   const lost = (stage) => (est.scenarios.some(s => s.stages[stage].curtailed > 0)
     ? [['Lost to the export limit', per(s => `${roiKwh(s.stages[stage].curtailed)} a year (no more than ${est.exportLimitKw} kW can go to the grid)`)]] : []);
   const sections = [];
@@ -1159,9 +1162,12 @@ function roiPresentation(argsIn) {
         ['Pays for itself in', per(s => s.paybackText)],
         ['Yearly return', per(s => s.returnPercent != null ? `${s.returnPercent}% of the investment` : '-')],
       ] : []),
-      ['Saving over 10 years', per(s => roiDollars(s.saving10))],
-      ['Saving over 25 years', per(s => `${roiDollars(s.saving25)}${counted}`)],
-      ...(S.priceRise > 0 ? [[`If power prices rise ${roiPct(S.priceRise)} a year`, per(s => `${roiDollars(s.saving10Rise)} over 10 years, ${roiDollars(s.saving25Rise)} over 25`)]] : []),
+      // no long-run savings rows where the bill goes up (a plan column that does save still shows its own)
+      ...(est.scenarios.some(s => s.totalSaving > 0) ? [
+        ['Saving over 10 years', saves(s => roiDollars(s.saving10))],
+        ['Saving over 25 years', saves(s => `${roiDollars(s.saving25)}${counted}`)],
+        ...(S.priceRise > 0 ? [[`If power prices rise ${roiPct(S.priceRise)} a year`, saves(s => `${roiDollars(s.saving10Rise)} over 10 years, ${roiDollars(s.saving25Rise)} over 25`)]] : []),
+      ] : []),
       ['Emissions avoided', per(s => `about ${s.co2TonnesPerYear} tonnes of CO2 a year`)],
     ] });
   }
@@ -1169,7 +1175,7 @@ function roiPresentation(argsIn) {
   const cur = est.current;
   // the figures the page opens with (the current plan): null where we cannot stand behind one
   const headline = dollars ? {
-    billNow: bills ? cur.billNow : null, billNowIsActual: cur.billNowIsActual, billAfter: bills ? cur.billAfter : null, saving: cur.totalSaving,
+    billNow: bills ? cur.billNow : null, billNowIsActual: cur.billNowIsActual, rateTyped: (overridden || []).includes('rate'), billAfter: bills ? cur.billAfter : null, saving: cur.totalSaving,
     payback: est.prices.total > 0 ? cur.payback : null, paybackText: cur.paybackText, hasPrice: est.prices.total > 0,
     alt: est.alt ? { name: est.alt.name, saving: est.alt.totalSaving } : null,
   } : null;
@@ -1186,7 +1192,7 @@ function roiHeadlineHtml(pres) {
   const tile = (label, value, sub, strong) => `<div style="flex:1 1 150px; padding:14px 16px; border:1px solid ${strong ? '#1a6be6' : '#d9dde5'};${strong ? ' background:#f1f5fd;' : ''}"><div style="font-size:11.5px; letter-spacing:0.05em; text-transform:uppercase; color:#5b6472;">${roiEsc(label)}</div><div style="font-family:Archivo, Helvetica, Arial, sans-serif; font-weight:600; font-size:27px; line-height:1.15; margin-top:4px; color:#0a0a0a;">${roiEsc(value)}</div><div style="font-size:12px; color:#5b6472; margin-top:2px;">${roiEsc(sub)}</div></div>`;
   const tiles = [];
   const bill = (n) => (n < 0 ? `about ${roiAbout(-n)} in credit` : `about ${roiAbout(n)}`);
-  if (h.billNow != null) tiles.push(tile('Your power bill now', bill(h.billNow), h.billNowIsActual ? 'a year, from your bill' : 'a year, at your rates'));
+  if (h.billNow != null) tiles.push(tile('Your power bill now', bill(h.billNow), h.billNowIsActual ? 'a year, from your bill' : h.rateTyped ? 'a year, our estimate' : 'a year, at your rates'));
   if (h.billAfter != null) tiles.push(tile('With this system', bill(h.billAfter), 'a year'));
   tiles.push(h.saving < 0 ? tile('Your bill goes up by', `about ${roiAbout(-h.saving)}`, 'a year', true) : tile('You save', `about ${roiAbout(h.saving)}`, 'a year', true));
   const lines = [];
@@ -1265,7 +1271,7 @@ function roiChartsHtml(est, money, { dollars = true, bills = true, colors = ROI_
         </svg>
       </figure>`);
 
-  if (dollars && est.prices.total > 0 && s.cumulative) {
+  if (dollars && est.prices.total > 0 && s.cumulative && s.totalSaving > 0) {
     // the savings so far at today's prices (solid) against the price; the dashed line is the same with
     // power prices rising every year
     const cum = s.cumulative, rise = est.settings.priceRise > 0 ? s.cumulativeRise : null;
