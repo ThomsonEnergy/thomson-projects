@@ -63,6 +63,8 @@ function roiChecks(argsIn) {
     const genExtra = c.stages.solar.generation - c.stages.base.generation;
     if (solar > 0 && est.home.useKwh && genExtra > est.home.useKwh * 2.5) add('oversized', `The solar makes about ${Math.round(genExtra / est.home.useKwh * 10) / 10} times what the home uses in a year: check the size, or expect most of it to be exported.`);
     if (c.paybackRaw != null && (c.paybackRaw < 1 || c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears)) add('payback', c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears ? `${ROI_NOT_PAID_OFF} (about ${c.paybackRaw} years at this saving), which is what the proposal says: check the price, the sizes and the rates.` : `Pays for itself in ${c.paybackRaw} years, which is unusual: check the price, the sizes and the rates.`);
+    if (est.home.current.hasRate && c.totalSaving <= 0) add('bill_up', `The proposal shows the power bill going up by ${fmt(-c.totalSaving)} a year with this system${est.existingRemoved ? ` (the existing ${est.existingKw} kW is taken as coming off the roof)` : ''}: check the sizes, the existing system answers and the rates before it goes out.`);
+    if (est.existingKw > 0 && est.metrics.controlledDailyKwh > est.metrics.dailyKwh) add('controlled_over', `The bill's controlled load (${est.metrics.controlledDailyKwh} kWh a day) is more than its total use (${est.metrics.dailyKwh} kWh a day): check the kWh on the bill card.`);
     if (c.paybackRaw == null && est.prices.total > 0 && c.totalSaving > 0) add('payback', `${c.paybackText}, which is what the proposal says: the savings never reach the price${est.batteryKwh > 0 ? ` (past year ${est.settings.batteryLifeYears} only the solar's share is counted)` : ''}. Check the price, the sizes and the rates.`);
     if (c.billNowIsActual && c.modelledNow > 0) {
       // a bill at or below zero (in credit) has no sensible percentage: say the two figures
@@ -70,6 +72,8 @@ function roiChecks(argsIn) {
       if (diff == null || Math.abs(diff) > 0.2) add('model_vs_bill', `These rates on this use come to ${fmt(c.modelledNow)} a year but the bill says ${fmt(c.billNow)}${diff == null ? '' : ` (${diff > 0 ? '+' : ''}${Math.round(diff * 100)}%)`}: check the rates, the supply charge and the kWh split, or a discount or credit on the bill.`);
     }
   }
+  const pctOff = [['usage_discount_percent', 'off usage'], ['bill_discount_percent', 'off the bill']].filter(([k]) => { const n = roiNum((reading || {})[k]); return n != null && (n < 0 || n > 60); });
+  if (pctOff.length) add('discount_unused', `The bill's discount ${pctOff.map(([k, t]) => `${reading[k]}% ${t}`).join(' and ')} is outside 0 to 60% and is not used: check it on the bill card.`);
   if (roiExportLimitUnclear(a)) add('export_limit_unclear', `The export limit answer "${a.export_limit}" is not a number of kW, so no limit is applied: type the kW in total across the phases (for 5 kW a phase on three phases, 15).`);
   // the battery against the Pylon design, when its models say their size
   const pylon = roiPylonBatteryKwh(pylonStorage);
@@ -158,4 +162,36 @@ function roiPlansByRetailer(rows, brandOf, nameOf) {
     g.more.push(r);
   });
   return [...groups.values()].map(g => ({ brand: g.brand, best: g.best, more: g.more }));
+}
+
+// The staff wording of each thing the estimate is missing (roiGaps in solar-roi.js gives the key and
+// any detail). Blocking ones hold figures off the proposal until fixed or shown anyway on the
+// Savings assumptions page; the rest are assumptions the figures run on.
+function roiGapStaffText(gap) {
+  const info = gap.info || {};
+  const text = {
+    bill: 'No electricity bill read yet: add every page above and press Read bill with AI.',
+    usage: 'The bill gives no usage in kWh (no total kWh with the number of days, and no daily average).',
+    rate: 'No usage rate (c/kWh) on the bill and none typed in the rates below.',
+    total: 'No bill total found: "your bills now and after" are left off; the savings still show from the usage and the rates.',
+    short: `A ${info.days} day bill: the yearly figures are scaled up from it. A full quarterly bill is better.`,
+    existing: `${info.battery ? 'A battery quote' : 'The bill shows solar export'} but no existing solar size in the answers (Existing solar or battery, in kW).`,
+    supply: `No daily supply charge on the bill or typed below; ${ROI_ASSUMPTIONS.defaultSupplyChargeCents} c/day assumed.`,
+    feedin: `No feed-in rate on the bill or typed below; ${ROI_ASSUMPTIONS.defaultFeedInCents} c/kWh assumed for what is exported.`,
+    tou: 'No peak / shoulder / off-peak split on the bill: a normal household day shape is used for when the power is used.',
+    gst: `The bill is taken as ex GST (${info.typed ? 'set under the rates' : 'a company client; change it under the rates if the bill shows inc GST figures'}): its total, rates and supply charge are lifted 10% so they compare with the plans and the price, which are inc GST.`,
+    size: 'No system size: set it on step 3 (STC system size) or pull the Pylon design.',
+    battery: 'No battery quoted and no battery kWh in the line items, so the estimate runs without one. Type the battery (usable kWh) under What we are quoting, or answer "Batteries as well?" No if this quote has no battery.',
+    price: 'No price yet: the payback needs a priced stage on step 3.',
+    split_prices: 'No separate solar and battery prices under What we are quoting, so one payback shows for the whole system (not one for each).',
+  }[gap.key] || '';
+  return gap.overridden ? `${text} Shown anyway (Savings assumptions).` : text;
+}
+
+// One line for the bill card on where the quote's Savings assumptions stand ('' when every value is
+// the normal one and no block is shown anyway). The page itself is quote-savings-assumptions.js.
+function savingsAssumptionsNote(roiInputs, gaps) {
+  const typed = Object.keys((roiInputs && roiInputs.assumptions) || {}).length;
+  const shown = (gaps || []).filter(g => g.overridden).length; // only the ones in force: a block whose gap has gone counts for nothing
+  return [typed ? `${typed} assumed value${typed === 1 ? '' : 's'} changed` : '', shown ? `${shown} block${shown === 1 ? '' : 's'} shown anyway` : ''].filter(Boolean).join(', ');
 }
