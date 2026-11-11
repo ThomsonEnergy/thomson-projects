@@ -31,10 +31,9 @@ const ROI_ASSUMPTIONS = {
   defaultSupplyChargeCents: 110,
   minBatteryKwh: 5,
   maxBatteryKwh: 100,
-  // Four seasons, each a quarter of the year: how much the panels make and the home uses against
-  // the yearly average. Within each season, 30% of days are overcast (the panels make about a third
-  // of a clear day) and the rest are clear, so the season still averages out: the battery does not
-  // fill every day, which is what keeps the home on the grid some of the time.
+  // Four seasons, each a quarter of the year: what the panels make and the home uses against the
+  // yearly average. In each, 30% of days are overcast (about a third of a clear day's power), so
+  // the battery does not fill every day. A site with sun records uses its own (roiSiteSun).
   dayTypes: [{ name: 'clear', share: 0.7, gen: 1.2786 }, { name: 'overcast', share: 0.3, gen: 0.35 }],
   seasons: [
     { name: 'Summer', gen: 1.25, load: 1.10 },
@@ -53,12 +52,9 @@ const ROI_ASSUMPTIONS = {
 
 // ---------- what the estimate assumes on this quote ----------
 
-// The assumed values in use: the normal ones above, with any changed for this quote (kept under
-// roi_inputs.assumptions by key; backlog item 72) laid over them. A value outside its sensible
-// range is ignored. The two kinds of day and the four seasons are kept averaging to the year.
-// The normal sun figure for a site (see ROI_ASSUMPTIONS.yieldPerKwPerDay). address is the quote's
-// site address: the four digits it ends on (before "Australia", if that is there) are the postcode.
-// A street number is never taken for one; an address with no postcode keeps the zone's figure.
+// The area's sun figure for a site with no sun records. The postcode is the four digits the
+// address ends on (before "Australia", if there); a street number is never taken for one, and
+// with no postcode the zone's figure stands.
 function roiSiteYield(zoneRating, address) {
   const A = ROI_ASSUMPTIONS;
   const zone = A.yieldPerKwPerDay[zoneRating] ? Number(zoneRating) : A.defaultZoneRating;
@@ -67,18 +63,18 @@ function roiSiteYield(zoneRating, address) {
   return zone === A.defaultZoneRating && north ? A.northYieldPerKwPerDay : A.yieldPerKwPerDay[zone];
 }
 
-// The site's own sun figures (projects.site_sun, item 75: ten years of daily sun records for the
-// spot, worked out by netlify/functions/site-sun.js), when they are for this address and every
-// figure is believable; null otherwise, and the zone's figures are used.
-function roiSiteSun(siteSun, siteAddress) {
-  const s = siteSun;
-  if (!s || typeof s !== 'object' || String(s.for_address || '').trim() !== String(siteAddress || '').trim()) return null;
-  const y = roiNum(s.yield_per_kw), c = roiNum(s.clear_share), o = roiNum(s.overcast_output);
-  const seasons = Array.isArray(s.seasons) && s.seasons.length === 4 ? s.seasons.map(roiNum) : [];
-  if (!(y >= 2.5 && y <= 6 && c >= 0.3 && c <= 1 && o >= 0 && o <= 0.9) || seasons.length !== 4 || !seasons.every(v => v >= 0.3 && v <= 1.8)) return null;
-  return { yield: y, clearShare: c, overcastGen: o, seasons, years: String(s.years || '') };
+// The site's own sun figures (projects.site_sun, item 75, written by site-sun.js) when they are
+// for this address and believable; else null, and the zone's figures are used.
+function roiSiteSun(s, address) {
+  if (!s || String(s.for_address || '').trim() !== String(address || '').trim()) return null;
+  const y = roiNum(s.yield_per_kw), c = roiNum(s.clear_share), o = roiNum(s.overcast_output), seasons = [].concat(s.seasons || []).map(roiNum);
+  const ok = y >= 2.5 && y <= 6 && c >= 0.3 && c <= 1 && o != null && o >= 0 && o <= 0.9 && seasons.length === 4 && seasons.every(v => v >= 0.3 && v <= 1.8);
+  return ok ? { yield: y, clearShare: c, overcastGen: o, seasons, years: String(s.years || 'ten years') } : null;
 }
 
+// The assumed values in use: the normal ones (the site's own sun figures when it has them), with
+// any changed for this quote (roi_inputs.assumptions; item 72) laid over them. A value outside
+// its range is ignored. The two kinds of day and the four seasons are kept averaging to the year.
 function roiSettings(inputs, zoneRating, siteAddress, siteSun) {
   const A = ROI_ASSUMPTIONS;
   const typed = (inputs && typeof inputs.assumptions === 'object' && inputs.assumptions) || {};
@@ -95,7 +91,7 @@ function roiSettings(inputs, zoneRating, siteAddress, siteSun) {
   const meanGen = mean('gen'), meanLoad = mean('load');
   return {
     yieldPerKw: num('yield_per_kw', 1, 7) ?? zoneYield, zoneYield,
-    sunRecords: site ? site.years || 'ten years' : null, // the years of records behind the sun figures, or null for the zone's
+    sunRecords: site ? site.years : null, // the years of sun records in use
     clearShare, overcastGen, dayTypes,
     seasons: raw.map(sn => ({ name: sn.name, gen: sn.gen / meanGen, load: sn.load / meanLoad })),
     daylightShare: num('daylight_share', 0.1, 0.9), // null: the normal household day
@@ -150,11 +146,10 @@ function roiExistingRemoved(answers, template) {
 // ---------- GST basis of the bill (M10) ----------
 
 // Business bills are usually printed ex GST, while every published plan (energy-plans.js) and the
-// quote's price are inc GST. roi_inputs.bill_gst says which the bill is ('inc' or 'ex'); without it a
-// company client's bill is taken as ex GST and a household's as inc GST. The estimate runs inc GST
-// throughout, so an ex GST bill (its total, its rates and its supply charge) and the rates typed from
-// it under the estimate's inputs are lifted by 10% here before anything is compared. The feed-in rate
-// is left alone: feed-in credits carry no GST in the published plans either.
+// quote's price are inc GST. roi_inputs.bill_gst says which the bill is ('inc' or 'ex'); without it
+// a company's bill is taken as ex GST and a household's as inc. The estimate runs inc GST, so an ex
+// GST bill (its total, rates and supply charge) and the rates typed from it are lifted by 10% here
+// before anything is compared. Feed-in is left alone: its credits carry no GST in the plans either.
 const ROI_GST = 1.1;
 function roiBillGst(inputs, clientType) {
   const v = String((inputs || {}).bill_gst || '').toLowerCase();
@@ -1342,5 +1337,5 @@ function roiChartsHtml(est, money, { dollars = true, bills = true, colors = ROI_
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, ROI_NOT_PAID_OFF, roiComparePlans, billMetrics, existingSolarKw, roiNum, roiBillGst, roiIncGstArgs, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiDayPatterns, roiBatteryKwhFromLines, roiSettings, roiSiteYield, roiApplyOverrides, roiExportLimitKw, roiExportLimitUnclear, roiExistingRemoved, roiExistingRemovedFromWords, ROI_EXISTING_STAYS, ROI_EXISTING_GOES, roiHome, roiEstimate, roiGaps, roiPresentation, roiChartsHtml, roiHeadlineHtml, roiListsHtml, roiDollars, roiAbout };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_NOT_PAID_OFF, roiComparePlans, billMetrics, existingSolarKw, roiNum, roiIncGstArgs, roiPlan, roiParseHours, roiScheduleText, roiDayPatterns, roiBatteryKwhFromLines, roiSettings, roiApplyOverrides, roiExportLimitKw, roiExportLimitUnclear, roiExistingRemoved, roiExistingRemovedFromWords, ROI_EXISTING_STAYS, ROI_EXISTING_GOES, roiHome, roiEstimate, roiGaps, roiPresentation, roiChartsHtml, roiHeadlineHtml, roiListsHtml, roiDollars, roiAbout };
 }

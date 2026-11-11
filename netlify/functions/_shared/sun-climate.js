@@ -1,5 +1,5 @@
 // Long-run sun records for a place (backlog item 75): ten years of daily sun from NASA's POWER
-// service (free, no key, the whole world on a grid of about 55 km), boiled down to what the
+// service (free, no key, the whole world on a grid of about 100 km), boiled down to what the
 // savings estimate needs for a site: the yearly sun figure, how the seasons differ, and how many
 // days are dull and how little they make. Used by site-sun.js. Each grid cell is fetched once and
 // kept in the sun_climate table (the only thing written here).
@@ -7,9 +7,11 @@
 // Nothing here is guessed for a site. The one thing the records cannot say is how much a kW of
 // panels makes from a given amount of sun (roof pitch, heat, wiring and inverter losses), so that
 // is taken from the Clean Energy Council's published figures for Sydney (3.9 kWh per kW a day) and
-// Brisbane (4.2) against the same records for those two cities: every other site then moves with
-// its own sun. The seasons are handled the same way: the estimate's normal season spread is taken
+// Brisbane (4.2) against the same records for those two cities (so those two still come out at
+// their published figures) and every other site moves with its own sun. The seasons are handled the same way: the estimate's normal season spread is taken
 // as right for Sydney and shifted by how the site's seasons differ from Sydney's in the records.
+
+const fetch = require('node-fetch');
 
 const POWER_URL = 'https://power.larc.nasa.gov/api/temporal/daily/point';
 const YEARS = 10;
@@ -25,7 +27,8 @@ const SEASON_OF_MONTH = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 0]; // Jan..Dec: summe
 
 const round = (n, dp) => Math.round(n * 10 ** dp) / 10 ** dp;
 
-// The grid cell a place falls in: half a degree each way, which is as fine as the records are.
+// The cell a place is filed under: half a degree each way (the records themselves are coarser, so
+// neighbouring cells can hold the same figures; that only costs a second fetch).
 function sunCell(lat, lng) {
   const snap = (v) => (Math.round(v * 2) / 2).toFixed(1);
   return `${snap(lat)},${snap(lng)}`;
@@ -50,7 +53,7 @@ function parsePower(json) {
 async function fetchDailySun(lat, lng) {
   const lastYear = new Date().getUTCFullYear() - 1;
   const query = new URLSearchParams({ parameters: 'ALLSKY_SFC_SW_DWN', community: 'RE', latitude: String(lat), longitude: String(lng), start: `${lastYear - YEARS + 1}0101`, end: `${lastYear}1231`, format: 'JSON' });
-  const res = await fetch(`${POWER_URL}?${query}`);
+  const res = await fetch(`${POWER_URL}?${query}`, { timeout: 20000 });
   if (!res.ok) throw new Error(`The sun records could not be fetched (${res.status}).`);
   return { days: parsePower(await res.json()), years: `${lastYear - YEARS + 1} to ${lastYear}` };
 }
@@ -96,8 +99,12 @@ async function getClimate(admin, lat, lng) {
 // A site's sun, ready for the estimate, from its own summary and the two reference cities'.
 // Pure: the tests call it with made-up summaries.
 function siteSunFrom(site, sydney, brisbane) {
-  // kWh from a kW of panels for each unit of sun: what the two published city figures imply
-  const perSun = (REFERENCE[0].yield / sydney.psh + REFERENCE[1].yield / brisbane.psh) / 2;
+  // kWh from a kW of panels for each unit of sun: what each published city figure implies. A site
+  // with Sydney's sun or less takes Sydney's, with Brisbane's or more takes Brisbane's, and one in
+  // between slides from one to the other (the average of the two if the cities ever read alike).
+  const perS = REFERENCE[0].yield / sydney.psh, perB = REFERENCE[1].yield / brisbane.psh;
+  const span = brisbane.psh - sydney.psh;
+  const perSun = Math.abs(span) < 0.2 ? (perS + perB) / 2 : perS + (perB - perS) * Math.min(1, Math.max(0, (site.psh - sydney.psh) / span));
   // the normal season spread, shifted by how this site's seasons differ from Sydney's, kept averaging 1
   const shifted = NORMAL_SEASON_GEN.map((g, i) => g * site.seasons[i] / sydney.seasons[i]);
   const avg = shifted.reduce((t, v) => t + v, 0) / 4;

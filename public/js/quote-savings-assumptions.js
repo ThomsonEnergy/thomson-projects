@@ -30,7 +30,7 @@ const SAVINGS_FIELDS = [
 ];
 // The four seasons, against the yearly average: what the panels make and what the home uses.
 const SAVINGS_SEASONS = ['Summer', 'Autumn', 'Winter', 'Spring'].flatMap((name, i) => [
-  { key: `season_gen_${i}`, label: `${name}: panels make, % of the yearly average`, min: 20, max: 200, step: 5, scale: 100, normal: (n) => n.seasons[i].gen },
+  { key: `season_gen_${i}`, label: `${name}: panels make, % of the yearly average`, min: 20, max: 200, step: 5, scale: 100, normal: (n) => Math.round(n.seasons[i].gen * 100) / 100 }, // a site's own seasons are not round numbers
   { key: `season_load_${i}`, label: `${name}: the home uses, % of the yearly average`, min: 20, max: 200, step: 5, scale: 100, normal: (n) => n.seasons[i].load },
 ]);
 
