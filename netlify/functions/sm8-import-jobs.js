@@ -139,7 +139,7 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
     number: str(c.number, 50) || '?', amount: r2(c.amount), source: 'servicem8',
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(c.date || '')) ? c.date : null,
     // a deposit, or an invoice paid in ServiceM8: the payment date and method
-    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(c.paid || '')) ? { paid: c.paid, method: str(c.method, 50) || 'ServiceM8' } : {}),
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(c.paid || '')) ? { paid: c.paid, method: str(c.method, 50) || 'ServiceM8', ...(n(c.amount_inc) > 0 ? { amount_inc: r2(c.amount_inc) } : {}) } : {}),
   }));
   if (importedClaims.some(c => !(c.amount >= 0))) throw new Error('A ServiceM8 claim has a bad amount');
   if (importedClaims.length && Math.abs(r2(importedClaims.reduce((t, c) => t + c.amount, 0)) - invoiced) > 0.01) throw new Error('The ServiceM8 claims do not add up to the invoiced figure');
