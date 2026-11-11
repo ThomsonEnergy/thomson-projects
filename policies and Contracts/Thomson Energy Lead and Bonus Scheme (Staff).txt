@@ -15,7 +15,7 @@ Thomson Energy pays a bonus to employees who bring in work and who quote jobs th
 * These count on your KPIs (leads sent, leads that became quotes, leads won and their value). They do not pay the link bonus, because filling the form in on site is part of your paid work.
 
 3. The link bonus
-* $50 for every job we win from a lead that came through your link, earned the day the customer approves the quote. Nothing is earned for a quote that is declined or expires, or for a job under $1,000.
+* $50 for every job we win from a lead that came through your link, earned the day the customer approves the quote and payable once they have paid their deposit (or their first invoice, when the job has no deposit). Nothing is earned for a quote that is declined or expires, for a job that falls over before the deposit is paid, or for a job under $1,000.
 * One bonus per job. A lead that is already a Thomson Energy client with an open quote or job for that work, or your own household's job, does not count.
 
 4. The under budget bonus
@@ -24,7 +24,7 @@ Thomson Energy pays a bonus to employees who bring in work and who quote jobs th
 * A job that runs over budget earns nothing and costs you nothing.
 
 5. How it is paid
-* Bonuses are added to your pay as a Lead bonus line in the pay run after they are earned. They are taxed like any other pay, and superannuation applies as the law requires.
+* Bonuses are added to your pay as a Lead bonus line in the pay run after they become payable. They are taxed like any other pay, and superannuation applies as the law requires.
 * Your TEops staff profile shows every lead, every bonus earned and when it was paid.
 
 6. The rules
