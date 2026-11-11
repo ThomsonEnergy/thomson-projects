@@ -1227,12 +1227,12 @@
         byId('bc-solar-price-wrap').style.display = both ? '' : 'none';
         byId('bc-battery-price-wrap').style.display = both ? '' : 'none';
         byId('bc-battery-kwh').placeholder = lines ? `${lines} (from the line items)` : 'e.g. 13.5';
-        byId('bc-solar-price').placeholder = 'blank: one payback';
-        byId('bc-battery-price').placeholder = 'blank: one payback';
+        byId('bc-solar-price').placeholder = typedPrice('battery') != null ? 'blank: the rest' : 'blank: one payback';
+        byId('bc-battery-price').placeholder = typedPrice('solar') != null ? 'blank: the rest' : 'blank: one payback';
         const notes = [];
         if (hasBattery && !typedBatteryKwh()) notes.push(lines ? `Battery blank: ${lines} kWh from the battery lines on the quote.` : 'Battery blank and no battery kWh in the line items: type the battery\'s usable kWh.');
         if (both) notes.push(typedPrice('solar') == null && typedPrice('battery') == null
-          ? `Prices blank: one payback for the whole system on the quote's ${money(total)} after credits. Type both prices to show a payback for the solar and one for the battery.`
+          ? `Prices blank: one payback for the whole system on the quote's ${money(total)} after credits. Type a price to show a payback for the solar and one for the battery (with one typed, the other is the rest of the total).`
           : `The two prices should add up to the quote's ${money(total)} after credits.`);
         else notes.push(total ? `Price: the quote's ${money(total)} after credits.` : 'No price yet: price the stages on step 3.');
         byId('bc-quoting-note').textContent = notes.join(' ');
@@ -1642,7 +1642,7 @@
         const el = byId('bc-plan-results');
         if (!el || !planResults) return;
         const args = estimateArgs();
-        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, clientType: args.clientType,
+        const res = roiComparePlans({ reading: project.bill_reading, answers: args.answers, template: args.template, inputs: args.inputs, newSolarKw: args.newSolarKw, batteryKwh: args.batteryKwh, zoneRating: args.zoneRating, clientType: args.clientType,
           candidates: planResults.candidates.map(p => ({ key: p.plan_id, roi_plan: p.roi_plan, adjust: p.adjust })) });
         if (!res) { el.innerHTML = ''; return; }
         const byId2 = Object.fromEntries(planResults.candidates.map(p => [p.plan_id, p]));

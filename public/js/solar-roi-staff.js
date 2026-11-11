@@ -63,11 +63,13 @@ function roiChecks(argsIn) {
     const genExtra = c.stages.solar.generation - c.stages.base.generation;
     if (solar > 0 && est.home.useKwh && genExtra > est.home.useKwh * 2.5) add('oversized', `The solar makes about ${Math.round(genExtra / est.home.useKwh * 10) / 10} times what the home uses in a year: check the size, or expect most of it to be exported.`);
     if (c.paybackRaw != null && (c.paybackRaw < 1 || c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears)) add('payback', c.paybackRaw > ROI_ASSUMPTIONS.paybackCapYears ? `${ROI_NOT_PAID_OFF} (about ${c.paybackRaw} years at this saving), which is what the proposal says: check the price, the sizes and the rates.` : `Pays for itself in ${c.paybackRaw} years, which is unusual: check the price, the sizes and the rates.`);
+    if (c.paybackRaw == null && est.prices.total > 0 && c.totalSaving > 0) add('payback', `${c.paybackText}, which is what the proposal says: the savings never reach the price${est.batteryKwh > 0 ? ` (past year ${est.settings.batteryLifeYears} only the solar's share is counted)` : ''}. Check the price, the sizes and the rates.`);
     if (c.billNowIsActual && c.modelledNow > 0) {
       const diff = (c.modelledNow - c.billNow) / c.billNow;
       if (Math.abs(diff) > 0.2) add('model_vs_bill', `These rates on this use come to ${fmt(c.modelledNow)} a year but the bill says ${fmt(c.billNow)} (${diff > 0 ? '+' : ''}${Math.round(diff * 100)}%): check the rates, the supply charge and the kWh split, or a discount on the bill.`);
     }
   }
+  if (roiExportLimitUnclear(a)) add('export_limit_unclear', `The export limit answer "${a.export_limit}" is not a number of kW, so no limit is applied: type the kW in total across the phases (for 5 kW a phase on three phases, 15).`);
   // the battery against the Pylon design, when its models say their size
   const pylon = roiPylonBatteryKwh(pylonStorage);
   if (battery > 0 && pylon.kwh > 0 && Math.abs(battery - pylon.kwh) / pylon.kwh > 0.25) add('battery_pylon', `The battery quoted is ${battery} kWh but the Pylon design has ${pylon.text} (about ${pylon.kwh} kWh): make them match, the proposal shows both.`);
@@ -75,7 +77,7 @@ function roiChecks(argsIn) {
     const full = est.current.stages.full;
     if (est.batteryKwh > 0 && full.discharged > 0 && full.discharged / 365 < est.batteryKwh * 0.6) add('battery_big', `On an average day the home takes about ${Math.round(full.discharged / 365)} kWh from the ${est.batteryKwh} kWh battery (${Math.round(100 * full.discharged / 365 / est.batteryKwh)}% of it): in these figures a smaller battery saves the same. Fine if the size is for backup; otherwise check the battery kWh.`);
     if (est.exportLimitKw != null && full.generation > 0 && full.curtailed / full.generation > 0.05) add('export_limit', `The ${est.exportLimitKw} kW export limit throws away about ${roiKwh(full.curtailed)} a year (${Math.round(100 * full.curtailed / full.generation)}% of what the panels make). The figures allow for it: check the limit is right.`);
-    if (est.existingRemoved && (inputs || {}).existing_removed !== true) add('existing_removed', `The existing ${est.existingKw} kW system is taken as coming off the roof (from the words in the existing system answer), so it is not counted after the install. If it is staying, take "removed" out of that answer.`);
+    if (est.existingRemoved && roiExistingRemovedFromWords(a, template)) add('existing_removed', `The existing ${est.existingKw} kW system is taken as coming off the roof, from the words in the existing system answer, so it is not counted after the install. Answer "Existing system after this job" on step 1 to confirm it.`);
   }
   return out;
 }

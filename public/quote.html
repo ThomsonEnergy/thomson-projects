@@ -152,6 +152,8 @@
   .rows.roi-list { margin: 0; }
   /* the working table's labels stay on one line on a sheet (not the plan options, whose first column is long text) */
   @media (min-width: 701px) { .roi-table:not(.plan-table) td:first-child { white-space: nowrap; padding-right: 18px; } }
+  /* a second plan's name can be long: the column headings wrap so the table stays on the sheet */
+  .roi-table:not(.plan-table) th.num { white-space: normal; }
   .roi-table .roi-sec td { font-family: 'Archivo', sans-serif; font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--q-blue); border-bottom: none; padding-top: 14px; padding-bottom: 2px; }
   /* Plan options: the name column takes what is left, the two figures wrap inside their own width,
      and the plan ID and what to check sit under the name, so the table fits a sheet and a phone. */
@@ -845,7 +847,7 @@
       // saved on the quote, always with the disclaimer (a suggestion only, no endorsement, no payment).
       const planOpts = Array.isArray(roiInputs.plan_options) ? roiInputs.plan_options : [];
       const planCmp = roiWanted && planOpts.length && project.bill_reading
-        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, clientType: roiClientType, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
+        ? roiComparePlans({ reading: project.bill_reading, answers: roiAnswers, template, inputs: roiInputs, newSolarKw: roiSolarKw, batteryKwh: roiBatteryKwh, zoneRating: Number(project.stc_zone_rating) || 1.382, clientType: roiClientType, candidates: planOpts.map(o => ({ key: o.plan_id, roi_plan: o.roi_plan, adjust: o.adjust })) })
         : null;
       const planOptsHtml = planCmp ? (() => {
         const byKey = Object.fromEntries(planOpts.map(o => [o.plan_id, o]));

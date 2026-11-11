@@ -22,7 +22,13 @@ const GENERAL_QUESTIONS = [
 // One question for an existing system on both Solar and Battery quotes (it replaced the older
 // existing_system and existing_system_detail answers, item 70; solar-roi.js still reads the old
 // detail answer on older quotes). Required on a Battery quote: the battery couples to it.
-const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; add "to be removed" if it is coming off; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+const EXISTING_PV_QUESTION = { id: 'existing_pv', type: 'text', label: 'Existing solar or battery (size, inverter, year; blank if none)', placeholder: 'e.g. 6.6 kW, SMA Sunny Boy 5.0, 2018', requiredFor: ['battery'] };
+// Whether that existing system stays once this job is done. The savings estimate counts a system
+// that is coming off in the home as it is now and not after (solar-roi.js, roiExistingRemoved; the
+// two answers are ROI_EXISTING_STAYS and ROI_EXISTING_GOES there). Saved under existing_system,
+// the key the proposal is already given (older quotes hold "Existing solar" and the like under it,
+// which read as not answered).
+const EXISTING_AFTER_QUESTION = { id: 'existing_system', type: 'select', label: 'Existing system after this job (when there is one)', options: ['Stays on the roof', 'Coming off the roof'] };
 
 // The export limit, typed in kW in total across the phases (or one tap for the usual ones). The
 // savings estimate caps what goes to the grid at it (solar-roi.js, roiExportLimitKw); blank or
@@ -37,6 +43,7 @@ const SOLAR_QUESTIONS = [
   { id: 'with_battery', type: 'yesno', label: 'Batteries as well? (adds the battery questions and rules)', required: true },
   { id: 'life_support', type: 'yesno', label: 'Anyone on site on medical or life-support equipment? (Yes adds a job task to tell the network)', required: true },
   EXISTING_PV_QUESTION,
+  EXISTING_AFTER_QUESTION,
   { id: 'grid_type', type: 'select', label: 'Grid connection', options: ['Grid connected', 'Grid connected, VPP interest', 'Off grid'] },
   { id: 'roof_type', type: 'select', label: 'Roof type', options: ['Tin (Colorbond)', 'Tile', 'Klip-lok', 'Flat or membrane', 'Ground mount', 'Other'] },
   { id: 'phases', type: 'select', label: 'Supply (filled from the bill when it shows)', options: ['Single phase', 'Three phase', 'Not sure'] },
@@ -50,6 +57,7 @@ const SOLAR_QUESTIONS = [
 const BATTERY_QUESTIONS = [
   { id: 'backup_needs', type: 'text', label: 'What must stay on in a blackout', placeholder: 'e.g. fridge, lights, pump, nothing', required: true },
   EXISTING_PV_QUESTION,
+  EXISTING_AFTER_QUESTION,
   { id: 'location_clear', type: 'yesno', label: 'Location clear of habitable rooms, exits and heat, with AS/NZS 5139 clearances?', required: true },
   { id: 'vpp_capable', type: 'yesno', label: 'Battery (or its inverter) VPP capable?', required: true },
   { id: 'cec_listed', type: 'yesno', label: 'Battery on the CEC approved product list?', required: true },

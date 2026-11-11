@@ -98,24 +98,39 @@ function roiSettings(inputs, zoneRating) {
 }
 
 // The export limit in kW, in total across the phases, from the step 1 answer: a typed number
-// ("7.5" or "7.5 kW"), "Zero export" (0), or none ("No limit", "Not known yet" or blank: null,
-// and then no limit is applied and the proposal says so).
-function roiExportLimitKw(answers) {
+// ("7.5", "7.5 kW", "7.5 kW total"), "Zero export" or "No export" (0), or none ("No limit", "Not
+// known yet" or blank: null, and then no limit is applied and the proposal says so). Anything else
+// ("5 kW per phase", "3 phase 15kW") is not guessed at: no limit is applied and
+// roiExportLimitUnclear() tells the staff.
+function roiExportLimitRead(answers) {
   const text = String((answers || {}).export_limit ?? '').trim().toLowerCase();
-  if (!text || /no limit|not known|unknown|none/.test(text)) return null;
-  if (/zero/.test(text)) return 0;
-  const n = roiNum(text);
-  return n != null && n >= 0 ? n : null;
+  if (!text || /^(no limit|none|unlimited|not known( yet)?|unknown)$/.test(text)) return { kw: null, unclear: false };
+  if (/^(zero( export)?|no export|nil)$/.test(text)) return { kw: 0, unclear: false };
+  const m = text.match(/^(\d+(?:\.\d+)?)\s*(kw)?(\s*(in\s+)?total)?$/);
+  return m ? { kw: parseFloat(m[1]), unclear: false } : { kw: null, unclear: true };
 }
+const roiExportLimitKw = (answers) => roiExportLimitRead(answers).kw;
+const roiExportLimitUnclear = (answers) => roiExportLimitRead(answers).unclear;
 
 // True when the existing solar comes off the roof as part of this job, so it is counted in the home
-// as it is now and not after: the quote's own answer (roi_inputs.existing_removed) when it has one,
-// else the words in the existing system answer ("1 kW, to be removed").
-function roiExistingRemoved(answers, inputs) {
-  const set = (inputs || {}).existing_removed;
-  if (set === true || set === false) return set;
+// as it is now and not after. The step 1 answer "Existing system after this job" decides it. Where
+// that is blank (an older quote), the words in the existing system answer are read ("1 kW, to be
+// removed"; not "not removed"), on Solar quotes only: a Battery quote's battery couples to the
+// existing solar. roiExistingRemovedFromWords() tells the staff when the words decided it.
+const ROI_EXISTING_STAYS = 'Stays on the roof', ROI_EXISTING_GOES = 'Coming off the roof';
+function roiExistingRemovedFromWords(answers, template) {
   const a = answers || {};
-  return /\b(remov\w*|decommission\w*|coming off|taken (off|down))\b/i.test(`${a.existing_pv || ''} ${a.existing_system_detail || ''}`);
+  if (a.existing_system === ROI_EXISTING_STAYS || a.existing_system === ROI_EXISTING_GOES || template === 'battery') return false;
+  const text = `${a.existing_pv || ''} ${a.existing_system_detail || ''}`;
+  const m = text.match(/\b(to be removed|being removed|will be removed|removing|remove (it|the|existing|old)|decommission\w*|coming off|taken (off|down))\b/i);
+  if (!m) return false;
+  return !/\b(not|no|never|isn't|won't|don't|do not)\s+(be\s+)?$/i.test(text.slice(0, m.index));
+}
+function roiExistingRemoved(answers, template) {
+  const a = answers || {};
+  if (a.existing_system === ROI_EXISTING_GOES) return true;
+  if (a.existing_system === ROI_EXISTING_STAYS) return false;
+  return roiExistingRemovedFromWords(a, template);
 }
 
 // ---------- GST basis of the bill (M10) ----------
@@ -246,7 +261,7 @@ function suggestSizes({ reading, answers, zoneRating }) {
     const wanted = Math.max(0, solarRaw - existingKw);
     solarKw = wanted > 0 ? roiRoundUpTo(wanted, ROI_ASSUMPTIONS.solarSizesKw) : 0;
     notes.push(`${m.dailyKwh} kWh a day divided by ${yieldPerKw} kWh per kW per day = ${solarRaw.toFixed(1)} kW to cover the whole year's use${existingKw ? `, less ${existingKw} kW already on the roof` : ''}, rounded up to a common size.`);
-    if (a.export_limit && /zero|5 kw/i.test(a.export_limit)) notes.push(`Export limit "${a.export_limit}": a bigger system mostly feeds a battery, not the grid.`);
+    if (roiExportLimitKw(a) != null && roiExportLimitKw(a) <= 5) notes.push(`Export limit "${a.export_limit}": a bigger system mostly feeds a battery, not the grid.`);
   }
   let batteryKwh = null, eveningKwh = null;
   if (m.dailyKwh) {
@@ -514,10 +529,13 @@ function roiScheduleText(plan) {
   }).join('. ');
 }
 
-// The hourly load shape, stretched so the hours in each band add up to the bill's split. Hours can
-// be in different bands on weekdays and weekends or by season, so the stretch is fitted over the
-// whole year (a few rounds of proportional fitting).
-function roiLoadShape(metrics, plan, settings) {
+// The hourly load shape, stretched so the hours in each band add up to the bill's split (or to
+// bandKwh when given: roiHome passes the home's own use per band once existing solar is allowed
+// for). Hours can be in different bands on weekdays and weekends or by season, so the stretch is
+// fitted over the whole year (a few rounds of proportional fitting). Returns { shape, fitted }:
+// fitted is false when the bill has no split or its bands and the plan's times do not line up, and
+// then the shape is the normal household day (or the typed daylight share).
+function roiLoadShape(metrics, plan, settings, bandKwh) {
   const base = ROI_ASSUMPTIONS.loadShape.slice();
   const total = base.reduce((s, v) => s + v, 0);
   let shape = base.map(v => v / total);
@@ -527,11 +545,11 @@ function roiLoadShape(metrics, plan, settings) {
     const dayNow = roiDaylightShare(shape);
     shape = shape.map((v, h) => (h >= 6 && h < 18 ? v * dayWant / dayNow : v * (1 - dayWant) / (1 - dayNow)));
   }
-  if (!metrics.split || plan.tariff !== 'tou') return shape;
-  const sp = metrics.split;
+  if (!metrics.split || plan.tariff !== 'tou') return { shape, fitted: false };
+  const sp = bandKwh || metrics.split;
   const want = { peak: sp.peak, shoulder: sp.shoulder, off_peak: sp.offPeak, solar_soak: sp.solarSoak || 0 };
   const splitTotal = Object.values(want).reduce((a, b) => a + b, 0);
-  if (!(splitTotal > 0)) return shape;
+  if (!(splitTotal > 0)) return { shape, fitted: false };
   Object.keys(want).forEach(b => { want[b] /= splitTotal; });
   // share of the year each hour spends in each band
   const mem = [];
@@ -543,7 +561,7 @@ function roiLoadShape(metrics, plan, settings) {
   const bandsUsed = Object.keys(want).filter(b => mem.some(m => m[b] > 0));
   // only stretch when every band the plan has hours for also has kWh on the bill; otherwise the
   // bill's bands and the plan's times do not line up and the normal day shape is the safer guess
-  if (!bandsUsed.every(b => want[b] > 0)) return shape;
+  if (!bandsUsed.every(b => want[b] > 0)) return { shape, fitted: false };
   for (let round = 0; round < 40; round++) {
     const have = { peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 };
     shape.forEach((v, h) => bandsUsed.forEach(b => { have[b] += v * mem[h][b]; }));
@@ -553,7 +571,7 @@ function roiLoadShape(metrics, plan, settings) {
     const sum = shape.reduce((s, v) => s + v, 0);
     shape = shape.map(v => v / sum);
   }
-  return shape;
+  return { shape, fitted: true };
 }
 
 // The share of a day's use that falls between 6am and 6pm, the hours the panels work.
@@ -679,11 +697,13 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
         totals.costBy[d.band] += deficit * count * d.rate / 100;
       }
     };
-    // settle: the same day again and again until the battery starts it with what it ended the last with
-    if (batteryKwh > 0) {
-      for (let warm = 0; warm < 12; warm++) { const start = soc; runDay(0); if (Math.abs(soc - start) < 0.01) break; }
-    }
-    runDay(days);
+    // settle: the same day again and again until the battery starts it with what it ended the last
+    // with. A day that never settles (the charge swings between two states) is counted as two days
+    // in a row, half the days each, so neither state is picked by chance.
+    let settled = batteryKwh <= 0;
+    for (let warm = 0; warm < 24 && !settled; warm++) { const start = soc; runDay(0); settled = Math.abs(soc - start) < 0.01; }
+    if (settled) runDay(days);
+    else { runDay(days / 2); runDay(days / 2); }
   })));
   const controlledKwh = (metrics.controlledDailyKwh || 0) * 365;
   const usageCost = Object.values(totals.costBy).reduce((s, v) => s + v, 0);
@@ -711,38 +731,58 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
 // The home every figure runs on, worked out once (the estimate and the plan comparison share it):
 // the settings in use, the bill's figures, the current plan, when the home uses power, the export
 // limit, any existing solar and whether it stays, and the home's own use. A bill from a home with
-// solar only shows what was bought, so the home's use is raised until the model, with that solar on
-// the roof, buys what the bill says. A yearly use typed for the quote is used as it is.
-function roiHome({ reading, answers, inputs, zoneRating }) {
+// solar only shows what was bought, so the home's use (and, on a time-of-use bill, its use in each
+// band) is raised until the model, with that solar on the roof, buys what the bill says. A yearly
+// use typed for the quote is used as it is.
+function roiHome({ reading, answers, inputs, zoneRating, template }) {
   const inp = inputs || {};
   const S = roiSettings(inp, zoneRating);
   const metrics = billMetrics(reading);
   if (!metrics.dailyKwh) return null;
   const existingKw = existingSolarKw(answers);
-  const existingRemoved = existingKw > 0 && roiExistingRemoved(answers, inp);
+  const existingRemoved = existingKw > 0 && roiExistingRemoved(answers, template);
   const current = roiPlan(inp.current, reading, (reading && reading.retailer) ? `${reading.retailer} (current plan)` : 'Current plan');
-  const loadShape = roiLoadShape(metrics, current, S);
   const solarShape = roiSolarShape();
   const exportLimitKw = roiExportLimitKw(answers);
+  let fit = roiLoadShape(metrics, current, S);
   let dailyKwh = metrics.dailyKwh;
   if (S.annualKwh) dailyKwh = S.annualKwh / 365;
   else if (existingKw > 0) {
-    for (let i = 0; i < 8; i++) {
-      const st = roiRunStage({ metrics, plan: current, loadShape, solarShape, solarKw: existingKw, batteryKwh: 0, settings: S, dailyKwh, exportLimitKw });
+    // what the home uses in each band, starting from what it bought in each (the bill's split)
+    const sp = metrics.split;
+    const bands = fit.fitted ? { peak: sp.peak, shoulder: sp.shoulder, offPeak: sp.offPeak, solarSoak: sp.solarSoak || 0 } : null;
+    const billBand = bands ? { peak: sp.peak, shoulder: sp.shoulder, off_peak: sp.offPeak, solar_soak: sp.solarSoak || 0 } : null;
+    const key = { peak: 'peak', shoulder: 'shoulder', off_peak: 'offPeak', solar_soak: 'solarSoak' };
+    const floor = metrics.controlledDailyKwh || 0;
+    for (let i = 0; i < 12; i++) {
+      const st = roiRunStage({ metrics, plan: current, loadShape: fit.shape, solarShape, solarKw: existingKw, batteryKwh: 0, settings: S, dailyKwh, exportLimitKw });
       const gap = metrics.dailyKwh - (st.imported + st.controlledKwh) / 365;
-      if (Math.abs(gap) < 0.02) break;
-      dailyKwh += gap;
+      let bandsOff = 0;
+      if (bands && st.imported > 0) {
+        const billTotal = Object.values(billBand).reduce((t, v) => t + v, 0);
+        Object.keys(billBand).forEach(b => {
+          const want = billBand[b] / billTotal, got = (st.importBy[b] || 0) / st.imported;
+          if (!(want > 0) || !(got > 0)) return;
+          bandsOff = Math.max(bandsOff, Math.abs(want - got));
+          bands[key[b]] *= Math.min(2, Math.max(0.5, want / got));
+        });
+        const refit = roiLoadShape(metrics, current, S, bands);
+        if (refit.fitted) fit = refit;
+      }
+      if (Math.abs(gap) < 0.02 && bandsOff < 0.01) break;
+      dailyKwh = Math.max(floor, dailyKwh + gap);
     }
   }
-  const useKwh = Math.round(dailyKwh * 365);
+  const usesBill = !S.annualKwh && !(existingKw > 0); // the home's use is just what the bill says it bought
+  const useKwh = usesBill ? metrics.annualKwh : Math.round(dailyKwh * 365);
   return {
-    settings: S, metrics, current, loadShape, solarShape, exportLimitKw,
+    settings: S, metrics, current, loadShape: fit.shape, solarShape, exportLimitKw,
     existingKw, existingRemoved, afterExistingKw: existingRemoved ? 0 : existingKw,
     dailyKwh, useKwh, boughtKwh: metrics.annualKwh,
-    ownSolarKwh: S.annualKwh ? 0 : Math.max(0, useKwh - metrics.annualKwh), // what the existing solar supplies direct
+    ownSolarKwh: existingKw > 0 && !S.annualKwh ? Math.max(0, useKwh - metrics.annualKwh) : 0, // what the existing solar supplies direct
     useTyped: !!S.annualKwh,
-    daylightShare: roiDaylightShare(loadShape),
-    shapeFrom: metrics.split && current.tariff === 'tou' ? 'bill' : (S.daylightShare != null ? 'typed' : 'assumed'),
+    daylightShare: roiDaylightShare(fit.shape),
+    shapeFrom: fit.fitted ? 'bill' : (S.daylightShare != null ? 'typed' : 'assumed'),
   };
 }
 
@@ -752,8 +792,8 @@ function roiHome({ reading, answers, inputs, zoneRating }) {
 // the "Rise" figures are the same with prices rising every year (settings.priceRise). A payback is
 // the year the savings so far, at today's prices, reach the price.
 function roiEstimate(argsIn) {
-  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst } = roiIncGstArgs(argsIn);
-  const home = roiHome({ reading, answers, inputs, zoneRating });
+  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst, template } = roiIncGstArgs(argsIn);
+  const home = roiHome({ reading, answers, inputs, zoneRating, template });
   if (!home) return null;
   const { settings: S, metrics } = home;
   const inp = inputs || {};
@@ -781,9 +821,11 @@ function roiEstimate(argsIn) {
     const withSolar = (solar > 0 || home.existingRemoved) ? run(kwAfter, 0) : base;
     const full = battery > 0 ? run(kwAfter, battery, true) : withSolar;
     const fullSolarOnly = battery > 0 && inp.grid_charge && inp.grid_charge.enabled ? run(kwAfter, battery, false) : null;
-    const solarSaving = Math.max(0, base.bill - withSolar.bill);
-    const batterySaving = Math.max(0, withSolar.bill - full.bill);
-    const totalSaving = Math.max(0, base.bill - full.bill);
+    // not floored at zero: a smaller system replacing a bigger one makes the bill rise, and the
+    // solar's and the battery's shares must still add up to the total
+    const solarSaving = base.bill - withSolar.bill;
+    const batterySaving = withSolar.bill - full.bill;
+    const totalSaving = base.bill - full.bill;
     // a year's saving y years on: the panels' loss each year, and past the battery's counted years
     // only the solar's share is left. rise is the yearly price rise (0 for today's prices).
     const fade = (y, rise) => Math.pow(1 + rise, y) * Math.pow(1 - S.panelLoss, y);
@@ -805,6 +847,12 @@ function roiEstimate(argsIn) {
     };
     const capped = (y) => (y != null && y <= ROI_ASSUMPTIONS.paybackCapYears ? y : null);
     const paybackRaw = yearsTo(prices.total, (y) => inYear(y, 0));
+    const batteryPaybackRaw = yearsTo(prices.battery, (y) => (y < S.batteryLifeYears ? batterySaving * fade(y, 0) : 0));
+    // the words for a payback: the years, or why not. A battery whose saving stops being counted
+    // before it has paid for itself says so, not "25 years".
+    const lifeText = `Not paid off in the ${S.batteryLifeYears} years the battery's saving is counted for`;
+    const words = (years, batteryLimited) => (years != null ? `${years} years` : batteryLimited ? lifeText : ROI_NOT_PAID_OFF);
+    const totalLimited = battery > 0 && paybackRaw == null && totalSaving > 0 && S.batteryLifeYears < ROI_ASSUMPTIONS.paybackCapYears;
     // "now" is the real bill when this is the current plan and the bill has a total; the model's
     // figure otherwise. The after figures move with the saving so the two always agree.
     const actualNow = idx === 0 && metrics.annualBill ? metrics.annualBill : null;
@@ -817,21 +865,20 @@ function roiEstimate(argsIn) {
       billWithSolar: Math.round(billNow - solarSaving), billAfter: Math.round(billNow - totalSaving),
       solarSaving: Math.round(solarSaving), batterySaving: Math.round(batterySaving), totalSaving: Math.round(totalSaving),
       solarPayback: capped(yearsTo(prices.solar, (y) => solarSaving * fade(y, 0))),
-      batteryPayback: capped(yearsTo(prices.battery, (y) => (y < S.batteryLifeYears ? batterySaving * fade(y, 0) : 0))),
-      payback: capped(paybackRaw), paybackRaw,
-      returnPercent: prices.total > 0 ? Math.round(totalSaving / prices.total * 1000) / 10 : null,
+      batteryPayback: capped(batteryPaybackRaw), batteryPaybackText: words(capped(batteryPaybackRaw), batteryPaybackRaw == null && batterySaving > 0),
+      payback: capped(paybackRaw), paybackRaw, paybackText: words(capped(paybackRaw), totalLimited),
+      returnPercent: prices.total > 0 && totalSaving > 0 ? Math.round(totalSaving / prices.total * 1000) / 10 : null,
       saving10: over(10, 0), saving25: over(25, 0), cumulative: series(0),
       saving10Rise: over(10, S.priceRise), saving25Rise: over(25, S.priceRise), cumulativeRise: series(S.priceRise),
       // generation that is used or sold in place of grid power (what the export limit throws away is not)
-      co2TonnesPerYear: Math.round(((full.generation - full.curtailed) - (base.generation - base.curtailed)) * S.emissions / 1000 * 10) / 10,
+      co2TonnesPerYear: Math.max(0, Math.round(((full.generation - full.curtailed) - (base.generation - base.curtailed)) * S.emissions / 1000 * 10) / 10),
     };
   });
   return { home, settings: S, metrics, existingKw: home.existingKw, existingRemoved: home.existingRemoved, exportLimitKw: home.exportLimitKw, newSolarKw: solar, batteryKwh: battery, yieldPerKw: S.yieldPerKw, prices, scenarios, current: scenarios[0], alt: scenarios[1] || null, exportWindow: inp.export && inp.export.enabled ? inp.export : null, gridCharge: battery > 0 && inp.grid_charge && inp.grid_charge.enabled ? inp.grid_charge : null, billGst };
 }
 
-// "6.2 years" or "Not paid off in 25 years": the one wording for a payback wherever it is shown (F32).
+// "Not paid off in 25 years": the one wording for a payback past the cap wherever it is shown (F32).
 const ROI_NOT_PAID_OFF = `Not paid off in ${ROI_ASSUMPTIONS.paybackCapYears} years`;
-const roiPaybackText = (years) => (years ? `${years} years` : ROI_NOT_PAID_OFF);
 
 // ---------- other retail plans (docs/IDEAS_BACKLOG.md item 34) ----------
 
@@ -842,8 +889,8 @@ const roiPaybackText = (years) => (years ? `${years} years` : ROI_NOT_PAID_OFF);
 // current plan's own deal and is not carried over. Returns null without a usable bill.
 function roiComparePlans(argsIn) {
   // the bill and the current plan on an inc GST basis, the same as every published plan (M10)
-  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, candidates } = roiIncGstArgs(argsIn);
-  const home = roiHome({ reading, answers, inputs, zoneRating });
+  const { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, candidates, template } = roiIncGstArgs(argsIn);
+  const home = roiHome({ reading, answers, inputs, zoneRating, template });
   if (!home) return null;
   const { settings: S, metrics } = home;
   const inp = inputs || {};
@@ -861,17 +908,19 @@ function roiComparePlans(argsIn) {
     return { billNow: bill(now), billAfter: bill(after), exported: after.exported, feedIn: plan.feed_in };
   };
   // The current plan is costed exactly as on the savings page: its own battery deals (selling to the
-  // grid, the typed night rate), and, when the bill has a total, moved by the same amount the real
-  // bill sits above or below these rates, so the two pages show the one "with the system" figure.
+  // grid, the typed night rate), and, when the bill has a total, moved by the amount the real bill
+  // sits above or below these rates, so the two pages show the one "with the system" figure. Every
+  // other plan is moved by that same amount, so the rows are all on the one footing and the
+  // difference between two rows is the difference between the plans.
   const nowStage = stage(home.current, home.existingKw, 0);
   const afterStage = changes ? stage(home.current, kwAfter, battery, { exportWindow: battery > 0 ? inp.export : null, gridCharge: battery > 0 ? inp.grid_charge : null }) : nowStage;
   const offset = metrics.annualBill ? metrics.annualBill - nowStage.bill : 0;
-  const saving = Math.max(0, nowStage.bill - afterStage.bill);
-  const currentCost = { billNow: Math.round(nowStage.bill + offset), billAfter: Math.round(nowStage.bill + offset - saving), exported: afterStage.exported, feedIn: home.current.feed_in, modelledNow: nowStage.bill };
+  const currentCost = { billNow: Math.round(nowStage.bill + offset), billAfter: Math.round(afterStage.bill + offset), exported: afterStage.exported, feedIn: home.current.feed_in, modelledNow: nowStage.bill };
   const rows = (candidates || []).map(c => {
     const plan = roiPlan(c.roi_plan, null, c.key);
     const r = cost(plan, c.adjust);
-    return { key: c.key, plan, ...r, vsCurrentAfter: r.billAfter - currentCost.billAfter, vsCurrentNow: r.billNow - currentCost.billNow };
+    const billNow = Math.round(r.billNow + offset), billAfter = Math.round(r.billAfter + offset);
+    return { key: c.key, plan, ...r, billNow, billAfter, vsCurrentAfter: billAfter - currentCost.billAfter, vsCurrentNow: billNow - currentCost.billNow };
   });
   rows.sort((x, y) => x.billAfter - y.billAfter);
   return { current: { plan: home.current, ...currentCost }, rows, withSystem: changes };
@@ -937,6 +986,9 @@ const roiKwh = (n) => `${Math.round(n).toLocaleString('en-AU')} kWh`;
 // "about" (an estimate to the cent claims more than it knows).
 const roiDollars = (n) => `${n < 0 ? '-' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-AU')}`;
 const roiAbout = (n) => roiDollars(Math.round(n / 10) * 10);
+// a yearly bill, which can be in credit, and a yearly saving, which can be a cost
+const roiBillText = (n) => (n < 0 ? `in credit by ${roiDollars(-n)} a year` : `${roiDollars(n)} a year`);
+const roiSavingText = (n) => (n < 0 ? `costs ${roiDollars(-n)} a year more` : `${roiDollars(n)} a year`);
 const roiPct = (share) => `${Math.round(share * 1000) / 10}%`;
 const roiEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -945,7 +997,7 @@ const roiEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;
 // day's use in daylight, or a tenth less). { low, high } in dollars, rounded out to the nearest $50.
 function roiSavingRange(estArgs, est) {
   const S = est.settings;
-  const day = S.daylightShare != null ? S.daylightShare : roiDaylightShare(roiLoadShape({ split: null }, { tariff: 'flat' }, null));
+  const day = S.daylightShare != null ? S.daylightShare : roiDaylightShare(roiLoadShape({ split: null }, { tariff: 'flat' }, null).shape);
   const tryWith = (over) => { const e = roiEstimate({ ...estArgs, inputs: { ...(estArgs.inputs || {}), assumptions: { ...S.typed, ...over } } }); return e ? e.current.totalSaving : null; };
   const values = [
     est.current.totalSaving,
@@ -988,8 +1040,12 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money }) {
   if (dollars) {
     assumed.push(['Prices', `Today's prices in every figure${S.priceRise > 0 ? `. If power prices rise ${roiPct(S.priceRise)} a year, the saving is about ${roiAbout(cur.saving10Rise)} over 10 years and ${roiAbout(cur.saving25Rise)} over 25` : ''}`]);
     if (est.newSolarKw > 0) assumed.push(['Panels', `Make ${roiPct(S.panelLoss)} less power each year`]);
-    if (gap('supply')) assumed.push(['Daily supply charge', `Not on your bill: ${plan.supply} c a day assumed`]);
-    if (gap('feedin')) assumed.push(['Solar feed-in', `Not on your bill: ${plan.feed_in} c/kWh assumed`]);
+    if (!plan.supplyKnown) assumed.push(['Daily supply charge', `Not on your bill: ${plan.supply} c a day assumed`]);
+    if (!plan.feedInKnown && (est.newSolarKw > 0 || home.existingKw > 0)) assumed.push(['Solar feed-in', `Not on your bill: ${plan.feed_in} c/kWh assumed`]);
+    if (plan.tariff === 'tou') {
+      const guessed = ROI_BANDS.filter(b => (plan.bandShare[b.key] || 0) > 0 && !plan.rateKnown[b.key]);
+      if (guessed.length) assumed.push(['Rates not on your bill', `${guessed.map(b => `${b.label.toLowerCase()} ${plan[b.key]} c/kWh`).join(', ')} assumed`]);
+    }
     if (plan.tariff === 'tou' && plan.timesFrom === 'assumed') assumed.push(['When each rate applies', `Not on your bill: ${roiScheduleText(plan)} assumed`]);
     if (est.billGst === 'ex') assumed.push(['GST', 'Your bill is before GST; its figures are shown here with GST added, to compare with the price']);
     const diff = cur.billNowIsActual ? cur.billNow - cur.modelledNow : 0;
@@ -1026,7 +1082,7 @@ function roiPresentation(argsIn) {
     if (has('total') && m.annualBill) sections[0].rows.push(['Bills now', [`${roiDollars(m.annualBill)} a year`]]);
     return { ...empty, sections, columns: ['Estimate'], rows: sections[0].rows.map(([k, v]) => [k, v[0]]) };
   }
-  const estArgs = { reading, answers, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };
+  const estArgs = { reading, answers, template, inputs, newSolarKw, batteryKwh, zoneRating, netCost, solarPrice, batteryPrice, billGst, billGstTyped, clientType };
   const est = roiEstimate(estArgs);
   const home = est.home, S = est.settings;
   const dollars = has('rate');
@@ -1037,9 +1093,9 @@ function roiPresentation(argsIn) {
     ? [['Lost to the export limit', per(s => `${roiKwh(s.stages[stage].curtailed)} a year (no more than ${est.exportLimitKw} kW can go to the grid)`)]] : []);
   const sections = [];
   sections.push({ title: 'Your home now', rows: [
-    ['Power used', per(() => `${roiKwh(home.useKwh)} a year (${Math.round(home.dailyKwh * 10) / 10} kWh a day)`)],
-    ...(home.ownSolarKwh > 0 ? [['Of that', per(() => `${roiKwh(home.boughtKwh)} bought, about ${roiKwh(home.ownSolarKwh)} from your existing solar`)]] : []),
-    ...(bills ? [['Bills now', per(s => `${roiDollars(s.billNow)} a year${s.billNowIsActual ? ' (from your bill)' : ' (at these rates)'}`)]] : []),
+    ['Power used', per(() => `${roiKwh(home.useKwh)} a year (${Math.round(home.useKwh / 365 * 10) / 10} kWh a day)`)],
+    ...(home.existingKw > 0 && home.ownSolarKwh > 0 ? [['Of that', per(() => `${roiKwh(home.boughtKwh)} bought, about ${roiKwh(home.ownSolarKwh)} from your existing solar`)]] : []),
+    ...(bills ? [['Bills now', per(s => `${roiBillText(s.billNow)}${s.billNowIsActual ? ' (from your bill)' : ' (at these rates)'}`)]] : []),
   ] });
   if (est.newSolarKw > 0) {
     sections.push({ title: `Step 1: ${est.newSolarKw} kW of solar${est.existingKw ? (est.existingRemoved ? ` (replacing your ${est.existingKw} kW)` : ` (on top of your ${est.existingKw} kW)`) : ''}`, rows: [
@@ -1049,7 +1105,7 @@ function roiPresentation(argsIn) {
       ...lost('solar'),
       ['Still bought from the grid', per(s => `${roiKwh(s.stages.solar.imported)} a year`)],
       ...(dollars ? [
-        ['Saving from the solar', per(s => `${roiDollars(s.solarSaving)} a year`)],
+        ['Saving from the solar', per(s => roiSavingText(s.solarSaving))],
         ...(est.prices.solar != null && est.prices.solar > 0 && est.batteryKwh > 0 ? [['Solar pays for itself in', per(s => s.solarPayback ? `${s.solarPayback} years (${money(est.prices.solar)})` : ROI_NOT_PAID_OFF)]] : []),
       ] : []),
     ] });
@@ -1064,19 +1120,19 @@ function roiPresentation(argsIn) {
       ...lost('full'),
       ['Still bought from the grid', per(s => `${roiKwh(s.stages.full.imported)} a year`)],
       ...(dollars ? [
-        ['Extra saving from the battery', per(s => `${roiDollars(s.batterySaving)} a year`)],
-        ...(est.prices.battery != null && est.prices.battery > 0 && est.newSolarKw > 0 ? [['Battery pays for itself in', per(s => s.batteryPayback ? `${s.batteryPayback} years (${money(est.prices.battery)})` : ROI_NOT_PAID_OFF)]] : []),
+        ['Extra saving from the battery', per(s => roiSavingText(s.batterySaving))],
+        ...(est.prices.battery != null && est.prices.battery > 0 && est.newSolarKw > 0 ? [['Battery pays for itself in', per(s => s.batteryPayback ? `${s.batteryPayback} years (${money(est.prices.battery)})` : s.batteryPaybackText)]] : []),
       ] : []),
     ] });
   }
   if (dollars) {
     const counted = est.batteryKwh > 0 && S.batteryLifeYears < 25 ? ` (the battery's share counted for ${S.batteryLifeYears} years)` : '';
     sections.push({ title: 'Together', rows: [
-      ...(bills ? [['Bills after', per(s => s.billAfter < 0 ? `in credit by ${roiDollars(-s.billAfter)} a year` : `${roiDollars(s.billAfter)} a year`)]] : []),
-      ['Total saving', per(s => `${roiDollars(s.totalSaving)} a year`)],
+      ...(bills ? [['Bills after', per(s => roiBillText(s.billAfter))]] : []),
+      ['Total saving', per(s => roiSavingText(s.totalSaving))],
       ...(est.prices.total > 0 ? [
         ['Your investment', per(() => `${money(est.prices.total)} after the credits`)],
-        ['Pays for itself in', per(s => roiPaybackText(s.payback))],
+        ['Pays for itself in', per(s => s.paybackText)],
         ['Yearly return', per(s => s.returnPercent != null ? `${s.returnPercent}% of the investment` : '-')],
       ] : []),
       ['Saving over 10 years', per(s => roiDollars(s.saving10))],
@@ -1089,8 +1145,8 @@ function roiPresentation(argsIn) {
   const cur = est.current;
   // the figures the page opens with (the current plan): null where we cannot stand behind one
   const headline = dollars ? {
-    billNow: bills ? cur.billNow : null, billAfter: bills ? cur.billAfter : null, saving: cur.totalSaving,
-    payback: est.prices.total > 0 ? cur.payback : null, hasPrice: est.prices.total > 0,
+    billNow: bills ? cur.billNow : null, billNowIsActual: cur.billNowIsActual, billAfter: bills ? cur.billAfter : null, saving: cur.totalSaving,
+    payback: est.prices.total > 0 ? cur.payback : null, paybackText: cur.paybackText, hasPrice: est.prices.total > 0,
     alt: est.alt ? { name: est.alt.name, saving: est.alt.totalSaving } : null,
   } : null;
   const range = dollars && cur.totalSaving > 0 ? roiSavingRange(estArgs, est) : null;
@@ -1105,13 +1161,14 @@ function roiHeadlineHtml(pres) {
   if (!h) return '';
   const tile = (label, value, sub, strong) => `<div style="flex:1 1 150px; padding:14px 16px; border:1px solid ${strong ? '#1a6be6' : '#d9dde5'};${strong ? ' background:#f1f5fd;' : ''}"><div style="font-size:11.5px; letter-spacing:0.05em; text-transform:uppercase; color:#5b6472;">${roiEsc(label)}</div><div style="font-family:Archivo, Helvetica, Arial, sans-serif; font-weight:600; font-size:27px; line-height:1.15; margin-top:4px; color:#0a0a0a;">${roiEsc(value)}</div><div style="font-size:12px; color:#5b6472; margin-top:2px;">${roiEsc(sub)}</div></div>`;
   const tiles = [];
-  if (h.billNow != null) tiles.push(tile('Your power bill now', `about ${roiAbout(h.billNow)}`, 'a year, from your bill'));
-  if (h.billAfter != null) tiles.push(tile('With this system', h.billAfter < 0 ? `about ${roiAbout(-h.billAfter)} in credit` : `about ${roiAbout(h.billAfter)}`, 'a year'));
-  tiles.push(tile('You save', `about ${roiAbout(h.saving)}`, 'a year', true));
+  const bill = (n) => (n < 0 ? `about ${roiAbout(-n)} in credit` : `about ${roiAbout(n)}`);
+  if (h.billNow != null) tiles.push(tile('Your power bill now', bill(h.billNow), h.billNowIsActual ? 'a year, from your bill' : 'a year, at your rates'));
+  if (h.billAfter != null) tiles.push(tile('With this system', bill(h.billAfter), 'a year'));
+  tiles.push(h.saving < 0 ? tile('Your bill goes up by', `about ${roiAbout(-h.saving)}`, 'a year', true) : tile('You save', `about ${roiAbout(h.saving)}`, 'a year', true));
   const lines = [];
-  if (h.hasPrice) lines.push(h.payback ? `The system pays for itself in about <strong>${roiEsc(h.payback)} years</strong>.` : `<strong>${roiEsc(ROI_NOT_PAID_OFF)}</strong> at that saving.`);
+  if (h.hasPrice && h.saving > 0) lines.push(h.payback ? `The system pays for itself in about <strong>${roiEsc(h.payback)} years</strong>.` : `<strong>${roiEsc(h.paybackText)}</strong>.`);
   if (pres.range && pres.range.high > pres.range.low) lines.push(`These are estimates, not a promise: your saving is likely to be between <strong>${roiDollars(pres.range.low)} and ${roiDollars(pres.range.high)} a year</strong>, depending on the weather and when you use your power.`);
-  if (h.alt) lines.push(`On ${roiEsc(h.alt.name)} the same system would save about ${roiAbout(h.alt.saving)} a year.`);
+  if (h.alt) lines.push(`On ${roiEsc(h.alt.name)} the same system would ${h.alt.saving < 0 ? `cost about ${roiAbout(-h.alt.saving)} a year more` : `save about ${roiAbout(h.alt.saving)} a year`}.`);
   return `<div class="roi-headline"><div style="display:flex; flex-wrap:wrap; gap:10px;">${tiles.join('')}</div>${lines.length ? `<p style="margin:12px 0 0; font-size:14px; line-height:1.6; color:#0a0a0a;">${lines.join(' ')}</p>` : ''}</div>`;
 }
 
@@ -1208,7 +1265,7 @@ function roiChartsHtml(est, money, { dollars = true, bills = true, colors = ROI_
           <text x="36" y="146" font-size="10.5" fill="${c.muted}" style="${font}">Today</text>
           <text x="${X(10)}" y="146" text-anchor="middle" font-size="10.5" fill="${c.muted}" style="${font}">10 years</text>
           <text x="206" y="146" text-anchor="end" font-size="10.5" fill="${c.muted}" style="${font}">25 years</text>
-          <text x="10" y="166" font-size="11" font-weight="600" fill="${c.ink}" style="${font}">${pb ? `Paid off after about ${esc(pb)} years` : esc(ROI_NOT_PAID_OFF)}</text>
+          <text x="10" y="166" font-size="11" font-weight="600" fill="${c.ink}" style="${font}">${pb ? `Paid off after about ${esc(pb)} years` : esc(s.paybackText.length > 34 ? ROI_NOT_PAID_OFF : s.paybackText)}</text>
           <g transform="translate(10, 179)"><line x1="0" y1="-4" x2="14" y2="-4" stroke="${c.grid}" stroke-width="1.5" stroke-dasharray="4 3" /><text x="20" y="0" font-size="10.5" fill="${c.muted}" style="${font}">Investment ${esc(money(est.prices.total))}</text></g>
           ${rise ? `<g transform="translate(10, 193)"><line x1="0" y1="-4" x2="14" y2="-4" stroke="${c.solar}" stroke-width="1.5" stroke-dasharray="2 3" opacity="0.7" /><text x="20" y="0" font-size="10.5" fill="${c.muted}" style="${font}">If prices rise ${esc(roiPct(est.settings.priceRise))} a year</text></g>` : ''}
         </svg>
@@ -1218,5 +1275,5 @@ function roiChartsHtml(est, money, { dollars = true, bills = true, colors = ROI_
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, ROI_NOT_PAID_OFF, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiBillGst, roiIncGstArgs, roiPaybackText, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiDayPatterns, roiBatteryKwhFromLines, roiSettings, roiExportLimitKw, roiExistingRemoved, roiHome, roiEstimate, roiGaps, roiPresentation, roiChartsHtml, roiHeadlineHtml, roiListsHtml, roiDollars, roiAbout };
+  module.exports = { ROI_ASSUMPTIONS, ROI_BANDS, ROI_BAND_LABEL, ROI_PLAN_DISCLAIMER, ROI_WHOLESALE_NOTE, ROI_WHOLESALE_REASON, ROI_NOT_PAID_OFF, roiComparePlans, billMetrics, suggestSizes, existingSolarKw, roiBillGst, roiIncGstArgs, roiPlan, roiParseHours, roiParseMonths, roiBillWindows, roiCleanWindows, roiScheduleText, roiDayPatterns, roiBatteryKwhFromLines, roiSettings, roiExportLimitKw, roiExportLimitUnclear, roiExistingRemoved, roiExistingRemovedFromWords, ROI_EXISTING_STAYS, ROI_EXISTING_GOES, roiHome, roiEstimate, roiGaps, roiPresentation, roiChartsHtml, roiHeadlineHtml, roiListsHtml, roiDollars, roiAbout };
 }
