@@ -61,8 +61,36 @@
     if (r.company) bits.push(esc(r.company));
     if (phone) bits.push(`<a class="link-quiet" href="${attr(telHref(phone))}">${esc(phone)}</a>`);
     if (r.email) bits.push(`<a class="link-quiet" href="mailto:${attr(r.email)}">${esc(r.email)}</a>`);
+    // a client-side or site-side person with an email can be sent their client portal login (item 74)
+    if (r.email && r.side !== 'thomson') bits.push(`<a class="link-quiet jc-portal-login" href="#" data-email="${attr(r.email)}">Send portal login</a>`);
     return bits.join(' &middot; ');
   }
+
+  // portal-invite.js emails a temporary password (the same call the Clients page makes)
+  async function sendPortalLogin(a) {
+    a.textContent = 'Sending...';
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/portal-invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ email: a.dataset.email, resend: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) throw new Error(data.error || 'Not sent');
+      showToast(`Portal login emailed to ${a.dataset.email}.`);
+      a.textContent = 'Portal login sent';
+    } catch (err) {
+      showToast(err.message, { error: true });
+      a.textContent = 'Send portal login';
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.jc-portal-login');
+    if (!a) return;
+    e.preventDefault();
+    sendPortalLogin(a);
+  });
 
   function renderSections() {
     const el = document.getElementById('job-contacts-sections');

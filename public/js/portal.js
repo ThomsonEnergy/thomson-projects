@@ -33,30 +33,49 @@
     main.innerHTML = `
       <div class="pl-login">
         <h1 style="font-size:22px; margin:0 0 6px;">Your jobs</h1>
-        <p class="subtitle">See your quotes, jobs and bookings. Type the email we have for you and we will send a code.</p>
+        <p class="subtitle">See your quotes, jobs, bookings, photos and invoices with Thomson Energy.</p>
         ${message ? `<div class="success-box">${esc(message)}</div>` : ''}
-        <form id="pl-email-form" style="margin-top:14px;">
+        <form id="pl-login-form" style="margin-top:14px;">
           <label>Email</label>
-          <input type="email" id="pl-email" autocomplete="email" autocapitalize="off" required placeholder="you@example.com" />
-          <button type="submit" id="pl-send">Send me a code</button>
+          <input type="email" id="pl-email" autocomplete="username" autocapitalize="off" required placeholder="you@example.com" />
+          <label>Password</label>
+          <input type="password" id="pl-password" autocomplete="current-password" required />
+          <button type="submit" id="pl-go">Log in</button>
         </form>
+        <p class="pl-muted" style="margin-top:14px;">First time here, or forgotten your password? <a href="#" id="pl-code-link">Email me a code instead</a></p>
         <div id="pl-msg" style="margin-top:10px;"></div>
       </div>`;
-    document.getElementById('pl-email-form').addEventListener('submit', async (e) => {
+    const emailEl = document.getElementById('pl-email');
+    document.getElementById('pl-code-link').addEventListener('click', (e) => { e.preventDefault(); sendCode(emailEl.value.trim()); });
+    document.getElementById('pl-login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email = document.getElementById('pl-email').value.trim();
-      const btn = document.getElementById('pl-send');
+      const btn = document.getElementById('pl-go');
       const msg = document.getElementById('pl-msg');
-      btn.disabled = true; btn.textContent = 'Sending...';
+      btn.disabled = true; btn.textContent = 'Checking...';
       try {
-        const r = await call('portal-login', { action: 'send', email });
-        if (r.staff) { msg.innerHTML = `<div class="error-box">${esc(r.message)}</div>`; btn.disabled = false; btn.textContent = 'Send me a code'; return; }
-        showCode(email, r.message, r.minutes);
+        const r = await call('portal-login', { action: 'password', email: emailEl.value.trim(), password: document.getElementById('pl-password').value, device: navigator.userAgent.slice(0, 200) });
+        setToken(r.token);
+        if (r.mustChange) showSetPassword(); else route();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
-        btn.disabled = false; btn.textContent = 'Send me a code';
+        btn.disabled = false; btn.textContent = 'Log in';
       }
     });
+  }
+
+  async function sendCode(emailIn) {
+    let email = emailIn;
+    if (!email) { email = prompt('Your email address:') || ''; email = email.trim(); }
+    if (!email) return;
+    const msg = document.getElementById('pl-msg');
+    if (msg) msg.innerHTML = `<p class="pl-muted">Sending...</p>`;
+    try {
+      const r = await call('portal-login', { action: 'send', email });
+      if (r.staff) { if (msg) msg.innerHTML = `<div class="error-box">${esc(r.message)}</div>`; return; }
+      showCode(email, r.message, r.minutes);
+    } catch (err) {
+      if (msg) msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+    }
   }
 
   function showCode(email, message, minutes) {
@@ -69,7 +88,7 @@
           <input type="text" id="pl-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" required />
           <button type="submit" id="pl-verify">Log in</button>
         </form>
-        <p class="pl-muted" style="margin-top:14px;"><a href="#" id="pl-again">Use a different email</a></p>
+        <p class="pl-muted" style="margin-top:14px;"><a href="#" id="pl-again">Back to the login page</a></p>
         <div id="pl-msg" style="margin-top:10px;"></div>
       </div>`;
     document.getElementById('pl-code').focus();
@@ -82,10 +101,44 @@
       try {
         const r = await call('portal-login', { action: 'verify', email, code: document.getElementById('pl-code').value, device: navigator.userAgent.slice(0, 200) });
         setToken(r.token);
-        route();
+        showSetPassword();
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
         btn.disabled = false; btn.textContent = 'Log in';
+      }
+    });
+  }
+
+  // After a temporary password or a code: choose your own password before anything else shows.
+  function showSetPassword() {
+    main.innerHTML = `
+      <div class="pl-login">
+        <h1 style="font-size:22px; margin:0 0 6px;">Choose your password</h1>
+        <p class="subtitle">At least 8 characters. You will use it with your email next time.</p>
+        <form id="pl-set-form" style="margin-top:14px;">
+          <label>New password</label>
+          <input type="password" id="pl-new1" autocomplete="new-password" minlength="8" required />
+          <label>Type it again</label>
+          <input type="password" id="pl-new2" autocomplete="new-password" minlength="8" required />
+          <button type="submit" id="pl-set">Save and continue</button>
+        </form>
+        <div id="pl-msg" style="margin-top:10px;"></div>
+      </div>`;
+    document.getElementById('pl-new1').focus();
+    document.getElementById('pl-set-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('pl-msg');
+      const a = document.getElementById('pl-new1').value, b = document.getElementById('pl-new2').value;
+      if (a !== b) { msg.innerHTML = `<div class="error-box">The two passwords are not the same.</div>`; return; }
+      const btn = document.getElementById('pl-set');
+      btn.disabled = true; btn.textContent = 'Saving...';
+      try {
+        await call('portal-login', { action: 'set_password', password: a });
+        history.replaceState(null, '', '/portal.html');
+        route();
+      } catch (err) {
+        msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+        btn.disabled = false; btn.textContent = 'Save and continue';
       }
     });
   }
@@ -129,7 +182,7 @@
       ${d.needsYou.length ? `
         <h2 class="pl-h">Needs you</h2>
         <div class="pl-card">${d.needsYou.map((n) => `
-          <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action) : ''}</div>`).join('')}</div>` : ''}
+          <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action, n.kind, n.projectId, n.detail) : ''}</div>`).join('')}</div>` : ''}
       <h2 class="pl-h">Jobs</h2>
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
       <h2 class="pl-h">Quotes</h2>
@@ -141,7 +194,13 @@
   const factHtml = (k, v) => v ? `<div class="pl-fact"><span class="k">${esc(k)}</span><span>${v}</span></div>` : '';
   const listNames = (a) => a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
   const phoneLink = (c) => c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '';
-  const openLink = (url, label) => `<a class="secondary pl-btn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+  const openLink = (url, label, kind, projectId, detail) => `<a class="secondary pl-btn" href="${esc(url)}" target="_blank" rel="noopener"${kind ? ` data-open="${esc(kind)}" data-project="${esc(projectId || '')}" data-detail="${esc(detail || '')}"` : ''}>${esc(label)}</a>`;
+  // the page tells the server what was opened (the usage log the office reads); never blocks the click
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[data-open]');
+    if (!a) return;
+    call('portal-read', { action: 'event', kind: a.dataset.open, projectId: a.dataset.project, detail: a.dataset.detail }).catch(() => {});
+  });
   const table = (headers, rows) => `<table class="pl-table"><thead><tr>${headers.map((h) => `<th${/^\$/.test(h) ? ' class="n"' : ''}>${esc(h.replace(/^\$/, ''))}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
   const card = (title, body) => `<h2 class="pl-h">${esc(title)}</h2><div class="pl-card">${body}</div>`;
   const bookingLine = (b) => `${esc(b.day)}${b.start ? `, ${esc(b.start)}${b.end ? ` to ${esc(b.end)}` : ''}` : ''}${b.who.length ? `, ${esc(listNames(b.who))}` : ''}`;
@@ -163,24 +222,24 @@
         <div style="margin-bottom:8px;"><span class="pl-status ${esc(d.tone)}">${esc(d.status)}</span></div>
         ${factHtml('Site', esc(d.site))}
         ${factHtml('Your contact', contact)}
-        ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote')}</p>` : ''}
+        ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote', 'opened_quote', d.id, d.ref)}</p>` : ''}
       </div>
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
       ${d.kind === 'job' ? card('Bookings', `
           ${d.bookings.length ? d.bookings.map((b) => `<div style="margin:4px 0;">${bookingLine(b)}</div>`).join('') : `<span class="pl-muted">Nothing booked yet. We will let you know when it is.</span>`}
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
       ${d.variations.length ? card('Variations', d.variations.map((v) => `
-          <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign') : ''}</div>`).join('')) : ''}
+          <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign', 'opened_variation', d.id, v.number != null ? `Variation ${v.number}` : '') : ''}</div>`).join('')) : ''}
       ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
       ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
             <td><span class="pl-status ${i.status === 'overdue' ? 'warn' : ''}">${esc(i.label)}</span></td>
             <td>${esc(i.due)}</td><td class="n">${i.status === 'paid' ? '' : esc(money(i.balance))}</td>
-            <td><a href="${esc(i.url)}" target="_blank" rel="noopener">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`)) : `<span class="pl-muted">No invoices yet.</span>`) : ''}
+            <td><a href="${esc(i.url)}" target="_blank" rel="noopener" data-open="opened_invoice" data-project="${esc(d.id)}" data-detail="${esc(i.number)}">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`)) : `<span class="pl-muted">No invoices yet.</span>`) : ''}
       ${card('Photos', d.photos.length ? `<div class="pl-grid">${d.photos.map(photoTile).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`)}
       ${card('Documents', `
-        ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
-        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener">Open</a></div>` : ''}`)}`;
+        ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener" data-open="opened_document" data-project="${esc(d.id)}" data-detail="${esc(f.name)}">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
+        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener" data-open="opened_rates" data-project="${esc(d.id)}">Open</a></div>` : ''}`)}`;
     main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, Number(img.dataset.i))));
     if (d.hasWork) showWork(d.work);
   }

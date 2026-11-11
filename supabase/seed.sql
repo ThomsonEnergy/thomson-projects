@@ -99,10 +99,10 @@ begin
   update public.cost_centres set invoiced_amount = coalesce(invoiced_amount, 0) + 9500 where id = v_centre;
 end $$;
 
--- Client portal smoke data (item 74, scripts/steps/client-portal.js): Acme Builders (TEST) logged in on a
--- known token, J9002 as a do and charge job with a clocked shift last week, a booking the client was told
--- about, one shared and one hidden photo, and PO9901 waiting for pickup. The token is
--- smoke-portal-token-acme-0001 (only its hash is here), staging only.
+-- Client portal smoke data (item 74, scripts/steps/client-portal.js): Acme Builders (TEST) with the password
+-- StagingOnly-Portal-2026 and a session on a known token (smoke-portal-token-acme-0001, only its hash is here),
+-- J9002 as a do and charge job with a clocked shift last week, a booking the client was told about, one shared
+-- and one hidden photo, and PO9901 waiting for pickup. Staging only.
 do $$
 declare
   v_job uuid := '00000000-0000-4000-c000-000000000002';
@@ -120,6 +120,10 @@ begin
   end if;
   insert into public.portal_sessions (token_hash, email, device, expires_at)
     values ('e51e7c03e21d2eb2f63a5e62b72b2ddbebf453bc779fbbc674d5da52e44a42c9', 'accounts@acme.example.test', 'smoke', now() + interval '10 years');
+  -- the smoke client's own password (StagingOnly-Portal-2026, scrypt), already changed from the temporary one
+  insert into public.portal_accounts (email, password_hash, must_change, welcome_sent_at)
+    values ('accounts@acme.example.test', 'scrypt$vhPVVy+TiIV4KVIluG8RgA==$mfF14YeJNH5AXbT4p0mDemkLjIhHtlFJ98F+dOhx3LUp0i3q70xWQPG5lockdR3By6Lj0NXUbylKwONrHcJ2yA==', false, now())
+    on conflict (email) do nothing;
   insert into public.time_entries (staff_id, project_id, clock_in, clock_out, cost_centre_id, time_category, notes, billable)
     values (v_staff, v_job, (date_trunc('day', now() at time zone 'Australia/Sydney') - interval '6 days' + interval '7 hours') at time zone 'Australia/Sydney', (date_trunc('day', now() at time zone 'Australia/Sydney') - interval '6 days' + interval '15 hours 30 minutes') at time zone 'Australia/Sydney', v_centre, 'job', 'portal smoke', true);
   insert into public.schedule_assignments (staff_id, project_id, assignment_date, start_time, end_time, block_type, note, client_informed_at)

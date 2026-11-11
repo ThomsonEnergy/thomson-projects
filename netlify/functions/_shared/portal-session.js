@@ -5,7 +5,9 @@
 // policies apply here; the scope is the whole access control and every query in
 // portal-data.js carries it.
 //
-//   requirePortalSession(event) -> { admin, session, scope } or null (not logged in)
+//   requirePortalSession(event) -> { admin, session, scope, log } or null (not logged in)
+//     log(action, { projectId, detail }) writes the usage row (portal_events) for every client in
+//     the scope, and a throttled line on the job's activity log for a job view or an open.
 //   portalScope(admin, email, { staffCheck })
 //                               -> { email, clients: [{ id, name, main, offAt }], contactJobIds, staffUser }
 //     staffCheck (one Auth listUsers call) only at login; a session's scope skips it.
@@ -16,10 +18,13 @@
 //       and never money (invoices, hours, costs, rates).
 //     staffUser: true when the email belongs to a staff login (refused: staff use the app).
 //   tokenHash(token), newToken(), codeHash(email, code), newCode()
+//   hashPassword(password), verifyPassword(password, hash), newPassword(): scrypt with a random salt
+//   logPortalEvent(admin, { email, clientIds, projectId, action, detail })
 //   json(statusCode, body)      the response shape every portal function answers with
 //   normEmail(s)                lower case, trimmed
 //
-// Tables written: portal_sessions.last_seen_at. Everything else here only reads.
+// Tables written: portal_sessions.last_seen_at, portal_events, activity_log (job views). Everything
+// else here only reads.
 
 const crypto = require('crypto');
 const { getAdminClient } = require('./require-admin');
@@ -27,6 +32,8 @@ const { allAuthUsers } = require('./auth-users');
 
 const SESSION_DAYS = 30;
 const CODE_MINUTES = 10;
+const PASSWORD_MIN = 8;
+const ACTIVITY_THROTTLE_MINUTES = 60; // one "client viewed this job" line an hour, not one a click
 const SEEN_REFRESH_MINUTES = 10;
 
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
@@ -38,6 +45,37 @@ const newToken = () => crypto.randomBytes(32).toString('base64url');
 const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
 // the code's hash is salted with the email, so two people sent the same digits never share a hash
 const codeHash = (email, code) => crypto.createHash('sha256').update(`${normEmail(email)}:${String(code).replace(/\D/g, '')}`).digest('hex');
+
+// Passwords: scrypt (built into Node) with a 16 byte random salt, stored as scrypt$salt$hash.
+const hashPassword = (password) => {
+  const salt = crypto.randomBytes(16);
+  return `scrypt$${salt.toString('base64')}$${crypto.scryptSync(String(password), salt, 64).toString('base64')}`;
+};
+const verifyPassword = (password, stored) => {
+  const [kind, saltB64, hashB64] = String(stored || '').split('$');
+  if (kind !== 'scrypt' || !saltB64 || !hashB64) return false;
+  const want = Buffer.from(hashB64, 'base64');
+  const got = crypto.scryptSync(String(password), Buffer.from(saltB64, 'base64'), want.length);
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+};
+// a temporary password a person can read out: three short words and two digits
+const WORDS = ['solar', 'volt', 'cable', 'switch', 'bright', 'north', 'river', 'valley', 'spark', 'panel', 'power', 'amp', 'copper', 'tweed', 'summit', 'harbour'];
+const newPassword = () => `${WORDS[crypto.randomInt(WORDS.length)]}-${WORDS[crypto.randomInt(WORDS.length)]}-${crypto.randomInt(10, 99)}`;
+
+const ACTIVITY_ACTIONS = { viewed_job: 'viewed this job', opened_quote: 'opened the quote', opened_invoice: 'opened an invoice', opened_document: 'opened a document', opened_rates: 'opened the Schedule of Rates', opened_variation: 'opened a variation' };
+
+async function logPortalEvent(admin, { email, clientIds = [], projectId = null, action, detail = null }) {
+  const rows = (clientIds.length ? clientIds : [null]).map((client_id) => ({ email, client_id, project_id: projectId, action, detail }));
+  await admin.from('portal_events').insert(rows);
+  // the job's activity log hears about a view or an open, at most once an hour per person
+  if (projectId && ACTIVITY_ACTIONS[action]) {
+    const sinceIso = new Date(Date.now() - ACTIVITY_THROTTLE_MINUTES * 60 * 1000).toISOString();
+    const { data: recent } = await admin.from('activity_log').select('id').eq('entity_type', 'project').eq('entity_id', projectId).eq('action', 'portal_view').ilike('description', `${likeSafe(email)}%`).gte('created_at', sinceIso).limit(1);
+    if (!(recent || []).length) {
+      await admin.from('activity_log').insert({ entity_type: 'project', entity_id: projectId, action: 'portal_view', description: `${email} ${ACTIVITY_ACTIONS[action]} in the client portal${detail ? ` (${detail})` : ''}` });
+    }
+  }
+}
 
 async function portalScope(admin, emailIn, { staffCheck = true } = {}) {
   const email = normEmail(emailIn);
@@ -89,7 +127,9 @@ async function requirePortalSession(event) {
   if (seenAgo > SEEN_REFRESH_MINUTES * 60 * 1000) {
     await admin.from('portal_sessions').update({ last_seen_at: new Date().toISOString() }).eq('id', session.id);
   }
-  return { admin, session, scope };
+  const clientIds = scope.clients.map((c) => c.id);
+  const log = (action, { projectId = null, detail = null } = {}) => logPortalEvent(admin, { email: scope.email, clientIds, projectId, action, detail }).catch((e) => console.error('portal event not logged', e.message));
+  return { admin, session, scope, log };
 }
 
-module.exports = { requirePortalSession, portalScope, bearer, tokenHash, newToken, codeHash, newCode, json, normEmail, SESSION_DAYS, CODE_MINUTES };
+module.exports = { requirePortalSession, portalScope, logPortalEvent, bearer, tokenHash, newToken, codeHash, newCode, hashPassword, verifyPassword, newPassword, json, normEmail, SESSION_DAYS, CODE_MINUTES, PASSWORD_MIN };

@@ -24,7 +24,7 @@ const sydneyDate = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Aus
 
 async function buildDigest(admin) {
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts, lowRes] = await Promise.all([
+  const [runsRes, beatsRes, tasksRes, billsRes, savedRes, pricesRes, checkRes, stIssuesRes, missingSts, lowRes, portalRes, portalNewRes] = await Promise.all([
     admin.from('agent_runs').select('agent, status, summary, input_tokens, output_tokens').gte('started_at', since),
     admin.from('agent_heartbeats').select('*'),
     admin.from('agent_tasks').select('title, dedupe_key, created_at').eq('status', 'open').order('created_at'),
@@ -35,6 +35,8 @@ async function buildDigest(admin) {
     admin.from('supplier_statements').select('created_at, query_reply_at').eq('status', 'issues'),
     missingStatements(admin),
     admin.from('stock_low_flags').select('created_at').is('cleared_at', null),
+    admin.from('portal_events').select('email, action').gte('created_at', since).in('action', ['login_password', 'login_code']),
+    admin.from('portal_accounts').select('email, created_at').gte('created_at', since),
   ]);
   const runs = runsRes.data || [], beats = beatsRes.data || [];
   // a worker-down task is already the "Not working" line, so it is not listed twice
@@ -96,6 +98,10 @@ async function buildDigest(admin) {
   if (!down.length) lines.push('All workers OK.');
   if (failedRuns.length) lines.push(`${plural(failedRuns.length, 'failed run')} in the last 24 hours.`);
   if (tokensIn || tokensOut) lines.push(`AI used: ${tokensIn.toLocaleString('en-AU')} tokens in, ${tokensOut.toLocaleString('en-AU')} out.`);
+  // the client portal (item 74): who was in, and who for the first time
+  const portalPeople = new Set((portalRes.data || []).map(e => e.email));
+  const portalNew = (portalNewRes.data || []).filter(a => portalPeople.has(a.email)).length;
+  if (portalPeople.size) lines.push(`Client portal: ${plural(portalPeople.size, 'client login')}${portalNew ? ` (${portalNew} first time)` : ''}.`);
 
   const title = down.length ? `Morning: ${down[0].label} is not working`
     : newCount ? `Morning: ${plural(newCount, 'new thing')} since yesterday`

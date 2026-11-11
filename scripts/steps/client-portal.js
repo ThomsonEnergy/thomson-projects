@@ -2,17 +2,29 @@
 // portal.html with --login none against the staging seed: Acme Builders (TEST),
 // accounts@acme.example.test, J9002 made a direct job with a clocked shift, a booking the client
 // was told about, one shared and one hidden photo and PO9901. The session row for the token
-// below was inserted on staging by hand (its hash only), so the steps skip the email code.
+// below is in the seed (its hash only); the password login is tried first, then the seeded session.
 const TOKEN = 'smoke-portal-token-acme-0001';
 const J9002 = '00000000-0000-4000-c000-000000000002';
 const JANES_QUOTE = '00000000-0000-4000-c000-000000000001'; // another client's
 
 module.exports = async (page, { base, shot }) => {
   const text = async (sel) => (await page.locator(sel).first().textContent()) || '';
-  // 0. logged out: the email form
+  // 0. logged out: email and password
   await page.waitForSelector('#pl-email');
   await shot('login');
-  // log in with the smoke session
+  await page.fill('#pl-email', 'accounts@acme.example.test');
+  await page.fill('#pl-password', 'StagingOnly-Portal-2026');
+  await page.click('#pl-go');
+  await page.waitForSelector('.pl-row');
+  // a wrong password is refused with the same words whoever you are
+  await page.evaluate(() => localStorage.removeItem('te_portal_token'));
+  await page.goto(`${base}/portal.html`);
+  await page.fill('#pl-email', 'nobody@example.test');
+  await page.fill('#pl-password', 'wrong-password-1');
+  await page.click('#pl-go');
+  await page.waitForSelector('#pl-msg .error-box');
+  if (!/do not match/.test(await text('#pl-msg'))) throw new Error('a wrong password should be refused');
+  // the rest on the seeded session
   await page.evaluate((t) => localStorage.setItem('te_portal_token', t), TOKEN);
   await page.goto(`${base}/portal.html`);
   await page.waitForSelector('.pl-row');

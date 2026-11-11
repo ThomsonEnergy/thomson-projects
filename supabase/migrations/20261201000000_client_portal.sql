@@ -93,3 +93,40 @@ begin
 end;
 $$;
 revoke execute on function public.guard_project_documents_writes() from public, anon, authenticated;
+
+-- The password login (owner, 11 Nov 2026: username is the email, a temporary password emailed when a
+-- contact is ticked, changed on first login; the email code stays as the forgot-password path).
+-- The hash is scrypt with a random salt (_shared/portal-session.js). Server only.
+create table if not exists public.portal_accounts (
+  id uuid primary key default gen_random_uuid(),
+  email text not null unique,
+  password_hash text not null,
+  must_change boolean not null default true,
+  welcome_sent_at timestamptz,
+  last_login_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.portal_accounts enable row level security;
+revoke all on public.portal_accounts from public, anon, authenticated;
+
+-- What clients do in the portal (owner, 11 Nov 2026: a log on our end): one row per login, list
+-- view, job view, and every quote, invoice, document or rates page opened from the portal. Written
+-- by the server on every call; pricing roles read it on the Clients page. Kept 12 months.
+create table if not exists public.portal_events (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  client_id uuid references public.clients(id) on delete cascade,
+  project_id uuid references public.projects(id) on delete set null,
+  action text not null,
+  detail text,
+  created_at timestamptz not null default now()
+);
+create index if not exists portal_events_client_idx on public.portal_events (client_id, created_at desc);
+create index if not exists portal_events_project_idx on public.portal_events (project_id, created_at desc);
+create index if not exists portal_events_created_idx on public.portal_events (created_at desc);
+alter table public.portal_events enable row level security;
+drop policy if exists "Pricing roles read portal events" on public.portal_events;
+create policy "Pricing roles read portal events" on public.portal_events for select to authenticated using (is_pricing_role());
+revoke all on public.portal_events from public, anon;
+grant select on public.portal_events to authenticated;

@@ -183,7 +183,6 @@
   <script src="/js/supabase-client.js?v=131"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=2"></script>
-  <script src="/js/clients-portal.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
@@ -219,6 +218,17 @@
     }
 
     // --- contacts sub-form ---
+    // js/clients-portal.js (the portal card, item 74) on first use, the way the email composer is loaded.
+    let clientPortalJs = null;
+    function loadClientPortalJs() {
+      return (clientPortalJs ||= new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = '/js/clients-portal.js?v=2';
+        el.onload = resolve; el.onerror = () => reject(new Error('The portal card did not load.'));
+        document.head.appendChild(el);
+      }));
+    }
+
     function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
       const row = document.createElement('div');
@@ -277,7 +287,7 @@
       document.getElementById('c-terms').value = 'cod';
       document.getElementById('c-rate-card').value = defaultRateCardId;
       renderClientAgreement(null);
-      renderClientPortal(null);
+      if (typeof renderClientPortal === 'function') renderClientPortal(null);
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -468,7 +478,8 @@
       document.getElementById('c-terms').value = c.payment_terms || 'cod';
       document.getElementById('c-rate-card').value = c.rate_card_id || '';
       renderClientAgreement(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
-      renderClientPortal(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
+      // The portal card's code is downloaded the first time a client is opened, so the page stays under its weight budget.
+      loadClientPortalJs().then(() => renderClientPortal(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) }));
       document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -543,6 +554,16 @@
         if (contactErr) contactErrors.push(contactErr.message);
       }
       if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
+      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74).
+      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
+      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
+      if (newlyTicked.length) {
+        await loadClientPortalJs();
+        const results = await sendPortalLogins(newlyTicked);
+        const failed = results.filter(r => !r.ok && !/Already sent|own password/.test(r.message));
+        if (failed.length) showToast(`Saved. Portal login not sent to ${failed.map(f => f.email).join(', ')}: ${failed[0].message}`, { error: true, ms: 8000 });
+        else showToast(`Saved. Portal login emailed to ${newlyTicked.join(', ')}.`);
+      }
 
       // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
       // rows taken off the form deleted (their jobs keep the address text).

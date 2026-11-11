@@ -175,11 +175,11 @@ async function portalOverview(admin, scope) {
   const quotes = rows.filter((r) => r.kind === 'quote').sort(openFirst);
   const refOf = (id) => rows.find((r) => r.id === id)?.ref || '';
   const needsYou = [];
-  rows.filter((r) => r.needsYou === 'Approve your quote').forEach((r) => needsYou.push({ text: `${r.ref} ${r.name}: your quote is waiting on you`, action: 'Open quote', url: r.quoteUrl }));
-  (variations.data || []).forEach((v) => needsYou.push({ text: `${refOf(v.project_id)}: variation ${v.variation_number || ''} to sign`.replace(/\s+/g, ' '), action: 'Open variation', url: `/quote.html?variation=${v.variation_token}` }));
+  rows.filter((r) => r.needsYou === 'Approve your quote').forEach((r) => needsYou.push({ text: `${r.ref} ${r.name}: your quote is waiting on you`, action: 'Open quote', url: r.quoteUrl, kind: 'opened_quote', projectId: r.id, detail: r.ref }));
+  (variations.data || []).forEach((v) => needsYou.push({ text: `${refOf(v.project_id)}: variation ${v.variation_number || ''} to sign`.replace(/\s+/g, ' '), action: 'Open variation', url: `/quote.html?variation=${v.variation_token}`, kind: 'opened_variation', projectId: v.project_id, detail: `Variation ${v.variation_number || ''}`.trim() }));
   (offers.data || []).forEach((o) => needsYou.push({ text: `${refOf(o.project_id)}: pick a time that suits you`, action: 'Pick a time', url: `/pick-time.html?token=${o.token}` }));
-  invoices.filter((i) => i.status === 'overdue').forEach((i) => needsYou.push({ text: `${i.number} is overdue (${money(i.balance)})`, action: 'Pay online', url: i.url }));
-  invoices.filter((i) => i.status === 'awaiting').forEach((i) => needsYou.push({ text: `${i.number}: ${money(i.balance)} due ${i.due}`, action: 'View invoice', url: i.url }));
+  invoices.filter((i) => i.status === 'overdue').forEach((i) => needsYou.push({ text: `${i.number} is overdue (${money(i.balance)})`, action: 'Pay online', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
+  invoices.filter((i) => i.status === 'awaiting').forEach((i) => needsYou.push({ text: `${i.number}: ${money(i.balance)} due ${i.due}`, action: 'View invoice', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
   return {
     clients: scope.clients.map((c) => ({ id: c.id, name: c.name, main: c.main })),
     needsYou, jobs, quotes, company: comp,
