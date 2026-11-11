@@ -83,6 +83,7 @@
           </div>
 
           <div class="card" id="proposal-pictures-card"></div>
+          <div class="card" id="photo-tags-card"></div>
 
           <div class="card">
             <h2>Company details</h2>
@@ -820,7 +821,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -872,6 +873,7 @@
       logoUrl = data.logo_url || '';
       renderLogoPreview();
       loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';

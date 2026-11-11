@@ -137,6 +137,25 @@
       },
     },
     {
+      // Job pictures by their tags (the picture tagger, item 73b) or captions: "sigenergy inverter"
+      // finds pictures carrying both tags; a row opens the job's Site Photos on that search.
+      label: 'Pictures',
+      run: async (q) => {
+        const words = q.toLowerCase().replace(/[{}]/g, ' ').split(' ').filter(Boolean);
+        if (!words.length) return [];
+        const data = must(await supabaseClient.from('project_photos')
+          .select('id, url, caption, ai_caption, project_id, projects(name, job_number, quote_number)')
+          .or(`tags.cs.{${words.map(w => `"${w}"`).join(',')}},tags.cs.{"${words.join(' ')}"},${ilikeOr(['ai_caption', 'caption'], q)}`)
+          .order('created_at', { ascending: false }).limit(PER_GROUP));
+        return data.filter(p => !isVideoUrl(p.url)).map(p => ({
+          title: p.ai_caption || p.caption || 'Picture',
+          sub: [p.projects?.job_number ? `J${p.projects.job_number}` : (p.projects?.quote_number ? `Q${p.projects.quote_number}` : ''), p.projects?.name].filter(Boolean).join(' · '),
+          href: `/project.html?id=${p.project_id}&tab=photos&photo_q=${enc(q)}`,
+          thumb: p.url,
+        }));
+      },
+    },
+    {
       label: 'Knowledge',
       run: async (q) => {
         const data = must(await supabaseClient.from('knowledge_entries')
@@ -201,7 +220,7 @@
     }
     panel.innerHTML = filled.length
       ? filled.map(g => `<div class="gsearch-group">${escapeHtml(g.label)}</div>` + g.rows.map(r =>
-          `<a class="gsearch-result" href="${r.href}"><div class="gsearch-title">${escapeHtml(r.title || '')}</div>${r.sub ? `<div class="gsearch-sub">${escapeHtml(r.sub)}</div>` : ''}</a>`).join('')).join('')
+          `<a class="gsearch-result" href="${r.href}"${r.thumb ? ' style="display:flex; gap:10px; align-items:center;"' : ''}>${r.thumb ? `<img src="${escapeHtml(supaImageVariant(r.thumb, 96, 60))}" alt="" loading="lazy" style="width:44px; height:44px; object-fit:cover; border-radius:6px; flex:none;" />` : ''}<div><div class="gsearch-title">${escapeHtml(r.title || '')}</div>${r.sub ? `<div class="gsearch-sub">${escapeHtml(r.sub)}</div>` : ''}</div></a>`).join('')).join('')
       : `<div class="gsearch-empty">Nothing found for "${escapeHtml(q)}"</div>`;
   }
 

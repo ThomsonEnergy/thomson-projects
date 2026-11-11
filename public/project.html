@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=131"></script>
+  <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/template-questions.js?v=7"></script>
   <script src="/js/solar-roi.js?v=18"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -3806,7 +3806,7 @@
         // ----- step 4: scope of works -----
         renderEditSowDocList();
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
-        loadJsOnce('/js/quote-pictures.js?v=1', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+        loadJsOnce('/js/quote-pictures.js?v=2', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
@@ -4677,6 +4677,7 @@
                     <button type="button" class="secondary" id="site-photo-select-cancel">Cancel</button>
                   </span>
                 </div>
+                <div id="site-photo-search"></div>
                 <div id="site-photos-list" style="margin-top:14px;"><p class="subtitle">Loading...</p></div>
               </div>
             </div>
@@ -4780,7 +4781,8 @@
 
       tabLoaders.documents = () => { loadDocuments(project.id); wireCompanyDocs(project); };
       wireDocumentUpload(project);
-      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadSitePhotos(project.id); wireSitePhotoUpload(project.id); }
+      // the tags and the search box are js/photo-tags.js; the pictures still load if it does not
+      if (document.getElementById('site-photos-list')) { tabLoaders.photos = () => loadJsOnce('/js/photo-tags.js?v=1', () => typeof wireSitePhotoTags === 'function').then(() => wireSitePhotoTags(() => loadSitePhotos(project.id))).catch(() => {}).then(() => loadSitePhotos(project.id)); wireSitePhotoUpload(project.id); }
       if (document.getElementById('plan-schedule-card')) loadPlanScheduleCard(project);
       if (document.getElementById('related-jobs-card')) loadRelatedJobsCard(project);
       if (document.getElementById('clock-here-card')) loadClockHereCard(project);
@@ -6591,6 +6593,7 @@
               project_id: state().projectId, staff_id: user.id, url, task_id: t.id, caption: `#task ${t.description}`.slice(0, 200),
             })));
             if (error) throw error;
+            requestPhotoTags(state().projectId);
             jtExpanded.add(t.id);
             await reload();
           } catch (err) {
@@ -7973,7 +7976,7 @@
       let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
         supabaseClient
           .from('project_photos')
-          .select('id, url, caption, staff_id, created_at, task_id, profiles(full_name)')
+          .select('id, url, caption, staff_id, created_at, task_id, tags, ai_caption, profiles(full_name)')
           .eq('project_id', projectId)
           .order('created_at', { ascending: false }),
         getMyRole(),
@@ -7999,7 +8002,7 @@
       const yesterdayKey = sydneyDateKey(yd);
       const dayHeading = (key) => key === todayKey ? 'Today' : key === yesterdayKey ? 'Yesterday' : dayKeyLabel(key) + (key.slice(0, 4) === todayKey.slice(0, 4) ? '' : ' ' + key.slice(0, 4));
       const groups = [];
-      allPhotos.forEach(p => {
+      (typeof sitePhotoSearchFilter === 'function' ? sitePhotoSearchFilter(allPhotos) : allPhotos).forEach(p => { // the search box above the list (js/photo-tags.js)
         const key = sydneyDateKey(new Date(p.created_at));
         if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, items: [] });
         groups[groups.length - 1].items.push(p);
@@ -8011,8 +8014,10 @@
                 : `<img src="${escapeHtml(supaImageVariant(p.url, 240, 70))}" loading="lazy" decoding="async" data-i="${photos.indexOf(p)}" data-photo-id="${p.id}" class="site-photo-view" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" />`}
               <div style="padding:6px 8px; font-size:11px; color:var(--muted);">
                 ${p.caption ? `<strong style="color:var(--text); font-size:12px;">${escapeHtml(p.caption)}</strong><br>` : ''}${escapeHtml(p.profiles?.full_name || 'Unknown')} &middot; ${new Date(p.created_at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', timeZone: 'Australia/Sydney' })}
+                ${typeof photoTagsLineHtml === 'function' && !isVideoUrl(p.url) ? photoTagsLineHtml(p) : ''}
               </div>
             </div>`;
+      if (!groups.length) { listEl.innerHTML = '<p class="subtitle">No pictures match that search.</p>'; return; }
       listEl.innerHTML = groups.map((g, gi) => `
         <h3 class="site-photo-day" style="font-size:14px; margin:${gi ? '18px' : '0'} 0 8px;">${escapeHtml(dayHeading(g.key))} <span class="subtitle" style="font-weight:400; font-size:12px;">${g.items.length} photo${g.items.length === 1 ? '' : 's'}</span></h3>
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px;">${g.items.map(tileHtml).join('')}</div>`).join('');
@@ -8069,6 +8074,7 @@
               project_id: projectId, staff_id: user.id, url: pub.publicUrl, caption: `${base} (marked up)`,
             });
             if (insErr) throw insErr;
+            requestPhotoTags(projectId);
           },
           onClose: () => loadSitePhotos(projectId),
         }));
