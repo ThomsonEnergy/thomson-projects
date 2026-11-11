@@ -5,7 +5,9 @@
 // policies apply here; the scope is the whole access control and every query in
 // portal-data.js carries it.
 //
-//   requirePortalSession(event) -> { admin, session, scope, log } or null (not logged in)
+//   requirePortalSession(event) -> { admin, session, scope, mustChange, log } or null (not logged in)
+//     mustChange: the password is still the temporary one (or a code got them in): portal-read
+//     refuses every read until set_password, so the page cannot skip choosing a password.
 //     log(action, { projectId, detail }) writes the usage row (portal_events) for every client in
 //     the scope, and a throttled line on the job's activity log for a job view or an open.
 //   portalScope(admin, email, { staffCheck })
@@ -133,7 +135,10 @@ async function requirePortalSession(event) {
   const admin = getAdminClient();
   const { data: session } = await admin.from('portal_sessions').select('*').eq('token_hash', tokenHash(token)).maybeSingle();
   if (!session || session.ended_at || new Date(session.expires_at).getTime() < Date.now()) return null;
-  const scope = await portalScope(admin, session.email, { staffCheck: false });
+  const [scope, { data: account }] = await Promise.all([
+    portalScope(admin, session.email, { staffCheck: false }),
+    admin.from('portal_accounts').select('must_change').eq('email', session.email).maybeSingle(),
+  ]);
   if (!scope.canLogIn) return null;
   const seenAgo = Date.now() - new Date(session.last_seen_at).getTime();
   if (seenAgo > SEEN_REFRESH_MINUTES * 60 * 1000) {
@@ -141,7 +146,7 @@ async function requirePortalSession(event) {
   }
   const clientIds = scope.clients.map((c) => c.id);
   const log = (action, { projectId = null, detail = null } = {}) => logPortalEvent(admin, { email: scope.email, clientIds, projectId, action, detail }).catch((e) => console.error('portal event not logged', e.message));
-  return { admin, session, scope, log };
+  return { admin, session, scope, mustChange: !account || !!account.must_change, log };
 }
 
 module.exports = { requirePortalSession, portalScope, logPortalEvent, bearer, tokenHash, newToken, codeHash, newCode, hashPassword, verifyPassword, noPasswordHash, newPassword, json, normEmail, SESSION_DAYS, CODE_MINUTES, PASSWORD_MIN };

@@ -20,9 +20,14 @@ const { RULES } = require('./labour-bands');
 const { firstName, listNames, sydneyToday, jobRef, fmtDay, fmtTime } = require('./schedule-emails');
 const { localDateKey } = require('./compute-labour-cost');
 const { moneyText } = require('./invoice-events');
+const { renderedImageUrl } = require('./storage-image');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
+// a photo's grid picture is Supabase's small copy (_shared/storage-image.js); the full picture stays for the viewer
+const thumbUrl = (url) => renderedImageUrl(url, { width: 480, height: 480 });
+// a staff member's first name for the client, never the 'there' a greeting would use
+const staffFirst = (fullName) => (fullName ? firstName(fullName) : '');
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
 const timeText = (iso) => TIME.format(new Date(iso)).replace(/\s/g, '').toLowerCase();
 const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at';
@@ -68,8 +73,8 @@ async function bookingsFor(admin, projectIds, { from } = {}) {
   (data || []).forEach((a) => {
     const key = `${a.project_id}|${a.assignment_date}`;
     const b = (byKey[key] ||= { projectId: a.project_id, dateKey: a.assignment_date, day: fmtDay(a.assignment_date), start: null, end: null, who: [] });
-    const n = firstName(a.profiles?.full_name);
-    if (!b.who.includes(n)) b.who.push(n);
+    const n = staffFirst(a.profiles?.full_name);
+    if (n && !b.who.includes(n)) b.who.push(n);
     if (a.start_time && (!b.start || a.start_time < b.start)) b.start = a.start_time;
     if (a.end_time && (!b.end || a.end_time > b.end)) b.end = a.end_time;
   });
@@ -83,7 +88,7 @@ async function onSiteFor(admin, projectIds) {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data } = await admin.from('time_entries').select('project_id, clock_in, profiles(full_name)').in('project_id', projectIds).is('clock_out', null).gte('clock_in', dayAgo).order('clock_in');
   const today = sydneyToday();
-  return (data || []).filter((e) => localDateKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: firstName(e.profiles?.full_name), since: timeText(e.clock_in) }));
+  return (data || []).filter((e) => localDateKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: staffFirst(e.profiles?.full_name) || 'Someone', since: timeText(e.clock_in) }));
 }
 
 // Invoices the client has been sent (made but not sent stay hidden), with a plain status word.
@@ -145,8 +150,9 @@ function projectRow(p, ctx) {
   return {
     id: p.id, ref: jobRef(p), name: p.name, site: p.client_address || '', kind: p.job_number ? 'job' : 'quote',
     status: st.text, tone: st.tone || '', open: st.open, money: p.money,
-    quoteUrl: !p.job_number && p.sent_at && p.quote_token ? `/quote.html?token=${p.quote_token}` : null,
-    needsYou: st.needsYou || null,
+    // the proposal carries every price, so a job contact (no money) never gets its link
+    quoteUrl: p.money && !p.job_number && p.sent_at && p.quote_token ? `/quote.html?token=${p.quote_token}` : null,
+    needsYou: p.money ? st.needsYou || null : null,
   };
 }
 
@@ -221,10 +227,10 @@ async function portalProject(admin, p) {
   return {
     ...projectRow(p, { bookings, onSite, invoices }),
     hasWork, work,
-    manager: manager ? firstName(manager.profiles?.full_name) : null,
+    manager: manager ? staffFirst(manager.profiles?.full_name) || null : null,
     company: comp,
     bookings, pastBookings, onSite,
-    photos: (photos.data || []).map((ph) => ({ url: ph.url, caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
+    photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,
     variations: (variations.data || []).map((v) => ({ number: v.variation_number, description: v.description, status: v.approval_status === 'sent' ? 'To sign' : 'Signed', url: v.approval_status === 'sent' ? `/quote.html?variation=${v.variation_token}` : null })),

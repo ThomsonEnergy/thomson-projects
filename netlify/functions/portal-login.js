@@ -2,8 +2,8 @@
 // The client portal's login (backlog item 74). Body { action, email, password, code, device }:
 //   password    email and password. Right: the device's token (30 days, portal_sessions holds its
 //               hash) and mustChange when the password is the temporary one. 5 wrong tries in an
-//               hour locks the password until a code login; the answer never says whether the
-//               email exists.
+//               hour locks the password until a code login (which clears them); the answer never
+//               says whether the email exists.
 //   send        emails a 6 digit code to an email that is on a client record (the client's own
 //               email, a ticked contact, or a job contact): the forgot-password path and the way in
 //               before a welcome email. The answer is the same whether or not the email is known. A
@@ -86,8 +86,9 @@ async function send(admin, event, email) {
   const scope = await S.portalScope(admin, email);
   if (scope.staffUser) return S.json(200, { ok: true, staff: true, message: 'That is a staff login. Use the app instead.' });
   if (!scope.canLogIn) {
-    // unknown email: the same words, no code (code_hash null), but the attempt still counts against the limits
-    await admin.from('portal_logins').insert({ email, code_hash: null, ip, expires_at: new Date().toISOString(), used_at: new Date().toISOString() });
+    // unknown email: the same words and the same limits (a dead row with a hash nothing matches, so
+    // the per email count is the same as for a known email), no email sent
+    await admin.from('portal_logins').insert({ email, code_hash: S.tokenHash(S.newToken()), ip, expires_at: new Date().toISOString(), used_at: new Date().toISOString() });
     return S.json(200, { ok: true, message: SAME_ANSWER, minutes: S.CODE_MINUTES });
   }
   const code = S.newCode();
@@ -118,7 +119,11 @@ async function verify(admin, email, codeIn, device) {
   // send already refused a staff email, so no Auth lookup here
   const scope = await S.portalScope(admin, email, { staffCheck: false });
   if (!scope.canLogIn) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
-  await admin.from('portal_logins').update({ used_at: new Date().toISOString() }).eq('id', login.id);
+  await Promise.all([
+    admin.from('portal_logins').update({ used_at: new Date().toISOString() }).eq('id', login.id),
+    // the code got them in, so the wrong password tries no longer count (the lockout ends here)
+    admin.from('portal_logins').update({ attempts: 0 }).eq('email', email).is('code_hash', null).eq('attempts', 1),
+  ]);
   // a code login always ends in choosing a password (the account is made if it is their first time)
   const { error: accountErr } = await admin.from('portal_accounts').upsert({ email, password_hash: S.noPasswordHash(), must_change: true, updated_at: new Date().toISOString() }, { onConflict: 'email' });
   if (accountErr) throw accountErr;
@@ -150,7 +155,7 @@ async function setPassword(event, pw) {
   if (local.length >= 4 && pw.toLowerCase().includes(local)) return S.json(400, { ok: false, error: 'Pick a password that is not part of your email.' });
   const { error } = await auth.admin.from('portal_accounts').upsert({ email: auth.scope.email, password_hash: S.hashPassword(pw), must_change: false, updated_at: new Date().toISOString() }, { onConflict: 'email' });
   if (error) throw error;
-  auth.log('set_password');
+  await auth.log('set_password');
   return S.json(200, { ok: true });
 }
 

@@ -22,6 +22,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return S.json(400, { ok: false, error: 'Bad request' }); }
   const auth = await S.requirePortalSession(event);
   if (!auth) return S.json(401, { ok: false, error: 'Please log in again.' });
+  if (auth.mustChange) return S.json(403, { ok: false, mustChange: true, error: 'Choose your password first.' });
   const { admin, scope, log } = auth;
   try {
     const action = String(body.action || 'overview');

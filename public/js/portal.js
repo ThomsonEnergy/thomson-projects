@@ -23,6 +23,7 @@
     let data = {};
     try { data = await res.json(); } catch { /* no body */ }
     if (res.status === 401) { setToken(''); showLogin(); throw new Error('login'); }
+    if (res.status === 403 && data.mustChange) { showSetPassword(); throw new Error('password'); }
     if (!res.ok || data.ok === false) throw new Error(data.error || 'Something went wrong. Please try again.');
     return data;
   }
@@ -213,7 +214,7 @@
     const pictures = d.photos.filter((p) => !p.video);
     const photoTile = (p) => `<div>${p.video
       ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>`
-      : `<img src="${esc(p.url)}" data-i="${pictures.indexOf(p)}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`;
+      : `<img src="${esc(p.thumb || p.url)}" data-i="${pictures.indexOf(p)}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`;
     main.innerHTML = `
       <a class="pl-back" href="/portal.html">&larr; All your jobs</a>
       <div class="pl-card">

@@ -29,11 +29,12 @@ exports.handler = async (event) => {
     const { data: existing } = await admin.from('portal_accounts').select('id, welcome_sent_at, must_change').eq('email', email).maybeSingle();
     if (existing && existing.welcome_sent_at && !body.resend) return S.json(200, { ok: true, sent: false, message: 'Already sent.' });
     if (existing && !existing.must_change) return S.json(200, { ok: true, sent: false, message: 'They already have their own password. If they have forgotten it, "Email me a code instead" on the login page gets them back in.' });
+    // the email first: a send that fails leaves the account as it was, so the next tick tries again
     const password = S.newPassword();
+    await sendPortalWelcome(admin, { to: email, password, name: scope.firstName });
     const now = new Date().toISOString();
     const { error } = await admin.from('portal_accounts').upsert({ email, password_hash: S.hashPassword(password), must_change: true, welcome_sent_at: now, updated_at: now }, { onConflict: 'email' });
     if (error) throw error;
-    await sendPortalWelcome(admin, { to: email, password, name: scope.firstName });
     const clientIds = scope.clients.map((c) => c.id);
     if (clientIds.length) await admin.from('activity_log').insert(clientIds.map((id) => ({ entity_type: 'client', entity_id: id, action: 'portal_invite', description: `Portal login emailed to ${email}`, changed_by: auth.user.id })));
     return S.json(200, { ok: true, sent: true });
