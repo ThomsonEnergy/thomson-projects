@@ -23,8 +23,10 @@
 
 const crypto = require('crypto');
 const { getAdminClient } = require('./require-admin');
+const { allAuthUsers } = require('./auth-users');
 
 const SESSION_DAYS = 30;
+const CODE_MINUTES = 10;
 const SEEN_REFRESH_MINUTES = 10;
 
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
@@ -59,12 +61,10 @@ async function portalScope(admin, emailIn, { staffCheck = true } = {}) {
   return { email, clients, contactJobIds, staffUser };
 }
 
-// Email lives only in Supabase Auth (see list-staff-emails.js), so this is one listUsers call;
-// the team is small enough for one page.
+// Email lives only in Supabase Auth, so this is the Auth user list (paged, _shared/auth-users.js).
 async function isStaffEmail(admin, email) {
   try {
-    const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    return (data?.users || []).some((u) => normEmail(u.email) === email);
+    return (await allAuthUsers(admin)).some((u) => normEmail(u.email) === email);
   } catch (e) {
     console.error('portal-session: could not check staff emails', e.message);
     return false;
@@ -73,8 +73,8 @@ async function isStaffEmail(admin, email) {
 
 function bearer(event) {
   const h = (event.headers || {}).authorization || (event.headers || {}).Authorization || '';
-  const m = /^Bearer\s+(.+)$/i.test(h) ? h.replace(/^Bearer\s+/i, '').trim() : '';
-  return m;
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : '';
 }
 
 async function requirePortalSession(event) {
@@ -92,4 +92,4 @@ async function requirePortalSession(event) {
   return { admin, session, scope };
 }
 
-module.exports = { requirePortalSession, portalScope, bearer, tokenHash, newToken, codeHash, newCode, json, normEmail, SESSION_DAYS };
+module.exports = { requirePortalSession, portalScope, bearer, tokenHash, newToken, codeHash, newCode, json, normEmail, SESSION_DAYS, CODE_MINUTES };

@@ -9,6 +9,7 @@ const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
 const { sharedMailbox } = require('./mailboxes');
 const { buildMimeMessage } = require('./build-mime-message');
 const { plainTextToHtml } = require('./build-email-signature');
+const { CODE_MINUTES } = require('./portal-session');
 
 async function sendPortalCode(admin, { to, code }) {
   const [mailbox, { data: company }] = await Promise.all([
@@ -22,7 +23,7 @@ async function sendPortalCode(admin, { to, code }) {
     '',
     code,
     '',
-    'It works for 10 minutes. If you did not ask for it, you can ignore this email.',
+    `It works for ${CODE_MINUTES} minutes. If you did not ask for it, you can ignore this email.`,
     '',
     name + (company?.phone ? `, ${company.phone}` : ''),
   ].join('\n');

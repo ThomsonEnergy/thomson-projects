@@ -2,8 +2,8 @@
 // _shared/portal-session.js). Everything the client portal reads (backlog item 74), body { action, projectId }:
 //   overview  the lists: needs you, jobs, quotes, who the login is
 //   job       one job or quote: status, bookings, who is on site, shared photos and documents,
-//             invoices and variations (money only for an email on the client record)
-//   work      work so far on a do and charge job (money only): labour, materials, purchase orders
+//             invoices and variations (money only for an email on the client record), and on a
+//             do and charge job the work so far (labour, materials, purchase orders)
 // The queries and the whitelists are in _shared/portal-data.js. Reads only (the session's
 // last-seen time aside).
 
@@ -27,10 +27,6 @@ exports.handler = async (event) => {
     if (action === 'job') {
       const job = await D.portalProject(admin, scope, projectId);
       return job ? S.json(200, { ok: true, email: scope.email, job }) : S.json(404, { ok: false, error: 'That job is not on your account.' });
-    }
-    if (action === 'work') {
-      const work = await D.portalWork(admin, scope, projectId);
-      return work ? S.json(200, { ok: true, work }) : S.json(404, { ok: false, error: 'There is no work to show on that job.' });
     }
     return S.json(400, { ok: false, error: 'Unknown action' });
   } catch (err) {

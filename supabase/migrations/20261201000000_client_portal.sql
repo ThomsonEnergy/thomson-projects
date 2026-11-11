@@ -18,11 +18,12 @@ alter table public.project_documents add column if not exists client_visible boo
 create index if not exists project_photos_client_visible_idx on public.project_photos (project_id) where client_visible;
 create index if not exists project_documents_client_visible_idx on public.project_documents (project_id) where client_visible;
 
--- One row per code emailed. The code itself is never stored, only its hash.
+-- One row per code emailed (or per attempt for an email we do not know, code_hash null). The code
+-- itself is never stored, only its hash.
 create table if not exists public.portal_logins (
   id uuid primary key default gen_random_uuid(),
   email text not null,
-  code_hash text not null,
+  code_hash text,
   ip text,
   attempts integer not null default 0,
   expires_at timestamptz not null,

@@ -71,10 +71,10 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
   const holidaySet = new Set((holidays || []).map(h => h.holiday_date));
   // the invoice being edited does not count: its shifts and materials come back as lines to keep or drop
   const otherItems = (invItems || []).filter(i => !invoiceId || i.invoice_id !== invoiceId);
-  const invoiceOfEntry = {};
-  otherItems.forEach(i => (i.time_entry_ids || []).forEach(id => { invoiceOfEntry[id] = i.invoices?.invoice_number || ''; }));
-  const invoiceOfUsage = {};
-  otherItems.forEach(i => { if (i.job_material_usage_id) invoiceOfUsage[i.job_material_usage_id] = i.invoices?.invoice_number || ''; });
+  const invoiceOfEntry = new Map();
+  otherItems.forEach(i => (i.time_entry_ids || []).forEach(id => invoiceOfEntry.set(id, i.invoices?.invoice_number || '')));
+  const invoiceOfUsage = new Map();
+  otherItems.forEach(i => { if (i.job_material_usage_id) invoiceOfUsage.set(i.job_material_usage_id, i.invoices?.invoice_number || ''); });
 
   const byCentre = Object.fromEntries(centres.map(c => [c.id, { hours: 0, labourSell: 0, materialCost: 0, itemInvoiced: 0, labourLines: [], materialLines: [] }]));
   (entries || []).forEach(e => {
@@ -85,7 +85,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     const share = centreIds.length > 1 ? 1 / centreIds.length : 1;
     const rate = sellRateByProfile[e.staff_id] || 0;
     const profile = profileById[e.staff_id] || {};
-    const billed = Object.prototype.hasOwnProperty.call(invoiceOfEntry, e.id);
+    const billed = invoiceOfEntry.has(e.id);
     const shift = billed && !includeBilled ? null : shiftBands(e, holidaySet);
     (centreIds.length ? centreIds : [null]).forEach(cid => {
       const b = byCentre[centreOf(cid)];
@@ -108,7 +108,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
         bands,
         billable: e.billable !== false,
         invoiced: billed,
-        invoiceNumber: billed ? invoiceOfEntry[e.id] : null,
+        invoiceNumber: billed ? invoiceOfEntry.get(e.id) : null,
       });
     });
   });
@@ -118,7 +118,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
   // (greyed, tick to bill it) but out of the bulk total. Lines already on an invoice are left
   // out unless includeBilled.
   (usage || []).forEach(u => {
-    const billed = Object.prototype.hasOwnProperty.call(invoiceOfUsage, u.id);
+    const billed = invoiceOfUsage.has(u.id);
     if (billed && !includeBilled) return;
     const b = byCentre[centreOf(u.cost_centre_id)];
     const billable = u.billable !== false;
@@ -133,7 +133,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
       unitCost: r2(u.unit_cost),
       billable,
       invoiced: billed,
-      invoiceNumber: billed ? invoiceOfUsage[u.id] : null,
+      invoiceNumber: billed ? invoiceOfUsage.get(u.id) : null,
       createdAt: u.created_at,
     });
   });

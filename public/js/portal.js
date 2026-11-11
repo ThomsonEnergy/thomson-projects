@@ -51,7 +51,7 @@
       try {
         const r = await call('portal-login', { action: 'send', email });
         if (r.staff) { msg.innerHTML = `<div class="error-box">${esc(r.message)}</div>`; btn.disabled = false; btn.textContent = 'Send me a code'; return; }
-        showCode(email, r.message);
+        showCode(email, r.message, r.minutes);
       } catch (err) {
         msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
         btn.disabled = false; btn.textContent = 'Send me a code';
@@ -59,11 +59,11 @@
     });
   }
 
-  function showCode(email, message) {
+  function showCode(email, message, minutes) {
     main.innerHTML = `
       <div class="pl-login">
         <h1 style="font-size:22px; margin:0 0 6px;">Check your email</h1>
-        <p class="subtitle">${esc(message || '')} It works for 10 minutes.</p>
+        <p class="subtitle">${esc(message || '')} It works for ${esc(minutes || 10)} minutes.</p>
         <form id="pl-code-form" class="pl-code" style="margin-top:14px;">
           <label>6 digit code</label>
           <input type="text" id="pl-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" required />
@@ -104,13 +104,12 @@
   }
 
   // ----- the lists -----
-  const statusCls = (s) => /on site now/i.test(s) ? 'live' : /waiting on you|overdue|deposit to pay/i.test(s) ? 'warn' : '';
   const rowHtml = (r) => `
     <a class="pl-row ${r.open ? '' : 'done'}" href="/portal.html?job=${esc(r.id)}">
       <div class="ref">${esc(r.ref)}</div>
       <div class="name">${esc(r.name)}</div>
       ${r.site ? `<div class="site">${esc(r.site)}</div>` : ''}
-      <div class="status"><span class="pl-status ${statusCls(r.status)}">${esc(r.status)}</span></div>
+      <div class="status"><span class="pl-status ${esc(r.tone)}">${esc(r.status)}</span></div>
     </a>`;
   const listHtml = (rows, { empty, showDone }) => {
     const open = rows.filter((r) => r.open);
@@ -130,7 +129,7 @@
       ${d.needsYou.length ? `
         <h2 class="pl-h">Needs you</h2>
         <div class="pl-card">${d.needsYou.map((n) => `
-          <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? `<a class="secondary" style="padding:6px 12px; font-size:13px; text-decoration:none;" href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.action)}</a>` : ''}</div>`).join('')}</div>` : ''}
+          <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action) : ''}</div>`).join('')}</div>` : ''}
       <h2 class="pl-h">Jobs</h2>
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
       <h2 class="pl-h">Quotes</h2>
@@ -141,65 +140,49 @@
   // ----- one job -----
   const factHtml = (k, v) => v ? `<div class="pl-fact"><span class="k">${esc(k)}</span><span>${v}</span></div>` : '';
   const listNames = (a) => a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
+  const phoneLink = (c) => c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '';
+  const openLink = (url, label) => `<a class="secondary pl-btn" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+  const table = (headers, rows) => `<table class="pl-table"><thead><tr>${headers.map((h) => `<th${/^\$/.test(h) ? ' class="n"' : ''}>${esc(h.replace(/^\$/, ''))}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  const card = (title, body) => `<h2 class="pl-h">${esc(title)}</h2><div class="pl-card">${body}</div>`;
+  const bookingLine = (b) => `${esc(b.day)}${b.start ? `, ${esc(b.start)}${b.end ? ` to ${esc(b.end)}` : ''}` : ''}${b.who.length ? `, ${esc(listNames(b.who))}` : ''}`;
 
   async function showJob(id) {
     main.innerHTML = `<p class="subtitle">Loading...</p>`;
-    const { job, email } = await call('portal-read', { action: 'job', projectId: id });
+    const { job: d, email } = await call('portal-read', { action: 'job', projectId: id });
     header(email);
-    const d = job;
-    const bookingLine = (b) => `${esc(b.day)}${b.start ? `, ${esc(b.start)}${b.end ? ` to ${esc(b.end)}` : ''}` : ''}${b.who.length ? `, ${esc(listNames(b.who))}` : ''}`;
+    const contact = d.manager ? `${esc(d.manager)} at ${esc(d.company.name)}${d.company.phone ? `, ${phoneLink(d.company)}` : ''}` : (d.company.phone ? `${esc(d.company.name)}, ${phoneLink(d.company)}` : '');
+    const pictures = d.photos.filter((p) => !p.video);
+    const photoTile = (p) => `<div>${p.video
+      ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>`
+      : `<img src="${esc(p.url)}" data-i="${pictures.indexOf(p)}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`;
     main.innerHTML = `
       <a class="pl-back" href="/portal.html">&larr; All your jobs</a>
       <div class="pl-card">
         <div class="ref" style="font-size:13px; color:var(--muted); font-weight:700;">${esc(d.ref)}</div>
         <h1 style="font-size:20px; margin:2px 0 8px;">${esc(d.name)}</h1>
-        <div style="margin-bottom:8px;"><span class="pl-status ${statusCls(d.status)}">${esc(d.status)}</span></div>
+        <div style="margin-bottom:8px;"><span class="pl-status ${esc(d.tone)}">${esc(d.status)}</span></div>
         ${factHtml('Site', esc(d.site))}
-        ${factHtml('Your contact', d.manager ? `${esc(d.manager)} at ${esc(d.company.name)}${d.company.phone ? `, <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>` : ''}` : (d.company.phone ? `${esc(d.company.name)}, <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>` : ''))}
-        ${d.quoteUrl ? `<p style="margin:10px 0 0;"><a class="secondary" style="display:inline-block; padding:8px 14px; text-decoration:none;" href="${esc(d.quoteUrl)}" target="_blank" rel="noopener">Open your quote</a></p>` : ''}
+        ${factHtml('Your contact', contact)}
+        ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote')}</p>` : ''}
       </div>
-
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
-
-      ${d.kind === 'job' ? `
-        <h2 class="pl-h">Bookings</h2>
-        <div class="pl-card">
+      ${d.kind === 'job' ? card('Bookings', `
           ${d.bookings.length ? d.bookings.map((b) => `<div style="margin:4px 0;">${bookingLine(b)}</div>`).join('') : `<span class="pl-muted">Nothing booked yet. We will let you know when it is.</span>`}
-          ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}
-        </div>` : ''}
-
-      ${d.variations.length ? `
-        <h2 class="pl-h">Variations</h2>
-        <div class="pl-card">${d.variations.map((v) => `
-          <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? `<a class="secondary" style="padding:6px 12px; font-size:13px; text-decoration:none;" href="${esc(v.url)}" target="_blank" rel="noopener">Sign</a>` : ''}</div>`).join('')}</div>` : ''}
-
-      ${d.money && d.direct && d.kind === 'job' ? `
-        <h2 class="pl-h">Work so far</h2>
-        <div class="pl-card" id="pl-work"><p class="subtitle">Loading...</p></div>` : ''}
-
-      ${d.money ? `
-        <h2 class="pl-h">Invoices</h2>
-        <div class="pl-card">
-          ${d.invoices.length ? `<table class="pl-table"><thead><tr><th>Invoice</th><th>Status</th><th>Due</th><th class="n">Balance</th><th></th></tr></thead><tbody>${d.invoices.map((i) => `
+          ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
+      ${d.variations.length ? card('Variations', d.variations.map((v) => `
+          <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign') : ''}</div>`).join('')) : ''}
+      ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
+      ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
             <td><span class="pl-status ${i.status === 'overdue' ? 'warn' : ''}">${esc(i.label)}</span></td>
             <td>${esc(i.due)}</td><td class="n">${i.status === 'paid' ? '' : esc(money(i.balance))}</td>
-            <td><a href="${esc(i.url)}" target="_blank" rel="noopener">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`).join('')}</tbody></table>` : `<span class="pl-muted">No invoices yet.</span>`}
-        </div>` : ''}
-
-      <h2 class="pl-h">Photos</h2>
-      <div class="pl-card">
-        ${d.photos.length ? `<div class="pl-grid">${d.photos.map((p, i) => `<div>${p.video ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>` : `<img src="${esc(p.url)}" data-i="${i}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`}
-      </div>
-
-      <h2 class="pl-h">Documents</h2>
-      <div class="pl-card">
+            <td><a href="${esc(i.url)}" target="_blank" rel="noopener">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`)) : `<span class="pl-muted">No invoices yet.</span>`) : ''}
+      ${card('Photos', d.photos.length ? `<div class="pl-grid">${d.photos.map(photoTile).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`)}
+      ${card('Documents', `
         ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
-        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener">Open</a></div>` : ''}
-      </div>`;
-    const pictures = d.photos.filter((p) => !p.video);
-    main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, pictures.indexOf(d.photos[Number(img.dataset.i)]))));
-    if (d.money && d.direct && d.kind === 'job') showWork(id);
+        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener">Open</a></div>` : ''}`)}`;
+    main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, Number(img.dataset.i))));
+    if (d.hasWork) showWork(d.work);
   }
 
   function lightbox(photos, i) {
@@ -214,30 +197,26 @@
     document.body.appendChild(box);
   }
 
-  async function showWork(id) {
+  function showWork(work) {
     const el = document.getElementById('pl-work');
-    try {
-      const { work } = await call('portal-read', { action: 'work', projectId: id });
+    {
       const inv = (x) => x.invoiced ? `<span class="pl-muted">${esc(x.invoiceNumber || 'Invoiced')}</span>` : 'Not yet';
       el.innerHTML = `
         <div class="pl-big">${esc(money(work.notInvoiced))}</div>
         <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
         ${work.note ? `<p class="pl-muted">${esc(work.note)}</p>` : ''}
-        <h3 style="font-size:14px; margin:14px 0 4px;">Labour</h3>
-        ${work.labour.length ? `<table class="pl-table"><thead><tr><th>Day</th><th>Who</th><th>Hours</th><th class="n">Amount</th><th>Invoiced</th></tr></thead><tbody>${work.labour.map((l) => `
-          <tr><td>${esc(l.day)}<br><span class="pl-muted">${esc(l.start)} to ${esc(l.end)}</span></td><td>${esc(l.who)}</td><td>${esc(l.bands || `${l.hours} h`)}</td><td class="n">${esc(money(l.amount))}</td><td>${inv(l)}</td></tr>`).join('')}</tbody></table>
+        <h3>Labour</h3>
+        ${work.labour.length ? `${table(['Day', 'Who', 'Hours', '$Amount', 'Invoiced'], work.labour.map((l) => `
+          <tr><td>${esc(l.day)}<br><span class="pl-muted">${esc(l.start)} to ${esc(l.end)}</span></td><td>${esc(l.who)}</td><td>${esc(l.bands || `${l.hours} h`)}</td><td class="n">${esc(money(l.amount))}</td><td>${inv(l)}</td></tr>`))}
           <p class="pl-muted" style="margin:6px 0 0;">Hours at the Schedule of Rates: ${esc(work.rules.standardHours)} standard, after hours and weekends at the schedule's rates, minimum ${esc(work.rules.minimumHours)} hours a day per person on the invoice.</p>` : `<span class="pl-muted">No hours logged yet.</span>`}
-        <h3 style="font-size:14px; margin:14px 0 4px;">Materials used</h3>
-        ${work.materials.length ? `<table class="pl-table"><thead><tr><th>Item</th><th>Qty</th><th>From</th><th class="n">Amount</th><th>Invoiced</th></tr></thead><tbody>${work.materials.map((m) => `
-          <tr><td>${esc(m.description)}</td><td>${esc(m.quantity)}</td><td>${esc(m.from)}</td><td class="n">${esc(money(m.amount))}</td><td>${inv(m)}</td></tr>`).join('')}</tbody></table>` : `<span class="pl-muted">No materials yet.</span>`}
-        <h3 style="font-size:14px; margin:14px 0 4px;">Orders</h3>
+        <h3>Materials used</h3>
+        ${work.materials.length ? table(['Item', 'Qty', 'From', '$Amount', 'Invoiced'], work.materials.map((m) => `
+          <tr><td>${esc(m.description)}</td><td>${esc(m.quantity)}</td><td>${esc(m.from)}</td><td class="n">${esc(money(m.amount))}</td><td>${inv(m)}</td></tr>`)) : `<span class="pl-muted">No materials yet.</span>`}
+        <h3>Orders</h3>
         ${work.purchaseOrders.length ? work.purchaseOrders.map((po) => `
           <details style="margin:6px 0;"><summary style="cursor:pointer;"><strong>PO ${esc(po.number)}</strong> ${esc(po.supplier)}: ${esc(po.state)} <span class="pl-muted">(${esc(money(po.total))})</span></summary>
             <table class="pl-table" style="margin-top:6px;"><tbody>${po.lines.map((l) => `<tr><td>${esc(l.description)}</td><td>${esc(l.quantity)}</td><td>${l.received ? 'Picked up' : l.backordered ? `Back order${l.eta ? `, due ${esc(l.eta)}` : ''}` : 'Ordered'}</td><td class="n">${esc(money(l.amount))}</td></tr>`).join('')}</tbody></table>
           </details>`).join('') : `<span class="pl-muted">No orders on this job.</span>`}`;
-    } catch (err) {
-      if (err.message === 'login') return;
-      el.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
     }
   }
 
