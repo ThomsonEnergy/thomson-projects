@@ -39,6 +39,7 @@ exports.handler = async (event) => {
     if (action === 'event') {
       const kind = String(body.kind || '');
       if (!OPEN_KINDS.includes(kind)) return S.json(400, { ok: false, error: 'Unknown event' });
+      if (!(await D.scopedProject(admin, scope, projectId))) return S.json(404, { ok: false, error: 'That job is not on your account.' });
       await log(kind, { projectId, detail: String(body.detail || '').slice(0, 80) || null });
       return S.json(200, { ok: true });
     }

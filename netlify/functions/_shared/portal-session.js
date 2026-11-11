@@ -15,7 +15,8 @@
 //       main is true on the client's own email (it may let others in, PR 2). A client with
 //       portal_off_at set is left out of the scope (so a shut-out client sees nothing).
 //     contactJobIds: jobs where the email is a job contact (a builder's supervisor): that job only,
-//       and never money (invoices, hours, costs, rates).
+//       and never money (invoices, hours, costs, rates). A job of a client with the portal off is
+//       left out here too, whoever the contact is.
 //     staffUser: true when the email belongs to a staff login (refused: staff use the app).
 //   tokenHash(token), newToken(), codeHash(email, code), newCode()
 //   hashPassword(password), verifyPassword(password, hash), newPassword(): scrypt with a random salt
@@ -84,7 +85,7 @@ async function portalScope(admin, emailIn, { staffCheck = true } = {}) {
   const [{ data: own }, { data: ticked }, { data: jobContacts }, staffUser] = await Promise.all([
     admin.from('clients').select('id, name, portal_off_at').ilike('email', like),
     admin.from('client_contacts').select('client_id, clients(id, name, portal_off_at)').ilike('email', like).eq('portal_access', true),
-    admin.from('job_contacts').select('project_id').ilike('email', like),
+    admin.from('job_contacts').select('project_id, projects(clients(portal_off_at))').ilike('email', like),
     staffCheck ? isStaffEmail(admin, email) : Promise.resolve(false),
   ]);
   const byId = {};
@@ -95,7 +96,7 @@ async function portalScope(admin, emailIn, { staffCheck = true } = {}) {
     if (!byId[c.id]) byId[c.id] = { id: c.id, name: c.name, main: false, offAt: c.portal_off_at };
   });
   const clients = Object.values(byId).filter((c) => !c.offAt);
-  const contactJobIds = [...new Set((jobContacts || []).map((j) => j.project_id).filter(Boolean))];
+  const contactJobIds = [...new Set((jobContacts || []).filter((j) => j.project_id && !j.projects?.clients?.portal_off_at).map((j) => j.project_id))];
   return { email, clients, contactJobIds, staffUser };
 }
 

@@ -223,7 +223,7 @@
     function loadClientPortalJs() {
       return (clientPortalJs ||= new Promise((resolve, reject) => {
         const el = document.createElement('script');
-        el.src = '/js/clients-portal.js?v=2';
+        el.src = '/js/clients-portal.js?v=3';
         el.onload = resolve; el.onerror = () => reject(new Error('The portal card did not load.'));
         document.head.appendChild(el);
       }));
@@ -554,17 +554,6 @@
         if (contactErr) contactErrors.push(contactErr.message);
       }
       if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
-      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74).
-      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
-      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
-      if (newlyTicked.length) {
-        await loadClientPortalJs();
-        const results = await sendPortalLogins(newlyTicked);
-        const failed = results.filter(r => !r.ok && !/Already sent|own password/.test(r.message));
-        if (failed.length) showToast(`Saved. Portal login not sent to ${failed.map(f => f.email).join(', ')}: ${failed[0].message}`, { error: true, ms: 8000 });
-        else showToast(`Saved. Portal login emailed to ${newlyTicked.join(', ')}.`);
-      }
-
       // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
       // rows taken off the form deleted (their jobs keep the address text).
       const siteRows = [...document.querySelectorAll('.site-row')].map(row => ({
@@ -587,6 +576,25 @@
         if (error) siteErrors.push(/client_sites_client_address_uidx/.test(error.message) ? `"${st.address}" is already a site for this client.` : error.message);
       }
       if (siteErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a site did not: ${escapeHtml(siteErrors.join('; '))}</div>`; await loadClients(); return; }
+
+      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74).
+      // After the sites, and never in the way of the save: a failure is a toast, the client is saved.
+      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
+      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
+      if (newlyTicked.length) {
+        try {
+          await loadClientPortalJs();
+          const results = await sendPortalLogins(newlyTicked);
+          const sent = results.filter(r => r.sent).map(r => r.email);
+          const failed = results.filter(r => !r.ok);
+          const skipped = results.filter(r => r.ok && !r.sent);
+          if (failed.length) showToast(`Saved. Portal login not sent to ${failed.map(f => f.email).join(', ')}: ${failed[0].message}`, { error: true, ms: 8000 });
+          else if (sent.length) showToast(`Saved. Portal login emailed to ${sent.join(', ')}.`);
+          else if (skipped.length) showToast(`Saved. ${skipped[0].email}: ${skipped[0].message}`, { ms: 8000 });
+        } catch (err) {
+          showToast(`Saved. Portal login not sent: ${err.message}`, { error: true, ms: 8000 });
+        }
+      }
 
       await loadClients();
       document.querySelector('.settings-tab[data-panel="list"]').click();

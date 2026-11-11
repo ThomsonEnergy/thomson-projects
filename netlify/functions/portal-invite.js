@@ -4,7 +4,9 @@
 // welcome_sent_at. The Clients page calls it by itself for every contact newly ticked Portal and
 // for "Send login" on the card; the job's Contacts card has "Send portal login" on a contact with
 // an email. Body { email, resend }: an email that already had its welcome is only sent again
-// with resend true. The email must be one that can log in (on a client record or a job contact).
+// with resend true, and a client who has chosen their own password is never sent a new temporary
+// one (that would wipe their password; the login page's "Email me a code instead" is their way
+// back in). The email must be one that can log in (on a client record or a job contact).
 // Writes portal_accounts and activity_log.
 
 const { requireActiveUser } = require('./_shared/require-active-user');
@@ -26,7 +28,7 @@ exports.handler = async (event) => {
     if (!scope.clients.length && !scope.contactJobIds.length) return S.json(400, { ok: false, error: 'That email is not on a client record or a job yet. Save it first.' });
     const { data: existing } = await admin.from('portal_accounts').select('id, welcome_sent_at, must_change').eq('email', email).maybeSingle();
     if (existing && existing.welcome_sent_at && !body.resend) return S.json(200, { ok: true, sent: false, message: 'Already sent.' });
-    if (existing && !existing.must_change && !body.resend) return S.json(200, { ok: true, sent: false, message: 'They already have their own password.' });
+    if (existing && !existing.must_change) return S.json(200, { ok: true, sent: false, message: 'They already have their own password. If they have forgotten it, "Email me a code instead" on the login page gets them back in.' });
     const password = S.newPassword();
     const now = new Date().toISOString();
     const { error } = await admin.from('portal_accounts').upsert({ email, password_hash: S.hashPassword(password), must_change: true, welcome_sent_at: now, updated_at: now }, { onConflict: 'email' });

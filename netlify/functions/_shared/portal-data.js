@@ -6,6 +6,8 @@
 //   portalOverview(admin, scope) -> { clients, needsYou, jobs, quotes, company }
 //   portalProject(admin, scope, projectId) -> the job page (with `work` on a do and charge job the
 //     email may see money on), or null when it is not theirs
+//   scopedProject(admin, scope, projectId) -> the project row (money true or false), or null when
+//     it is not theirs: the check before an open is logged against a job
 //
 // Money (invoices, hours, prices, purchase orders, the Schedule of Rates) only goes to an email on
 // the client record (scope.clients). A job contact (scope.contactJobIds) sees the job's progress,
@@ -246,9 +248,13 @@ async function portalWork(admin, p) {
     jobActuals(admin, p.id, { includeBilled: true }),
     admin.from('purchase_orders').select('id, po_number, supplier_name, status, received, order_date, cost_centre_id, purchase_order_line_items(description, quantity, unit_cost, received, is_backordered, backorder_eta)').eq('project_id', p.id).neq('po_kind', 'tools').order('order_date', { ascending: false }),
   ]);
-  if (!actuals.ok) return { labour: [], materials: [], purchaseOrders: [], labourOpen: 0, materialsOpen: 0, notInvoiced: 0, note: actuals.error, rules: { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours }, agreement: null };
+  if (!actuals.ok) {
+    console.error('portal work not read for', projectRef(p), actuals.error);
+    return { labour: [], materials: [], purchaseOrders: [], labourOpen: 0, materialsOpen: 0, notInvoiced: 0, note: 'The work so far is not ready to show yet. Call us if you need it today.', rules: { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours }, agreement: null };
+  }
   const d = actuals.data;
   const bandLabel = (band) => band === 'standard' ? 'standard' : (RULES.bands[band]?.label || band);
+  const bandOrder = Object.keys(RULES.bands);
   const labour = [];
   d.centres.forEach((c) => c.labourLines.forEach((l) => {
     if (!l.billable && !l.invoiced) return;
@@ -258,12 +264,14 @@ async function portalWork(admin, p) {
       dateKey: l.dateKey, day: dayText(l.dateKey), who: firstName(l.staffName), staffId: l.staffId, start: l.start, end: l.end,
       hours: r2(l.hours), bands: parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', '),
       rate: r2(l.rate), amount: r2(amount), invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
+      // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
+      firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
     });
   }));
   labour.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
   // The minimum per person per day (the panel's applyMinimum in js/project-invoice-actuals.js): a
-  // short day not yet invoiced is rounded up on that person's first line of the day, so the figure
-  // here is the figure the invoice will carry.
+  // short day not yet invoiced is rounded up on that person's first line of the day, at the rate
+  // of that line's first band, so the figure here is the figure the invoice will carry.
   const min = Number(RULES.minimumHours) || 0;
   const byDay = new Map();
   labour.filter((l) => !l.invoiced).forEach((l) => {
@@ -273,11 +281,11 @@ async function portalWork(admin, p) {
   });
   byDay.forEach(({ total, first }) => {
     if (min && total > 0 && total < min) {
-      first.amount = r2(first.amount + (min - total) * first.rate);
+      first.amount = r2(first.amount + (min - total) * first.firstBandRate);
       first.bands = `${first.bands || `${first.hours} h`} (min. ${min} hrs)`;
     }
   });
-  labour.forEach((l) => { delete l.staffId; });
+  labour.forEach((l) => { delete l.staffId; delete l.firstBandRate; });
   const materials = [];
   d.centres.forEach((c) => c.materialLines.forEach((m) => {
     if (!m.billable && !m.invoiced) return;
@@ -305,4 +313,4 @@ async function portalWork(admin, p) {
   };
 }
 
-module.exports = { portalOverview, portalProject };
+module.exports = { portalOverview, portalProject, scopedProject };

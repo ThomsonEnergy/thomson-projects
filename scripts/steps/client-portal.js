@@ -19,7 +19,7 @@ module.exports = async (page, { base, shot }) => {
   // a wrong password is refused with the same words whoever you are
   await page.evaluate(() => localStorage.removeItem('te_portal_token'));
   await page.goto(`${base}/portal.html`);
-  await page.fill('#pl-email', 'nobody@example.test');
+  await page.fill('#pl-email', `nobody-${Date.now()}@example.test`); // a fresh email each run, so the 5 tries an hour lockout never trips
   await page.fill('#pl-password', 'wrong-password-1');
   await page.click('#pl-go');
   await page.waitForSelector('#pl-msg .error-box');

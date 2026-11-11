@@ -1,7 +1,7 @@
 // The client portal card on the Clients page (backlog item 74): who can log in (the client's own
 // email plus every contact with the Portal tick), when they were last in, what they have done in
 // the portal (portal_events, last 30 days, with Show more), "Send login" (portal-invite.js emails
-// a temporary password to anyone who can log in and has not had one), and "Portal off" for a
+// a temporary password to anyone who can log in and has not chosen their own password), and "Portal off" for a
 // client in dispute (a reason; every session of theirs ends at once because the server checks
 // portal_off_at on every call) with "Portal on" to let them back. sendPortalLogins(emails) is also
 // what the save button calls for contacts newly ticked. Writes clients.portal_off_at and
@@ -13,7 +13,9 @@ const PORTAL_EVENT_WORDS = {
   viewed_list: 'looked at their jobs', viewed_job: 'looked at', opened_quote: 'opened the quote on', opened_invoice: 'opened', opened_document: 'opened', opened_variation: 'opened', opened_rates: 'opened the Schedule of Rates',
 };
 
-// portal-invite.js with the staff member's token: { ok, sent, message } or { ok: false, error }
+// portal-invite.js with the staff member's token: { ok, sent, message } or { ok: false, error }.
+// sendPortalLogins gives one { email, ok, sent, message } per email: ok and sent (emailed), ok and
+// not sent (nothing to send, the message says why), or not ok (it failed).
 async function portalInvite(email, resend) {
   const { data: { session } } = await supabaseClient.auth.getSession();
   const res = await fetch('/.netlify/functions/portal-invite', {
@@ -28,8 +30,8 @@ async function sendPortalLogins(emails, { resend } = {}) {
   for (const email of [...new Set(emails.filter(Boolean))]) {
     try {
       const data = await portalInvite(email, resend);
-      results.push({ email, ok: data.ok && data.sent, message: data.error || data.message || '' });
-    } catch (err) { results.push({ email, ok: false, message: err.message }); }
+      results.push({ email, ok: !!data.ok, sent: !!(data.ok && data.sent), message: data.error || data.message || '' });
+    } catch (err) { results.push({ email, ok: false, sent: false, message: err.message }); }
   }
   return results;
 }
@@ -60,9 +62,10 @@ function renderClientPortal(client, { reopen } = {}) {
     btn.disabled = true; btn.textContent = 'Sending...';
     const results = await sendPortalLogins(logins, { resend: true });
     btn.disabled = false; btn.textContent = 'Send login';
-    const sent = results.filter((r) => r.ok).map((r) => r.email);
+    const sent = results.filter((r) => r.sent).map((r) => r.email);
+    const skipped = results.filter((r) => r.ok && !r.sent);
     const failed = results.filter((r) => !r.ok);
-    el.querySelector('#cp-msg').innerHTML = `${sent.length ? `<div class="success-box">Login emailed to ${escapeHtml(sent.join(', '))}.</div>` : ''}${failed.map((f) => `<div class="error-box">${escapeHtml(f.email)}: ${escapeHtml(f.message)}</div>`).join('')}`;
+    el.querySelector('#cp-msg').innerHTML = `${sent.length ? `<div class="success-box">Login emailed to ${escapeHtml(sent.join(', '))}.</div>` : ''}${skipped.map((s) => `<div class="subtitle" style="font-size:12px; margin-top:4px;">${escapeHtml(s.email)}: ${escapeHtml(s.message)}</div>`).join('')}${failed.map((f) => `<div class="error-box">${escapeHtml(f.email)}: ${escapeHtml(f.message)}</div>`).join('')}`;
   });
   el.querySelector('#cp-toggle').addEventListener('click', async () => {
     let fields;

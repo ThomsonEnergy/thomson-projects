@@ -27,6 +27,8 @@ const SAME_ANSWER = 'If that email is on a client record, a code is on its way.'
 const TOO_MANY_TRIES = 'Too many wrong tries. Ask for a new code.';
 const WRONG_PASSWORD = 'That email and password do not match. Try again, or choose "Email me a code instead".';
 
+// an unknown email still costs one scrypt, so the answer takes as long either way
+const NO_ACCOUNT_HASH = S.hashPassword(S.newToken());
 const ipOf = (event) => String((event.headers || {})['x-nf-client-connection-ip'] || (event.headers || {})['x-forwarded-for'] || '').split(',')[0].trim() || null;
 const hourAgo = () => new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
@@ -59,7 +61,7 @@ async function password(admin, event, email, pw, device) {
   const { count: wrong } = await admin.from('portal_logins').select('id', { count: 'exact', head: true }).eq('email', email).is('code_hash', null).eq('attempts', 1).gte('created_at', hourAgo());
   if ((wrong || 0) >= MAX_ATTEMPTS) return S.json(429, { ok: false, error: 'Too many wrong tries. Choose "Email me a code instead" to get back in.' });
   const { data: account } = await admin.from('portal_accounts').select('id, password_hash, must_change').eq('email', email).maybeSingle();
-  const ok = !!account && S.verifyPassword(pw, account.password_hash);
+  const ok = S.verifyPassword(pw, account ? account.password_hash : NO_ACCOUNT_HASH) && !!account;
   if (!ok) {
     await admin.from('portal_logins').insert({ email, code_hash: null, ip, attempts: 1, expires_at: new Date().toISOString(), used_at: new Date().toISOString() });
     return S.json(400, { ok: false, error: WRONG_PASSWORD });
@@ -116,8 +118,8 @@ async function verify(admin, email, codeIn, device) {
   if (!scope.clients.length && !scope.contactJobIds.length) return S.json(403, { ok: false, error: 'This email is not on a client record any more. Call us if that is wrong.' });
   await admin.from('portal_logins').update({ used_at: new Date().toISOString() }).eq('id', login.id);
   // a code login always ends in choosing a password (the account is made if it is their first time)
-  await admin.from('portal_accounts').upsert({ email, password_hash: S.hashPassword(S.newToken()), must_change: true, updated_at: new Date().toISOString() }, { onConflict: 'email', ignoreDuplicates: false });
-  await admin.from('portal_accounts').update({ must_change: true, updated_at: new Date().toISOString() }).eq('email', email);
+  const { error: accountErr } = await admin.from('portal_accounts').upsert({ email, password_hash: S.hashPassword(S.newToken()), must_change: true, updated_at: new Date().toISOString() }, { onConflict: 'email' });
+  if (accountErr) throw accountErr;
   return S.json(200, { ok: true, ...(await openSession(admin, scope, device, 'login_code')), mustChange: true });
 }
 
@@ -141,7 +143,9 @@ async function setPassword(event, pw) {
   const auth = await S.requirePortalSession(event);
   if (!auth) return S.json(401, { ok: false, error: 'Please log in again.' });
   if (pw.length < S.PASSWORD_MIN) return S.json(400, { ok: false, error: `Use at least ${S.PASSWORD_MIN} characters.` });
-  if (pw.toLowerCase().includes(auth.scope.email.split('@')[0].toLowerCase())) return S.json(400, { ok: false, error: 'Pick a password that is not part of your email.' });
+  // the part before the @, when it is long enough to mean anything (jo@ would refuse Majorca)
+  const local = auth.scope.email.split('@')[0].toLowerCase();
+  if (local.length >= 4 && pw.toLowerCase().includes(local)) return S.json(400, { ok: false, error: 'Pick a password that is not part of your email.' });
   const { error } = await auth.admin.from('portal_accounts').upsert({ email: auth.scope.email, password_hash: S.hashPassword(pw), must_change: false, updated_at: new Date().toISOString() }, { onConflict: 'email' });
   if (error) throw error;
   auth.log('set_password');
