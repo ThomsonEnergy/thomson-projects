@@ -6,7 +6,7 @@
 --    of panels, the four season factors, the share of clear days and what a dull day makes), with
 --    the years of records behind them and the address they were worked out for. Written by the
 --    server only (netlify/functions/site-sun.js).
---  * sun_climate: ten years of daily sun records boiled down, one row per half degree cell, so
+--  * sun_climate: ten years of daily sun records boiled down, one row per one degree cell, so
 --    an area is fetched from NASA's POWER service once. Staff can read it; only the server
 --    writes it (no insert, update or delete policy).
 --  * get_quote_by_token also returns site_sun, so the client's proposal runs on the same sun

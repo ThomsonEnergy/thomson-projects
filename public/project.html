@@ -3534,7 +3534,7 @@
           Object.assign(project, fields);
           setJobTitle(project);
           showToast('Quote and client saved.');
-          if (typeof ensureSiteSun === 'function') ensureSiteSun(); // a new address gets its own sun figures
+          if (typeof ensureSiteSun === 'function') ensureSiteSun(); // a changed address gets its own sun figures
         } catch (err) {
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally { btn.disabled = false; btn.textContent = 'Save quote and client'; }

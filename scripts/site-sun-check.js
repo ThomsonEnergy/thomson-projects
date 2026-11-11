@@ -37,7 +37,7 @@ function madeUpYears({ mean, swing, dull, dullAt }) {
 const answer = (series, units) => ({ properties: { parameter: { ALLSKY_SFC_SW_DWN: series } }, parameters: { ALLSKY_SFC_SW_DWN: { units } } });
 
 // 1. Where a place is filed.
-say(sunCell(-33.87, 151.21) === '-34.0,151.0' && sunCell(-28.26, 153.5) === '-28.5,153.5', 'cell: a place is filed to the nearest half degree');
+say(sunCell(-33.87, 151.21) === '-33.5,151.5' && sunCell(-28.26, 153.5) === '-28.5,153.5' && sunCell(-28.99, 153.01) === sunCell(-28.01, 153.99), 'cell: a place is filed under the one degree cell it sits in');
 
 // 2. Reading the service's answer.
 const series = madeUpYears({ mean: 4.6, swing: 0.3, dull: 0.2, dullAt: 0.35 });
@@ -47,8 +47,10 @@ const inMj = Object.fromEntries(Object.entries(series).map(([d, v]) => [d, v * 3
 say(near(summariseSun(parsePower(answer(inMj, 'MJ/m^2/day'))).psh, summariseSun(days).psh, 0.001), 'read: an answer in MJ is turned into kWh');
 const withGaps = { ...series, 20240101: -999, 20240102: -999 };
 say(parsePower(answer(withGaps, 'kW-hr/m^2/day')).length === 3651, 'read: missing days are left out, not counted as dark');
+say(parsePower(answer({ ...series, 20240103: null, 20240104: '' }, 'kW-hr/m^2/day')).length === 3651, 'read: a blank day is missing too, not a dark day');
 say(throws(() => parsePower({ properties: {} })), 'read: an answer in another shape is refused');
-say(throws(() => parsePower(answer(Object.fromEntries(Object.entries(series).slice(0, 200)), 'kW-hr/m^2/day'))), 'read: under a year of days is refused');
+say(throws(() => parsePower(answer(Object.fromEntries(Object.entries(series).slice(0, 366)), 'kW-hr/m^2/day'))), 'read: one year where ten were asked for is refused');
+say(throws(() => parsePower(answer(Object.fromEntries(Object.entries(series).filter(([d]) => !/^....0[678]/.test(d))), 'kW-hr/m^2/day'))), 'read: ten years with the winters missing are refused');
 say(throws(() => parsePower(answer(Object.fromEntries(Object.entries(series).map(([d, v]) => [d, v * 100])), 'kW-hr/m^2/day'))), 'read: figures that cannot be sun are refused');
 
 // 3. Boiling ten years down.
@@ -58,8 +60,8 @@ say(near(sum.dullShare, 0.2, 0.02) && near(sum.dullOutput, 0.35, 0.05), 'sum: du
 say(near(sum.seasons.reduce((t, v) => t + v, 0) / 4, 1, 0.01) && sum.seasons[0] > sum.seasons[1] && sum.seasons[1] > sum.seasons[2] && sum.seasons[3] > sum.seasons[2], 'sum: the seasons average to the year, summer most and winter least', sum.seasons.join(', '));
 
 // 4. The figures a quote gets.
-const sydney = { ...sum, psh: 4.6, years: '2015 to 2024', cell: '-34.0,151.0' };
-const brisbane = { ...sum, psh: 5.2, seasons: [1.2, 1.0, 0.8, 1.0], years: '2015 to 2024', cell: '-27.5,153.0' };
+const sydney = { ...sum, psh: 4.6, years: '2015 to 2024', cell: '-33.5,151.5' };
+const brisbane = { ...sum, psh: 5.2, seasons: [1.2, 1.0, 0.8, 1.0], years: '2015 to 2024', cell: '-27.5,153.5' };
 const at = (psh, more) => siteSunFrom({ ...sydney, psh, ...more }, sydney, brisbane);
 say(at(4.6).yield_per_kw === 3.9 && siteSunFrom(brisbane, sydney, brisbane).yield_per_kw === 4.2, 'quote: Sydney and Brisbane come out at their published 3.9 and 4.2');
 say(at(4.9).yield_per_kw > 3.9 && at(4.9).yield_per_kw < 4.2, 'quote: a site with sun between the two lands between them', `${at(4.9).yield_per_kw}`);
