@@ -12,8 +12,12 @@
 // the same way: the estimate's normal season spread is taken as right for Sydney and shifted by
 // how the site's seasons differ from Sydney's in the records.
 //
-// The records are an average over a cell about 100 km across, not one roof: an area has fewer
-// very dull days than a single roof does, so the clear day count can read a little high.
+// The records are an average over a cell about 100 km across, not one roof, and an area has far
+// fewer dull days than a single roof does. The first live run (12 Nov 2026, the Northern Rivers
+// cell) counted 1 dull day in 10 where the estimate assumes 3, which would have lifted every
+// battery quote's saving. So the dull day figures (clear_share, overcast_output) are still worked
+// out and kept with the rest, for the record, but the estimate does not use them: it keeps its own
+// clear and dull days (solar-roi.js roiSiteSun). The yearly figure and the seasons are used.
 
 const fetch = require('node-fetch');
 const { ROI_ASSUMPTIONS } = require('../../../public/js/solar-roi.js');
