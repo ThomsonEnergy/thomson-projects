@@ -16,7 +16,7 @@
 const { gmailRequest, gmailUploadSend, GMAIL_MAILBOX } = require('./google-client');
 const { sharedMailbox } = require('./mailboxes');
 const { buildMimeMessage, buildRfc822 } = require('./build-mime-message');
-const { signatureForUser, plainTextToHtml, plainTextWithoutButtons } = require('./build-email-signature');
+const { signatureForUser, plainTextToHtml, plainTextWithoutButtons, withoutSignOff } = require('./build-email-signature');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KINDS = ['materials_quote', 'client', 'supplier', 'other'];
@@ -26,8 +26,10 @@ async function sendRecordedEmail(admin, opts) {
   const { mailbox, fromName, fromAddress, senderId, signature, to, cc, subject, bodyText, thread: threadIn, lastMessage, tagProjectId, tagKind } = opts;
   const attachments = opts.attachments || [];
   if (!mailbox || !to || !subject || !bodyText) throw new Error('to, subject and bodyText are required');
-  const fullBody = `${plainTextWithoutButtons(bodyText)}\n\n${signature.text}`;
-  const fullHtml = `${plainTextToHtml(bodyText)}${signature.html}`;
+  // a sign off at the end of the reply goes: the signature adds "Kind regards," and the name
+  const body = withoutSignOff(bodyText, fromName);
+  const fullBody = `${plainTextWithoutButtons(body)}\n\n${signature.text}`;
+  const fullHtml = `${plainTextToHtml(body)}${signature.html}`;
   let thread = threadIn || null;
   const finalSubject = thread && !/^re:/i.test(subject) ? `Re: ${subject}` : subject;
   const mail = {
