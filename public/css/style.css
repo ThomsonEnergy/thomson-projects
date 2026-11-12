@@ -779,62 +779,11 @@ html[data-theme="navy"] .success-box {
   .settings-tab { white-space: nowrap; }
 }
 
-/* Job page (item 77): the header and tabs stay put; under them the tab in the middle and
-   the Activity log on the right, each scrolling on its own. On Summary a left column holds
-   the clock-in card, key people and Tasks (on a phone they stay first, as before). */
-.job-wrap > #content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.job-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 20px; flex-shrink: 0; }
-.job-head-main { flex: 1 1 420px; min-width: 0; }
-.job-head-main .subtitle { margin-bottom: 4px; }
-.job-head-side { flex: 0 1 600px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-bottom: 8px; }
-.job-head-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.job-head-btns:empty { display: none; }
-.job-head #job-search-wrap { width: 100%; margin-bottom: 0; }
-.job-head #job-search-results { position: absolute; left: 0; right: 0; top: 100%; z-index: 30; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3); }
-#job-tabs { flex-shrink: 0; }
-.job-tab-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; }
-.job-tab-layout:has(#panel-summary.active):has(> .job-side) { grid-template-columns: 320px minmax(0, 1fr) 320px; }
-.job-side { display: none; }
-.job-tab-layout:has(#panel-summary.active) > .job-side { display: block; }
-.job-side, .job-tab-main, .job-activity-sidebar { min-width: 0; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
-.job-activity-sidebar { padding-bottom: 72px; }
-.job-side .card { margin-bottom: 12px; }
-.job-activity-sidebar .card { margin-bottom: 0; }
-/* Activity log: fits the screen and scrolls inside its own box (on the job page the column scrolls) */
+/* Activity log: fits the screen and scrolls inside its own box */
 .activity-log-scroll { max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; }
-.job-activity-sidebar .activity-log-scroll { max-height: none; overflow: visible; }
 .activity-entry { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .activity-entry .subtitle { font-size: 12px; margin: 2px 0 0; }
-/* The quote's five steps: a rail on the left that stays while the steps scroll */
-#panel-quote.active { display: grid; grid-template-columns: 172px minmax(0, 1fr); grid-template-rows: repeat(6, auto); column-gap: 12px; align-items: start; }
-#panel-quote > * { grid-column: 2; }
-#panel-quote > .card:first-child { grid-column: 1; grid-row: 1 / -1; position: sticky; top: 0; padding: 8px; }
-#quote-steps-bar { flex-direction: column; }
-#quote-steps-bar .qstep-link { justify-content: flex-start; }
-.qs-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; margin-top: 14px; }
-@media (max-width: 1365px) {
-  .job-tab-layout { grid-template-columns: minmax(0, 1fr) 280px; }
-  .job-tab-layout:has(#panel-summary.active):has(> .job-side) { grid-template-columns: 280px minmax(0, 1fr) 280px; }
-}
-@media (max-width: 900px) {
-  .job-wrap > #content, .job-tab-layout { display: block; }
-  .job-side, .job-tab-main, .job-activity-sidebar { overflow: visible; padding-bottom: 0; }
-  .job-head-side { flex-basis: 100%; align-items: stretch; }
-  .job-head-btns { justify-content: flex-start; }
-  .activity-log-scroll, .job-activity-sidebar .activity-log-scroll { max-height: 60vh; overflow-y: auto; }
-  #panel-quote.active { display: block; }
-  #panel-quote > .card:first-child { position: static; padding: 12px 16px; }
-  #quote-steps-bar { flex-direction: row; }
-  .qs-pair { grid-template-columns: 1fr; }
-}
-
-/* Job tab cards sit side by side: 2 across in the middle column on a laptop, 1 on a phone.
-   Stat rows and other grids take the full width. */
-.settings-panel.active.job-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; align-items: start; margin-bottom: 12px; }
-.job-card-grid > * { min-width: 0; }
-.job-card-grid > :empty { display: none; }
-.job-card-grid > .card, .job-card-grid > div > .card { margin: 0 !important; }
-.job-card-grid > .grid { grid-column: 1 / -1; }
+@media (max-width: 900px) { .activity-log-scroll { max-height: 60vh; } }
 
 .theme-options {
   display: grid;
