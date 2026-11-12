@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 13 Nov 2026
 
+- Owner's numbering and approval rules for item 81 (13 Nov 2026): the request number is RFQ plus the quote number (RFQ1017), shared by every supplier asked; a Supplier quotes tab lists each supplier's quote with Approve and Deny; Approve issues a new PO to that supplier with the RFQ on it, several quotes from one supplier approved the same day go on one PO, different days separate POs. Detail: `docs/IDEAS_BACKLOG.md` item 81.
 - Planned (waiting on yes): item 81, ask suppliers for prices from a quote (RFQ1001, an email with a request PDF, not an order), the supplier's quote filed on the job by itself when it comes back on that conversation and its prices read onto the lines, Convert to PO on the job once the client approves. With it, part A as a bug fix into `main`: any email sent from a quote's Emails tab moved it to Quote Sent; now only an email that carries the quote PDF does. Detail: `docs/IDEAS_BACKLOG.md` item 81.
 
 ## 12 Nov 2026
