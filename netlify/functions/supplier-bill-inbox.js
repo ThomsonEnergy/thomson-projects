@@ -2,12 +2,18 @@
 // Body: { action, id, ... } - the buttons on the Emailed bills page (supplier-bills.html).
 // Pricing roles only (the same people who can save supplier bills).
 //
+//   credit_plan   { id, po_id }         a credit note: what saving it against that PO does to each line (shown before Save)
 //   save          { id, po_id, amount } save the bill against that PO (po_id null = no PO); amount is the
-//                                      bill total the person has confirmed (inc GST, as on the bill)
+//                                      bill total the person confirmed. A credit note (document_type credit_note)
+//                                      saves through supplier_credit_note_save instead, with { overrides: { index: goods_returned } }.
+//                                      bill total the person has confirmed (inc GST, as on the bill).
+//                                      Also the one tap on a PO page ("This bill is for PO2009", js/po-bills-match.js).
+//                                      A packing slip (document_type delivery_docket) is refused: nothing to pay.
 //   set_supplier  { id, supplier_id }  supplier picked by hand: match the POs again
 //   mark_saved    { id, bill_id }      saved through the full review screen instead
 //   not_a_bill    { id }               not a bill (statement, remittance, spam): put aside
 //   reopen        { id }               bring a put-aside or duplicate one back to check
+//   is_a_bill     { id }               a file the reader called a packing slip is a bill after all: matched again as an invoice
 //   retry         { id }               read the file again (after a failure)
 //   delete        { id }               a duplicate or something that is not a bill: hide it for good (the row
 //                                      stays as 'deleted' so the 30-day Gmail search does not bring it back;
@@ -19,7 +25,7 @@
 //                                      never shows in Pay bills due.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { analyse, saveInboxItemAsBill, startSupplierBillProcessing } = require('./_shared/supplier-bill-intake');
+const { analyse, saveInboxItemAsBill, saveInboxItemAsCredit, creditLinesPlan, fileDocketsWithBill, startSupplierBillProcessing } = require('./_shared/supplier-bill-intake');
 const { FINANCE_ROLES } = require('./_shared/require-finance-role');
 const { sydneyToday, isCalendarDate } = require('./_shared/bill-check');
 
@@ -32,7 +38,7 @@ exports.handler = async (event) => {
   const { supabaseAdmin, user, role } = auth;
 
   try {
-    const { action, id, po_id: poId, supplier_id: supplierId, bill_id: billId, amount, paid_on: paidOnRaw, reference: referenceRaw } = JSON.parse(event.body || '{}');
+    const { action, id, po_id: poId, supplier_id: supplierId, bill_id: billId, amount, paid_on: paidOnRaw, reference: referenceRaw, overrides } = JSON.parse(event.body || '{}');
     if (!id) return json(400, { ok: false, error: 'id is required' });
     const { data: item } = await supabaseAdmin.from('supplier_bill_inbox').select('*').eq('id', id).maybeSingle();
     if (!item) return json(404, { ok: false, error: 'That emailed bill was not found.' });
@@ -43,8 +49,31 @@ exports.handler = async (event) => {
       // the total the reader found is never saved unseen: the person confirms (or corrects) it first
       const confirmedTotal = Number(amount);
       if (!(confirmedTotal > 0)) return json(400, { ok: false, error: 'Confirm the bill total first.' });
-      const newBillId = await saveInboxItemAsBill(supabaseAdmin, id, { poId: poId || null, userId: user.id, amount: confirmedTotal });
+      const isCredit = ((item.extracted || {}).document_type || 'invoice') === 'credit_note';
+      const newBillId = isCredit
+        ? await saveInboxItemAsCredit(supabaseAdmin, id, { poId: poId || null, userId: user.id, amount: confirmedTotal, overrides: overrides && typeof overrides === 'object' ? overrides : {} })
+        : await saveInboxItemAsBill(supabaseAdmin, id, { poId: poId || null, userId: user.id, amount: confirmedTotal });
       return json(200, { ok: true, bill_id: newBillId });
+    }
+
+    if (action === 'credit_plan') {
+      // what saving this credit note against that PO will do to each line (the card shows it before Save)
+      if (((item.extracted || {}).document_type || 'invoice') !== 'credit_note') return json(400, { ok: false, error: 'Not a credit note.' });
+      let poLines = [];
+      if (poId) {
+        const { data: po } = await supabaseAdmin.from('purchase_orders').select('id, supplier_id, purchase_order_line_items(id, material_id, description, quantity, unit_cost)').eq('id', poId).maybeSingle();
+        poLines = po?.purchase_order_line_items || [];
+        const matIds = [...new Set(poLines.map(pl => pl.material_id).filter(Boolean))];
+        if (matIds.length) {
+          const [{ data: mats }, { data: links }] = await Promise.all([
+            supabaseAdmin.from('materials').select('id, part_number').in('id', matIds),
+            supabaseAdmin.from('material_supplier_links').select('material_id, part_number').eq('supplier_id', po.supplier_id).in('material_id', matIds),
+          ]);
+          const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || null;
+          poLines.forEach(pl => { pl.part_numbers = [...(mats || []).filter(m => m.id === pl.material_id).map(m => m.part_number), ...(links || []).filter(k => k.material_id === pl.material_id).map(k => k.part_number)].map(norm).filter(Boolean); });
+        }
+      }
+      return json(200, { ok: true, lines: creditLinesPlan(item.extracted || {}, poLines) });
     }
 
     if (action === 'set_supplier') {
@@ -60,11 +89,21 @@ exports.handler = async (event) => {
       const { data: bill } = await supabaseAdmin.from('supplier_bills').select('id, supplier_id, po_id').eq('id', billId).maybeSingle();
       if (!bill) return json(404, { ok: false, error: 'That bill was not found.' });
       await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'saved', bill_id: bill.id, supplier_id: bill.supplier_id, po_id: bill.po_id, ...resolved }).eq('id', id);
+      await fileDocketsWithBill(supabaseAdmin, bill.id, { gmailMessageId: item.gmail_message_id }); // the packing slip from the same email
       return json(200, { ok: true });
     }
 
     if (action === 'not_a_bill') {
       await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'not_a_bill', ...resolved }).eq('id', id);
+      return json(200, { ok: true });
+    }
+
+    if (action === 'is_a_bill') {
+      // the reader called it a packing slip and a person says it is a bill: read as an invoice from here on
+      if (item.bill_id) return json(400, { ok: false, error: 'That packing slip is filed with a saved bill.' });
+      const ex = { ...(item.extracted || {}), document_type: 'invoice' };
+      const result = await analyse(supabaseAdmin, { ...item, extracted: ex }, { supplierId: item.supplier_id || null });
+      await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted: result.extracted || ex, status: 'to_check', duplicate_of_bill_id: null, resolved_by: null, resolved_at: null }).eq('id', id);
       return json(200, { ok: true });
     }
 
@@ -99,6 +138,7 @@ exports.handler = async (event) => {
     if (action === 'save_paid') {
       // Record as paid is Admin and Finance only (same as the Suppliers page)
       if (!FINANCE_ROLES.includes(role)) return json(403, { ok: false, error: 'Only Admin or Finance can record a bill as paid.' });
+      if (((item.extracted || {}).document_type || 'invoice') === 'credit_note') return json(400, { ok: false, error: 'A credit note is saved with Save credit note; Refunded on the supplier page records the money coming back.' });
       const paidOn = String(paidOnRaw || '').trim();
       if (!isCalendarDate(paidOn)) return json(400, { ok: false, error: 'Enter the paid date as YYYY-MM-DD.' });
       if (paidOn > sydneyToday()) return json(400, { ok: false, error: 'The paid date cannot be in the future.' });
