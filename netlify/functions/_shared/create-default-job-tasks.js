@@ -21,7 +21,7 @@
 // yet), falls back to the plain rule labels rather than blocking job
 // creation - a less polished task list is far better than none at all.
 
-const { evaluate } = require('./solar-compliance-rules');
+const { evaluate, accreditationFlags } = require('./solar-compliance-rules');
 const { wordSolarTasks } = require('./word-solar-tasks');
 const { tasksFor } = require('./template-job-tasks');
 const { quoteHasBattery } = require('../../../public/js/template-questions.js');
@@ -82,10 +82,7 @@ async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
     equipment,
     solarCentres,
     quotedTotal: (newStages || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0),
-    hasAccreditedStaff:
-      licenceNames.some((n) => /saa|accreditation/i.test(n)) &&
-      licenceNames.some((n) => /electrical/i.test(n)),
-    hasBatteryAccreditedStaff: licenceNames.some((n) => /saa|accreditation/i.test(n) && /batter/i.test(n)),
+    ...accreditationFlags(licenceNames),
     hasBatteryAssetSerial: false, // a fresh job has nothing installed yet
     hasBatteryLocationPhoto: false,
     hasComplianceCertDoc: false, // legacy folder check; a fresh job has no CCEW yet, so the Upload the CCEW task is always created
