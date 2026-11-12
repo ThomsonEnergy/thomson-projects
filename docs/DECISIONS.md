@@ -2,8 +2,13 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 13 Nov 2026
+
+- Planned (waiting on yes): item 81, ask suppliers for prices from a quote (RFQ1001, an email with a request PDF, not an order), the supplier's quote filed on the job by itself when it comes back on that conversation and its prices read onto the lines, Convert to PO on the job once the client approves. With it, part A as a bug fix into `main`: any email sent from a quote's Emails tab moved it to Quote Sent; now only an email that carries the quote PDF does. Detail: `docs/IDEAS_BACKLOG.md` item 81.
+
 ## 12 Nov 2026
 
+- Planned (waiting on yes): item 77 as a whole-site build, the owner's "fix all the pages" of 12 Nov 2026. Four PRs in one chat into `staging`: (1) the frame and practical sizes in `style.css` for every page at once, (2) the job page in columns (Tasks, summary, Activity log; the quote steps as a rail), (3) Tasks, Leads, Timesheets, Stock, My Day, Home, Clients, Settings, Schedule, Pipeline, (4) the rest. Client, public and print pages left alone. No migration. Detail: `docs/IDEAS_BACKLOG.md` item 77.
 - Bug fix, LIVE (owner: "layout is in but it's not loading any emails", straight into `main`): the new Inbox list loader read the search text one line before it was defined, so every list threw and stayed on Loading. One line moved. Found by the owner on the live site minutes after the release: the cloud session could not open staging, so nobody had loaded a real inbox before release. Lesson in `docs/IDEAS_BACKLOG.md` item 77.
 - Released (Thursday 12 Nov, evening Sydney, the owner's "Release"): item 76, the Inbox on the whole screen, is LIVE. Release PR 401, `main` at `b48eb0a`, no migration. The Kind regards fix (item 78, PR 394) and PR 400 (bill reader photo size, scope page pictures) were on `main` already. Detail: `docs/PROJECT_SPEC.md` A18.
 - Built, on its way to `staging` (owner's yes, no migration): item 76, the Inbox on the whole screen. Gmail's three columns (Compose and the folders with Drafts as a folder, a search over the whole inbox, one-line rows with Done and Read on hover) and Outlook's reading pane (subject and actions stuck at the top, the reply box under them, the newest email open, older ones folded). The first page under the whole-screen rule (item 77). Detail: `docs/PROJECT_SPEC.md` A18.
