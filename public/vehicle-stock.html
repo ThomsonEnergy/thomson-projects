@@ -26,7 +26,7 @@
     </div>
   </div>
 
-  <div class="wrap" id="content">
+  <div class="wrap fill" id="content">
     <p class="subtitle">Loading...</p>
   </div>
 
@@ -70,9 +70,9 @@
     function render(vehicle, stockRows, pos, drums, myRole) {
       const vehLabel = vehicle.vehicle_name || vehicle.rego;
       document.getElementById('content').innerHTML = `
-        <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
+        <div class="page-head">
           <div>
+            <a href="/fleet.html" class="link-quiet">&larr; Fleet</a>
             <h1>${escapeHtml(vehicle.vehicle_name || vehicle.rego)}</h1>
             <p class="subtitle">${escapeHtml(vehicle.rego)}${vehicle.asset_number ? ' &middot; Asset ' + escapeHtml(vehicle.asset_number) : ''}</p>
           </div>
@@ -84,6 +84,8 @@
           </div>
         </div>
 
+        <div class="page-cols">
+        <div class="page-col">
         <div class="card">
           <h2>Current stock</h2>
           ${!stockRows.length ? '<p class="subtitle">No stock assigned to this vehicle yet.</p>' : `
@@ -99,12 +101,16 @@
               </tbody>
             </table>`}
         </div>
+        </div>
 
+        <div class="page-col">
         <div class="card">
           <h2>Purchase orders for this vehicle</h2>
           <div id="veh-po-list">
             ${!pos.length ? '<p class="subtitle">None open. Closed ones are on the <a href="/purchase-orders.html" class="link-quiet">Purchase Orders</a> page.</p>' : pos.map(po => renderPoRow(po, { showWhere: false })).join('') + '<p class="subtitle" style="font-size:13px;">Tap a PO to receive gear into this vehicle.</p>'}
           </div>
+        </div>
+        </div>
         </div>
       `;
 

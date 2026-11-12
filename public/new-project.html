@@ -26,84 +26,91 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1 id="page-title">New quote</h1>
-    <p class="subtitle">Pick the proposal, enter the client, press Create. The quote then takes you through the pre-quote information, a site visit if needed, pricing, the scope of works and sending, one step at a time.</p>
-
-    <div class="card">
-      <h2>Proposal</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Sets the questions asked, the rules checked before sending and how the proposal looks to the client.</p>
-      <div class="grid cols-3" id="template-picker">
-        <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
-        <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
-        <button type="button" class="secondary template-option" data-template="battery">Battery Proposal</button>
-        <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
-        <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
-        <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1 id="page-title">New quote</h1>
+        <p class="subtitle">Pick the proposal, enter the client, press Create. The quote then takes you through the pre-quote information, a site visit if needed, pricing, the scope of works and sending, one step at a time.</p>
       </div>
-      <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
-      <p class="subtitle" style="margin-top:6px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Pipeline board instead.</p>
     </div>
-
-    <div class="card">
-      <h2>Project &amp; client</h2>
-      <label>Project name <span class="req" aria-hidden="true">*</span></label>
-      <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
-
-      <label>Client</label>
-      <div style="display:flex; gap:8px; align-items:start;">
-        <div style="flex:1; position:relative;">
-          <input id="client-search-input" placeholder="Search existing clients by name, email, or phone..." autocomplete="off" />
-          <div id="client-search-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-top:4px; max-height:220px; overflow-y:auto; z-index:10;"></div>
-        </div>
-        <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
-      </div>
-      <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
-
-      <div class="grid cols-3" style="margin-top:14px;">
-        <div>
-          <label style="margin-top:0">Client name <span class="req" aria-hidden="true">*</span></label>
-          <input id="p-client" required />
-        </div>
-        <div>
-          <label style="margin-top:0">Client email</label>
-          <input id="p-email" type="email" placeholder="for sending the quote" />
-        </div>
-        <div>
-          <label style="margin-top:0">Client phone</label>
-          <input id="p-phone" type="tel" autocomplete="tel" />
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <h2>Proposal</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Sets the questions asked, the rules checked before sending and how the proposal looks to the client.</p>
+          <div class="grid cols-3" id="template-picker">
+            <button type="button" class="secondary template-option" data-template="new_build">New Build</button>
+            <button type="button" class="secondary template-option" data-template="solar">Solar Proposal</button>
+            <button type="button" class="secondary template-option" data-template="battery">Battery Proposal</button>
+            <button type="button" class="secondary template-option" data-template="quick_estimate">Quick Estimate</button>
+            <button type="button" class="secondary template-option" data-template="renovation">Renovation</button>
+            <button type="button" class="secondary template-option" data-template="service_work">Service Work</button>
+          </div>
+          <p class="subtitle" id="template-note" style="margin:12px 0 0;"></p>
+          <p class="subtitle" style="margin-top:6px;">Need to skip the quote entirely? Use "+ New job (no quote)" on the Pipeline board instead.</p>
         </div>
       </div>
-      <div class="grid cols-3">
-        <div style="grid-column: span 2;">
-          <label>Site address</label>
-          <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
-          <input id="p-address" placeholder="Where the work is done" />
-          <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
-        </div>
-        <div>
-          <label>Payment terms</label>
-          <select id="p-payment-terms">
-            <option value="cod">COD</option>
-            <option value="net_7">Net 7 days</option>
-            <option value="net_14">Net 14 days</option>
-            <option value="net_30">Net 30 days</option>
-          </select>
+      <div class="page-col" style="flex-grow:1.6">
+        <div class="card">
+          <h2>Project &amp; client</h2>
+          <label>Project name <span class="req" aria-hidden="true">*</span></label>
+          <input id="p-name" placeholder="e.g. 14 Miller St - New Build" required />
+
+          <label>Client</label>
+          <div style="display:flex; gap:8px; align-items:start;">
+            <div style="flex:1; position:relative;">
+              <input id="client-search-input" placeholder="Search existing clients by name, email, or phone..." autocomplete="off" />
+              <div id="client-search-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-top:4px; max-height:220px; overflow-y:auto; z-index:10;"></div>
+            </div>
+            <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
+          </div>
+          <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
+
+          <div class="grid cols-3" style="margin-top:14px;">
+            <div>
+              <label style="margin-top:0">Client name <span class="req" aria-hidden="true">*</span></label>
+              <input id="p-client" required />
+            </div>
+            <div>
+              <label style="margin-top:0">Client email</label>
+              <input id="p-email" type="email" placeholder="for sending the quote" />
+            </div>
+            <div>
+              <label style="margin-top:0">Client phone</label>
+              <input id="p-phone" type="tel" autocomplete="tel" />
+            </div>
+          </div>
+          <div class="grid cols-3">
+            <div style="grid-column: span 2;">
+              <label>Site address</label>
+              <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
+              <input id="p-address" placeholder="Where the work is done" />
+              <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
+            </div>
+            <div>
+              <label>Payment terms</label>
+              <select id="p-payment-terms">
+                <option value="cod">COD</option>
+                <option value="net_7">Net 7 days</option>
+                <option value="net_14">Net 14 days</option>
+                <option value="net_30">Net 30 days</option>
+              </select>
+            </div>
+          </div>
+          <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
         </div>
       </div>
-      <p class="subtitle" style="margin-top:6px;"><a class="link-quiet" href="/clients.html" target="_blank">Manage clients &amp; contacts &rarr;</a></p>
+      <div class="page-col">
+        <div class="card">
+          <h2>Notes</h2>
+          <p class="subtitle" style="margin-bottom:8px;">What the client asked for, in a few lines. Kept with the quote and the job, not shown to the client. The AI scope of works reads it too.</p>
+          <textarea id="p-notes" placeholder="e.g. Wants a 10 kW system with a battery, bill around $900 a quarter, tile roof, two storey"></textarea>
+          <div id="lead-attachments-note"></div>
+        </div>
+        <button id="save-btn">Create quote</button>
+        <div id="msg"></div>
+      </div>
     </div>
-
-
-    <div class="card">
-      <h2>Notes</h2>
-      <p class="subtitle" style="margin-bottom:8px;">What the client asked for, in a few lines. Kept with the quote and the job, not shown to the client. The AI scope of works reads it too.</p>
-      <textarea id="p-notes" placeholder="e.g. Wants a 10 kW system with a battery, bill around $900 a quarter, tile roof, two storey"></textarea>
-      <div id="lead-attachments-note"></div>
-    </div>
-
-    <button id="save-btn">Create quote</button>
-    <div id="msg"></div>
   </div>
 
   <script src="/js/supabase-client.js?v=132"></script>
