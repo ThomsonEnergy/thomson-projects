@@ -479,8 +479,9 @@ body {
 .wrap.narrow { max-width: 760px; }
 
 /* Whole-screen frame (item 77), like Chat and Inbox: .wrap.fill is the window under the
-   bar, a .page-head line, then .page-cols whose .page-col columns scroll on their own.
-   Columns from --cols (--cols-md for 901 to 1279px); 900px and under they stack. */
+   bar, a .page-head line, then .page-cols whose .page-col columns sit side by side and
+   scroll on their own (equal widths; a column sets its own with style="flex: 0 0 320px"
+   or "flex-grow: 2"). A column whose cards are all hidden drops out. 900px and under they stack. */
 .wrap.fill {
   height: calc(100vh - var(--top-h));
   height: calc(100dvh - var(--top-h));
@@ -491,30 +492,16 @@ body {
 }
 .page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; flex-shrink: 0; }
 .page-head h1, .page-head .subtitle { margin: 0; }
-.page-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.page-cols {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: var(--cols, minmax(0, 1fr) minmax(0, 1fr));
-  gap: 12px;
-}
-.page-col { min-width: 0; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
+.page-cols { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.page-col { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
 .page-col:last-child { padding-bottom: 72px; } /* the floating Ask AI button sits over the last column */
 .page-col > .card:last-child { margin-bottom: 0; }
-/* A card that fills its column and scrolls inside (a long list under a fixed heading) */
-.page-col.flow { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
-.page-col.flow > .card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-bottom: 0; }
-.col-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-@media (min-width: 901px) and (max-width: 1279px) {
-  .page-cols { grid-template-columns: var(--cols-md, var(--cols, minmax(0, 1fr) minmax(0, 1fr))); }
-}
+.page-col:not(:has(> :not([style*="display: none"]):not([style*="display:none"]))) { display: none; }
 @media (max-width: 900px) {
   .wrap.fill { height: auto; overflow: visible; display: block; padding-bottom: 72px; }
   .page-cols { display: block; }
-  .page-col, .page-col.flow { overflow: visible; padding-bottom: 0; display: block; }
-  .page-col.flow > .card { display: block; margin-bottom: 12px; }
-  .col-scroll { overflow: visible; }
+  .page-col { overflow: visible; padding-bottom: 0; }
+  .page-col > .card:last-child { margin-bottom: 12px; }
 }
 
 h1 { font-size: 20px; margin: 0 0 4px; }
@@ -768,6 +755,16 @@ html[data-theme="navy"] .success-box {
 .settings-tab.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
 .settings-panel { display: none; }
 .settings-panel.active { display: block; }
+/* On a whole-screen page the tab rail and the open panel scroll on their own (item 77), and
+   a panel of several cards (.two-up) lays them two across on a laptop. */
+.wrap.fill > .settings-layout { flex: 1; min-height: 0; align-items: stretch; }
+.wrap.fill > .settings-layout > * { min-height: 0; overflow-y: auto; padding-bottom: 72px; }
+@media (min-width: 901px) {
+  .settings-panel.active.two-up { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: start; }
+  .settings-panel.two-up > .card { margin: 0; }
+  .settings-panel.two-up > :not(.card) { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) { .wrap.fill > .settings-layout > * { overflow: visible; padding-bottom: 0; } }
 @media (max-width: 800px) {
   .settings-layout { grid-template-columns: 1fr; }
   .settings-tabs {
@@ -837,7 +834,7 @@ html[data-theme="navy"] .success-box {
   padding-bottom: 16px;
 }
 .pipeline-column {
-  flex: 0 0 260px;
+  flex: 0 0 240px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -845,6 +842,10 @@ html[data-theme="navy"] .success-box {
   flex-direction: column;
   max-height: calc(100vh - 220px);
 }
+/* On the whole-screen Pipeline page (item 77) the board fills the window and each column runs its full height */
+.pipeline-board.fill-board { flex: 1; min-height: 0; padding-bottom: 12px; }
+.fill-board .pipeline-column { max-height: none; }
+@media (max-width: 900px) { .fill-board .pipeline-column { max-height: calc(100vh - 220px); } }
 .pipeline-column-header {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);

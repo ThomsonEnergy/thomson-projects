@@ -59,6 +59,15 @@
     .cal-day { height: 80px; font-size: 10.5px; }
   }
 
+  /* item 77: on a laptop the calendar fills the window; six weeks fit without scrolling the page */
+  @media (min-width: 901px) {
+    #schedule-card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-bottom: 12px; }
+    #month-view:not([style*="none"]) { flex: 1; min-height: 0; display: flex !important; flex-direction: column; }
+    #cal-grid { flex: 1; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
+    #cal-grid .cal-day { height: auto; min-height: 0; }
+    #day-view { flex: 1; min-height: 0; overflow-y: auto; }
+  }
+
   .day-board { display: flex; gap: 16px; align-items: flex-start; }
   .day-board-main { flex: 1; overflow-x: auto; min-width: 0; }
   .day-board-sidebar { width: 280px; flex-shrink: 0; }
@@ -171,11 +180,14 @@
     </div>
   </div>
 
-  <div class="wrap wide">
+  <div class="wrap fill">
+    <div class="page-head">
+    <div>
     <h1>Schedule</h1>
     <p class="subtitle" id="schedule-subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
-
+    </div>
     <div id="clocked-in-now"></div>
+    </div>
 
     <div class="card" id="schedule-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">

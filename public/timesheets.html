@@ -26,165 +26,163 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Timesheets</h1>
-    <p class="subtitle">Your timesheet history, leave, and pay-week overview. Clock in/out from <a href="/my-day.html" class="link-quiet">My Day</a>.</p>
-
-    <div id="timesheet-issues"></div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-        <h2 style="margin:0;">Pay week</h2>
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="secondary" id="week-prev">&larr; Previous</button>
-          <span class="subtitle" id="week-range" style="margin:0; font-weight:600;"></span>
-          <button type="button" class="secondary" id="week-today" title="Back to the current pay week">This week</button>
-          <button type="button" class="secondary" id="week-next">Next &rarr;</button>
-        </div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Timesheets</h1>
+        <p class="subtitle">Your timesheet history, leave, and pay-week overview. Clock in/out from <a href="/my-day.html" class="link-quiet">My Day</a>.</p>
       </div>
-      <p class="subtitle" style="margin:8px 0 0;">Pay week runs Friday to Thursday.</p>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <h2 style="margin:0;">Your timesheet this week</h2>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="secondary" id="add-tafe-day-btn">+ TAFE day (8h)</button>
-          <button type="button" class="secondary" id="add-today-entry-btn">+ Add missed entry</button>
-        </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;" title="Pay week runs Friday to Thursday">
+        <strong style="font-size:13px;">Pay week</strong>
+        <button type="button" class="secondary" id="week-prev">&larr; Previous</button>
+        <span class="subtitle" id="week-range" style="margin:0; font-weight:600;"></span>
+        <button type="button" class="secondary" id="week-today" title="Back to the current pay week">This week</button>
+        <button type="button" class="secondary" id="week-next">Next &rarr;</button>
       </div>
-      <p class="subtitle" style="margin:0 0 10px;">Click any day to edit it - you can be logged against more than one job in a day, each with its own stage split, all in the one place.</p>
-      <div id="my-week-days"><p class="subtitle">Loading...</p></div>
     </div>
 
-    <div class="card" id="team-week-card" style="display:none;">
-      <h2>Team timesheets</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above - click any day's hours to view or edit that person's timesheet.</p>
-      <div id="team-week-table"><p class="subtitle">Loading...</p></div>
-      <h3 style="margin:20px 0 6px;">Lunch breaks this week</h3>
-      <div id="team-week-breaks"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card" id="dev-mode-entries-card" style="display:none;">
-      <h2>All entries this week</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-        <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
-        <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
-      </div>
-      <div id="bulk-delete-entries-msg"></div>
-      <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Request leave</h2>
-      <div class="grid cols-4">
-        <div>
-          <label style="margin-top:0">Start date</label>
-          <input type="date" id="leave-start" />
-        </div>
-        <div>
-          <label style="margin-top:0">End date</label>
-          <input type="date" id="leave-end" />
-        </div>
-        <div>
-          <label style="margin-top:0">Type</label>
-          <select id="leave-type">
-            <option value="annual">Annual leave</option>
-            <option value="sick">Sick leave</option>
-            <option value="unpaid">Unpaid leave</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div style="display:flex; align-items:end;">
-          <button id="request-leave-btn" style="width:100%;">Request</button>
-        </div>
-      </div>
-      <label>Notes (optional)</label>
-      <input id="leave-notes" placeholder="Anything worth flagging" />
-      <div id="leave-msg"></div>
-    </div>
-
-    <div class="card">
-      <h2>My leave requests</h2>
-      <div id="my-leave-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card" id="approvals-card" style="display:none;">
-      <h2>Leave</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Everyone's leave: who, when, what kind, and whether it is approved. Approved leave goes to Xero with the timesheet push below.</p>
-      <details id="add-leave-box" style="margin-bottom:12px;">
-        <summary style="cursor:pointer; font-weight:600;">Add leave for someone</summary>
-        <div class="grid cols-4" style="margin-top:8px;">
-          <div>
-            <label style="margin-top:0">Who</label>
-            <select id="add-leave-staff"><option value="">Loading...</option></select>
+    <div class="page-cols">
+      <div class="page-col">
+      <div id="timesheet-issues"></div>
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <h2 style="margin:0;">Your timesheet this week</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="secondary" id="add-tafe-day-btn">+ TAFE day (8h)</button>
+            <button type="button" class="secondary" id="add-today-entry-btn">+ Add missed entry</button>
           </div>
+        </div>
+        <p class="subtitle" style="margin:0 0 10px;">Click any day to edit it - you can be logged against more than one job in a day, each with its own stage split, all in the one place.</p>
+        <div id="my-week-days"><p class="subtitle">Loading...</p></div>
+      </div>
+      <div class="card">
+        <h2>Request leave</h2>
+        <div class="grid cols-2">
           <div>
             <label style="margin-top:0">Start date</label>
-            <input type="date" id="add-leave-start" />
+            <input type="date" id="leave-start" />
           </div>
           <div>
             <label style="margin-top:0">End date</label>
-            <input type="date" id="add-leave-end" />
+            <input type="date" id="leave-end" />
           </div>
           <div>
             <label style="margin-top:0">Type</label>
-            <select id="add-leave-type">
-              <option value="sick">Sick leave</option>
+            <select id="leave-type">
               <option value="annual">Annual leave</option>
+              <option value="sick">Sick leave</option>
               <option value="unpaid">Unpaid leave</option>
               <option value="other">Other</option>
             </select>
           </div>
+          <div style="display:flex; align-items:end;">
+            <button id="request-leave-btn" style="width:100%;">Request</button>
+          </div>
         </div>
         <label>Notes (optional)</label>
-        <input id="add-leave-notes" placeholder="Anything worth flagging" />
-        <label style="display:flex; align-items:center; gap:8px; margin-top:8px;"><input type="checkbox" id="add-leave-approved" checked style="width:auto;" /> Mark approved now</label>
-        <button id="add-leave-btn" style="margin-top:8px;">Add leave</button>
-        <div id="add-leave-msg"></div>
-      </details>
-      <div id="leave-filters" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
-      <div id="approvals-msg"></div>
-      <div id="approvals-list"></div>
-    </div>
-
-    <div class="card" id="xero-payroll-card" style="display:none;">
-      <h2>Push to Xero Payroll</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's clocked hours in the range as DRAFT timesheets (approve them in Xero), and approved leave in the range as Xero leave applications. Dates must match a real pay period in Xero. Safe to run more than once: hours and leave already in Xero are skipped, hours added since go onto the existing Xero timesheet, and anything deleted in Xero (a pay run redone) is sent again.</p>
-      <div class="grid cols-3">
-        <div>
-          <label style="margin-top:0">Pay period start</label>
-          <input type="date" id="xero-push-start" />
-        </div>
-        <div>
-          <label style="margin-top:0">Pay period end</label>
-          <input type="date" id="xero-push-end" />
-        </div>
-        <div style="display:flex; align-items:end;">
-          <button id="xero-push-btn" style="width:100%;">Push timesheets</button>
-        </div>
+        <input id="leave-notes" placeholder="Anything worth flagging" />
+        <div id="leave-msg"></div>
       </div>
-      <div id="xero-push-msg"></div>
-    </div>
-
-    <div class="card" id="nonbillable-card" style="display:none;">
-      <h2>Non-billable time</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Real cost of training and office time, not just hours - based on each person's own pay rate for when it was actually worked.</p>
-      <div class="grid cols-3">
-        <div>
-          <label style="margin-top:0">From</label>
-          <input type="date" id="nonbillable-start" />
-        </div>
-        <div>
-          <label style="margin-top:0">To</label>
-          <input type="date" id="nonbillable-end" />
-        </div>
-        <div style="display:flex; align-items:end;">
-          <button id="nonbillable-refresh-btn" style="width:100%;">Refresh</button>
-        </div>
+      <div class="card">
+        <h2>My leave requests</h2>
+        <div id="my-leave-list"><p class="subtitle">Loading...</p></div>
       </div>
-      <div id="nonbillable-results" style="margin-top:14px;"></div>
+      </div>
+      <div class="page-col" style="flex-grow:1.4;">
+      <div class="card" id="team-week-card" style="display:none;">
+        <h2>Team timesheets</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above - click any day's hours to view or edit that person's timesheet.</p>
+        <div id="team-week-table"><p class="subtitle">Loading...</p></div>
+        <h3 style="margin:20px 0 6px;">Lunch breaks this week</h3>
+        <div id="team-week-breaks"><p class="subtitle">Loading...</p></div>
+      </div>
+      <div class="card" id="dev-mode-entries-card" style="display:none;">
+        <h2>All entries this week</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
+          <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
+        </div>
+        <div id="bulk-delete-entries-msg"></div>
+        <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
+      </div>
+      </div>
+      <div class="page-col">
+      <div class="card" id="approvals-card" style="display:none;">
+        <h2>Leave</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Everyone's leave: who, when, what kind, and whether it is approved. Approved leave goes to Xero with the timesheet push below.</p>
+        <details id="add-leave-box" style="margin-bottom:12px;">
+          <summary style="cursor:pointer; font-weight:600;">Add leave for someone</summary>
+          <div class="grid cols-4" style="margin-top:8px;">
+            <div>
+              <label style="margin-top:0">Who</label>
+              <select id="add-leave-staff"><option value="">Loading...</option></select>
+            </div>
+            <div>
+              <label style="margin-top:0">Start date</label>
+              <input type="date" id="add-leave-start" />
+            </div>
+            <div>
+              <label style="margin-top:0">End date</label>
+              <input type="date" id="add-leave-end" />
+            </div>
+            <div>
+              <label style="margin-top:0">Type</label>
+              <select id="add-leave-type">
+                <option value="sick">Sick leave</option>
+                <option value="annual">Annual leave</option>
+                <option value="unpaid">Unpaid leave</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <label>Notes (optional)</label>
+          <input id="add-leave-notes" placeholder="Anything worth flagging" />
+          <label style="display:flex; align-items:center; gap:8px; margin-top:8px;"><input type="checkbox" id="add-leave-approved" checked style="width:auto;" /> Mark approved now</label>
+          <button id="add-leave-btn" style="margin-top:8px;">Add leave</button>
+          <div id="add-leave-msg"></div>
+        </details>
+        <div id="leave-filters" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
+        <div id="approvals-msg"></div>
+        <div id="approvals-list"></div>
+      </div>
+      <div class="card" id="xero-payroll-card" style="display:none;">
+        <h2>Push to Xero Payroll</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Pushes everyone's clocked hours in the range as DRAFT timesheets (approve them in Xero), and approved leave in the range as Xero leave applications. Dates must match a real pay period in Xero. Safe to run more than once: hours and leave already in Xero are skipped, hours added since go onto the existing Xero timesheet, and anything deleted in Xero (a pay run redone) is sent again.</p>
+        <div class="grid cols-3">
+          <div>
+            <label style="margin-top:0">Pay period start</label>
+            <input type="date" id="xero-push-start" />
+          </div>
+          <div>
+            <label style="margin-top:0">Pay period end</label>
+            <input type="date" id="xero-push-end" />
+          </div>
+          <div style="display:flex; align-items:end;">
+            <button id="xero-push-btn" style="width:100%;">Push timesheets</button>
+          </div>
+        </div>
+        <div id="xero-push-msg"></div>
+      </div>
+      <div class="card" id="nonbillable-card" style="display:none;">
+        <h2>Non-billable time</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Real cost of training and office time, not just hours - based on each person's own pay rate for when it was actually worked.</p>
+        <div class="grid cols-3">
+          <div>
+            <label style="margin-top:0">From</label>
+            <input type="date" id="nonbillable-start" />
+          </div>
+          <div>
+            <label style="margin-top:0">To</label>
+            <input type="date" id="nonbillable-end" />
+          </div>
+          <div style="display:flex; align-items:end;">
+            <button id="nonbillable-refresh-btn" style="width:100%;">Refresh</button>
+          </div>
+        </div>
+        <div id="nonbillable-results" style="margin-top:14px;"></div>
+      </div>
+      </div>
     </div>
   </div>
 
