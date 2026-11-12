@@ -49,7 +49,7 @@
 
   <div class="wrap">
     <h1>Emailed bills</h1>
-    <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. Nothing is approved for payment or sent to Xero from here.</p>
+    <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. A bill whose PO is not sure also shows on that supplier's open POs, where "This bill is for PO2009" saves it in one tap. Packing slips are filed with their invoice, never saved as bills. Nothing is approved for payment or sent to Xero from here.</p>
 
     <div class="card">
       <div class="sb-filters" id="sb-filters">
@@ -63,7 +63,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=132"></script>
+  <script src="/js/supabase-client.js?v=133"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const FILTERS = {
@@ -93,7 +93,7 @@
       const candIds = new Set(cands.map(c => c.po_id));
       const others = openPOs.filter(po => po.supplier_id === item.supplier_id && !candIds.has(po.id));
       const picked = item.po_id || '';
-      return `<option value="">No PO for this bill</option>`
+      return (picked ? '' : `<option value="" selected>Pick the PO...</option>`) + `<option value="__none__">No PO for this bill</option>`
         + (cands.length ? `<optgroup label="Suggested">${cands.map(c => `<option value="${c.po_id}" ${c.po_id === picked ? 'selected' : ''}>${esc(c.label)} (${esc(c.reason)})</option>`).join('')}</optgroup>` : '')
         + (others.length ? `<optgroup label="Other open POs for this supplier">${others.map(po => `<option value="${po.id}">${esc(poRef(po))}</option>`).join('')}</optgroup>` : '');
     }
@@ -114,7 +114,11 @@
       // supplier not recognised but our PO number is on the bill: offer that PO's supplier
       const guessSupplierId = ((item.po_candidates || [])[0] || {}).supplier_id || '';
 
-      if (item.status === 'to_check') {
+      const docket = (ex.document_type || 'invoice') === 'delivery_docket';
+      if (docket && item.status !== 'deleted') {
+        // a packing slip: nothing to pay, filed with its invoice (same email or same number) when that is saved
+        body += `<div class="sb-actions">${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}${item.bill_id && item.supplier_id ? `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${item.supplier_id}">Open supplier</a>` : ''}${!item.bill_id ? `<button type="button" class="secondary sb-is-bill">It is a bill</button>` : ''}${!item.bill_id ? deleteBtn : ''}</div>`;
+      } else if (item.status === 'to_check') {
         const readable = item.attachment_part_id !== 'none' && item.extracted && ex.bill_number !== undefined;
         body += !supplier && readable ? `
           <div class="sb-row">
@@ -144,7 +148,7 @@
 
       return `<div class="sb-item" data-id="${item.id}">
         <div class="sb-head">
-          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${esc(STATUS_TEXT[item.status] || item.status)}</span></div>
+          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${docket ? (item.bill_id ? 'Packing slip, filed with the bill' : 'Packing slip') : esc(STATUS_TEXT[item.status] || item.status)}</span></div>
           ${ex.total != null ? `<div class="sb-total">${money(ex.total)}</div>` : ''}
         </div>
         <div class="sb-meta">${ex.bill_date ? 'Dated ' + dateText(ex.bill_date) + ' · ' : ''}${ex.our_order_reference ? 'Our ref on bill: ' + esc(ex.our_order_reference) + ' · ' : ''}Emailed ${dateText(item.received_at || item.created_at)} by ${esc(item.email_from || 'unknown')}${item.file_name ? ' · ' + esc(item.file_name) : ''}</div>
@@ -192,7 +196,9 @@
       };
       // the PO picked and the total read off the bill, confirmed (or corrected) by a person before it is saved (M4)
       const askPoAndTotal = () => {
-        const po_id = el.querySelector('.sb-po')?.value || null;
+        const pickedPo = el.querySelector('.sb-po')?.value || '';
+        if (el.querySelector('.sb-po') && !pickedPo) { showErr(new Error('Pick the PO this bill is for (or "No PO for this bill").')); return null; }
+        const po_id = pickedPo === '__none__' ? null : pickedPo || null;
         if (!po_id && !confirm('Save this bill with no PO?')) return null;
         const ex = item.extracted || {};
         const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
@@ -218,6 +224,7 @@
       });
       el.querySelector('.sb-not-bill')?.addEventListener('click', (e) => run(e.target, { action: 'not_a_bill', id: item.id }, 'Putting aside...'));
       el.querySelector('.sb-reopen')?.addEventListener('click', (e) => run(e.target, { action: 'reopen', id: item.id }, 'Moving...'));
+      el.querySelector('.sb-is-bill')?.addEventListener('click', (e) => run(e.target, { action: 'is_a_bill', id: item.id }, 'Moving...'));
       el.querySelector('.sb-retry')?.addEventListener('click', (e) => run(e.target, { action: 'retry', id: item.id }, 'Starting...'));
       el.querySelector('.sb-delete')?.addEventListener('click', (e) => {
         if (!confirm('Delete this emailed bill? It goes for good (the file too) and will not come back from the mailbox.')) return;
@@ -253,7 +260,8 @@
           const file = new File([blob], item.file_name || 'bill.pdf', { type: item.mime_type || blob.type || 'application/pdf' });
           const extra = { inboxItemId: item.id };
           if (item.supplier_id) {
-            const poId = el.querySelector('.sb-po')?.value || null;
+            const poRaw = el.querySelector('.sb-po')?.value || '';
+            const poId = poRaw && poRaw !== '__none__' ? poRaw : null;
             sessionStorage.setItem('pending_upload', JSON.stringify({
               ...extra, type: 'bill', extracted: item.extracted, filePath: await uploadPrivateFile(file, 'ai-extraction-uploads'), fileName: file.name, fileType: file.type, preselectedPoId: poId,
             }));
