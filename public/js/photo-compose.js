@@ -18,6 +18,10 @@
 // everything outside the line goes), Box (a rectangle), Rub out and Bring back (a brush to tidy the
 // edge). Undo steps back one cut at a time. Works with a finger and with a mouse. One editor at a
 // time; closing it lets go of its pictures (a phone has little room for them).
+//
+// Laid out to use the whole screen (owner's rule, 12 Nov 2026): on a laptop the picture fills the
+// window with the tools in a column beside it, nothing to scroll to; on a phone the hint, the
+// picture and the tools stack.
 
 const COMPOSE_WORK = 1200; // the equipment picture is worked on at up to this many pixels on its long side
 const COMPOSE_OUT = 1920;  // the saved picture's long side, at most
@@ -64,16 +68,18 @@ const composeFree = (canvas) => { if (canvas) { canvas.width = 0; canvas.height 
 async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   if (composeOverlay && document.body.contains(composeOverlay)) return;
   const overlay = openModal(`
-      <h2 style="margin-bottom:4px;">Put the equipment on this picture</h2>
-      <p class="subtitle" id="pc-hint" style="margin:0 0 8px; font-size:12.5px;">Opening the picture...</p>
-      <div id="pc-wrap" style="border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;">
-        <canvas id="pc-stage" style="max-width:100%; touch-action:none; cursor:grab;"></canvas>
-      </div>
-      <div id="pc-tools" style="margin-top:10px;"></div>
-      <div id="pc-msg" style="font-size:12.5px; min-height:18px; margin-top:6px;"></div>`, { maxWidth: 860, zIndex: 110 });
+      <h2 style="margin-bottom:6px; font-size:16px;">Put the equipment on this picture</h2>
+      <div id="pc-grid" style="display:grid; gap:8px 16px; align-items:start;">
+        <p class="subtitle" id="pc-hint" style="grid-area:hint; margin:0; font-size:12.5px;">Opening the picture...</p>
+        <div id="pc-wrap" style="grid-area:stage; border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;">
+          <canvas id="pc-stage" style="max-width:100%; touch-action:none; cursor:grab;"></canvas>
+        </div>
+        <div id="pc-tools" style="grid-area:tools;"></div>
+        <div id="pc-msg" style="grid-area:msg; font-size:12.5px; min-height:18px;"></div>
+      </div>`, { maxWidth: 1500, zIndex: 110 });
   composeOverlay = overlay;
   const $ = (sel) => overlay.querySelector(sel);
-  const stage = $('#pc-stage'), wrap = $('#pc-wrap'), tools = $('#pc-tools'), hint = $('#pc-hint'), msg = $('#pc-msg');
+  const stage = $('#pc-stage'), wrap = $('#pc-wrap'), tools = $('#pc-tools'), hint = $('#pc-hint'), msg = $('#pc-msg'), grid = $('#pc-grid');
   const ctx = stage.getContext('2d');
   const say = (text, bad) => { msg.innerHTML = text ? `<span ${bad ? 'style="color:var(--red);"' : 'class="subtitle"'}>${escapeHtml(text)}</span>` : ''; };
   const btn = (id, label, kind = 'secondary') => `<button type="button" id="${id}" class="${kind}" style="font-size:13px; padding:7px 11px;">${escapeHtml(label)}</button>`;
@@ -115,9 +121,19 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   // ---------- drawing ----------
   // The picture on the stage in this view, and its size on the screen.
   const shown = () => (view === 'cut' ? { w: ov.img.width, h: ov.img.height } : { w: crop.w, h: crop.h });
+  // A wide window puts the tools beside the picture, which then gets the window's whole height; a
+  // narrow one stacks them, and the picture leaves room for the tools under it.
+  function layOut() {
+    const wide = window.innerWidth >= 900;
+    grid.style.gridTemplateColumns = wide ? 'minmax(0, 1fr) 270px' : 'minmax(0, 1fr)';
+    grid.style.gridTemplateAreas = wide ? '"stage hint" "stage tools" "stage msg"' : '"hint" "stage" "tools" "msg"';
+    grid.style.gridTemplateRows = wide ? 'auto auto 1fr' : '';
+    return wide;
+  }
   function fit() {
     const { w, h } = shown();
-    const maxW = wrap.clientWidth || 600, maxH = Math.max(240, Math.round(window.innerHeight * 0.55));
+    const wide = layOut();
+    const maxW = wrap.clientWidth || 600, maxH = Math.max(240, Math.round(window.innerHeight * (wide ? 0.88 : 0.55)) - (wide ? 110 : 0));
     const scale = Math.min(maxW / w, maxH / h);
     const cssW = Math.max(40, Math.round(w * scale)), cssH = Math.max(40, Math.round(h * scale));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
