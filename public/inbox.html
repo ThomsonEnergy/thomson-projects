@@ -134,7 +134,8 @@
     .inbox-app, .inbox-app.one-pane { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
     .ib-side { flex-direction:row; align-items:center; overflow-x:auto; overflow-y:hidden; border-right:0; border-bottom:1px solid var(--border); padding:6px 8px; gap:6px; }
     .ib-side > div { display:contents; }
-    .ib-side .side-head, .ib-addr { display:none; }
+    .ib-side .side-head, .ib-side p, .ib-addr { display:none; }
+    .ib-read-head { position:static; }
     .ib-compose { width:auto; margin:0; padding:5px 12px; font-size:13px; white-space:nowrap; }
     .box-toggle { flex:none; }
     .side-item { white-space:nowrap; border:1px solid var(--border); border-radius:20px; padding:4px 10px; }
@@ -238,6 +239,14 @@
       return d.toLocaleDateString('en-AU', { timeZone: SYD, day: 'numeric', month: 'short', ...(sameYear ? {} : { year: '2-digit' }) });
     }
     const whenFull = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { timeZone: SYD, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+    // Read or unread, in Gmail too for a My inbox (its sync would otherwise flip it back)
+    async function setRead(threadId, read) {
+      if (S.box === 'mine') return act(read ? 'mark_read' : 'mark_unread', { thread_id: threadId });
+      const { error } = await supabaseClient.from('email_threads').update({ is_read: read }).eq('id', threadId);
+      if (error) throw error;
+    }
+    // Drafts changed: the count, and the Drafts folder if it is open
+    async function draftsChanged() { await loadDrafts(); if (S.view === 'drafts' && !S.search) loadList(); }
     // Clean up and Connect take the whole width: the reading pane goes while they show
     const onePane = (on) => document.getElementById('inbox-layout').classList.toggle('one-pane', !!on);
     // Keeps the page the height of the visible screen (iPhone keyboard), like Team chat.
@@ -444,7 +453,8 @@
       const seq = ++S.listSeq;
       const key = [S.box, S.view, S.unreadOnly, S.mineOnly, S.search].join('|');
       if (key !== S.listKey) { S.listKey = key; listEl.innerHTML = '<p class="subtitle" style="padding:8px 10px;">Loading...</p>'; }
-      let threads = [], header = '', latest = {}, sentRows = null, jobGroups = null, draftRows = null;
+      let threads = [], header = '', latest = {}, sentRows = null, jobGroups = null;
+      const draftsView = !q && S.view === 'drafts';
       const q = S.search.trim();
       const labelId = !q && S.view.startsWith('label:') ? S.view.slice(6) : null;
       let label = labelId ? S.labels.find(l => l.id === labelId) : null;
@@ -452,21 +462,24 @@
 
       if (q) {
         // the whole inbox: subject, the client's name, the sender or words in an email
-        const like = '%' + q.replace(/[%,()\\]/g, ' ') + '%';
-        const [bySubject, byClient, byEmail] = await Promise.all([
+        // (words in the email only from three letters: that leg reads every email in the inbox)
+        const like = '%' + q.replace(/[%,()"'\\]/g, ' ').trim() + '%';
+        const legs = await Promise.all([
           baseThreads().ilike('subject', like).order('last_message_at', { ascending: false, nullsFirst: false }).limit(100),
           supabaseClient.from('clients').select('id').ilike('name', like).limit(50)
-            .then(({ data }) => (data && data.length ? baseThreads().in('client_id', data.map(c => c.id)).order('last_message_at', { ascending: false, nullsFirst: false }).limit(100) : { data: [] })),
-          supabaseClient.from('emails').select('thread_id, email_threads!inner(mailbox_id, is_supplier_bill)').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
+            .then((r) => (r.error ? r : r.data.length ? baseThreads().in('client_id', r.data.map(c => c.id)).order('last_message_at', { ascending: false, nullsFirst: false }).limit(100) : { data: [] })),
+          q.length < 3 ? { data: [] } : supabaseClient.from('emails').select('thread_id, email_threads!inner(mailbox_id, is_supplier_bill)').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
             .or(`from_address.ilike.${like},body_text.ilike.${like}`).order('sent_at', { ascending: false }).limit(150)
-            .then(({ data }) => { const ids = [...new Set((data || []).map(e => e.thread_id))]; return ids.length ? baseThreads().in('id', ids).limit(150) : { data: [] }; }),
+            .then((r) => { if (r.error) return r; const ids = [...new Set(r.data.map(e => e.thread_id))]; return ids.length ? baseThreads().in('id', ids).limit(150) : { data: [] }; }),
         ]);
         if (seq !== S.listSeq) return;
+        const failed = legs.find(r => r.error);
+        if (failed) { listEl.innerHTML = `<div class="error-box">The search did not work: ${escapeHtml(failed.error.message)}</div>`; return; }
         const seen = new Map();
-        [bySubject, byClient, byEmail].forEach(r => (r.data || []).forEach(t => seen.set(t.id, t)));
+        legs.forEach(r => (r.data || []).forEach(t => seen.set(t.id, t)));
         threads = [...seen.values()].sort((a, b) => String(b.last_message_at || '').localeCompare(String(a.last_message_at || ''))).slice(0, 200);
-      } else if (S.view === 'drafts') {
-        draftRows = S.drafts;
+      } else if (draftsView) {
+        // the rows come from S.drafts when the list paints
       } else if (S.view === 'jobs') {
         // the last 30 days of this inbox's conversations that are tagged to a job, grouped by job
         const since = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -514,7 +527,7 @@
       const threadIds = sentRows ? [...new Set(sentRows.map(r => r.thread_id))] : threads.map(t => t.id);
       const labelsBy = {};
       // First paint straight away (no who line or chips yet), then the rest in parallel.
-      if (threadIds.length || draftRows) paint(true);
+      if (threadIds.length || draftsView) paint(true);
       await Promise.all([
         threads.length ? supabaseClient.from('emails').select('thread_id, direction, from_address, to_addresses, sent_at, created_by')
           .in('thread_id', threads.map(t => t.id)).order('sent_at', { ascending: false }).limit(1500)
@@ -536,7 +549,7 @@
 
         if (q) {
           header = `<h3>Search</h3><span class="subtitle" style="font-size:12px;">${threads.length} conversation${threads.length === 1 ? '' : 's'} for "${escapeHtml(q)}"</span>`;
-        } else if (draftRows) {
+        } else if (draftsView) {
           header = `<h3>Drafts</h3>` + note(`Replies waiting to be checked and sent. ${escapeHtml(S.assistant)} drafts replies to Priority emails here; a draft opens its conversation.`);
         } else if (labelId && !label) {
           header = '<h3>Label</h3>';
@@ -554,13 +567,13 @@
         }
 
         // one row: who (From, or To when we wrote last) and the time, then subject, chips and status
-        const rowHtml = (id, { who, subject, st, chips: ch, when, unread, title, acts }) => `<a class="ib-row ${id === S.activeThreadId ? 'active' : ''} ${unread ? 'unread' : ''}" data-id="${id}" title="${escapeHtml(title || '')}">`
-          + `<span class="who">${escapeHtml(who || 'unknown')}</span>`
+        const rowHtml = (id, { who, client, subject, st, chips: ch, when, unread, title, acts }) => `<a class="ib-row ${id === S.activeThreadId ? 'active' : ''} ${unread ? 'unread' : ''}" data-id="${id}" title="${escapeHtml(title || '')}">`
+          + `<span class="who">${escapeHtml(who || 'unknown')}${client ? ` <span style="color:var(--muted); font-weight:400;">&middot; ${escapeHtml(client)}</span>` : ''}</span>`
           + `<span class="mid"><span class="subj">${escapeHtml(subject || '(no subject)')}</span>${st ? `<span class="st ${st.cls || ''}">${escapeHtml(st.text)}</span>` : ''}${ch || ''}</span>`
           + `<span class="when">${when}</span>${acts || ''}</a>`;
         let body;
-        if (draftRows) {
-          body = draftRows.map(d => rowHtml('draft:' + d.id, {
+        if (draftsView) {
+          body = S.drafts.map(d => rowHtml('draft:' + d.id, {
             who: 'To ' + (addrName(String(d.to_addresses || '').split(',')[0]) || 'nobody yet'),
             subject: d.subject || d.email_threads?.subject,
             st: { text: String(d.body_text || '').replace(/\s+/g, ' ').trim().slice(0, 140) },
@@ -570,7 +583,7 @@
         } else if (sentRows) {
           body = sentRows.map(e => {
             const t = e.email_threads;
-            return rowHtml(t.id, { who: 'To ' + (addrName((e.to_addresses || [])[0]) || 'unknown'), subject: t.subject, chips: chips(t.id), when: whenShort(e.sent_at), title: [t.subject, t.clients?.name].filter(Boolean).join(' | ') });
+            return rowHtml(t.id, { who: 'To ' + (addrName((e.to_addresses || [])[0]) || 'unknown'), client: t.clients?.name, subject: t.subject, chips: chips(t.id), when: whenShort(e.sent_at), title: t.subject || '' });
           }).join('') || '<p class="subtitle" style="padding:8px 10px;">Nothing sent yet.</p>';
         } else {
           const row = (t) => {
@@ -582,9 +595,9 @@
             const st = partial && !l && t.last_direction === 'outbound' ? null : threadStatus(t, l);
             const acts = `<span class="acts">${t.is_done ? '' : '<button type="button" class="secondary" data-act="done" title="Done: out of the inbox">Done</button>'}<button type="button" class="secondary" data-act="read">${t.is_read ? 'Unread' : 'Read'}</button></span>`;
             return rowHtml(t.id, {
-              who, subject: t.subject, chips: chips(t.id), when: whenShort(t.last_message_at), unread: !t.is_read, acts,
+              who, client: t.clients?.name, subject: t.subject, chips: chips(t.id), when: whenShort(t.last_message_at), unread: !t.is_read, acts,
               st: st || (reason ? { cls: 'reason', text: reason } : null),
-              title: [t.subject, t.clients?.name, st && st.text, reason].filter(Boolean).join(' | '),
+              title: [t.subject, st && st.text, reason].filter(Boolean).join(' | '),
             });
           };
           if (jobGroups) {
@@ -610,7 +623,7 @@
           const d = S.drafts.find(x => x.id === a.dataset.id.slice(6));
           if (!d) return;
           if (d.thread_id) openThread(d.thread_id);
-          else openEmailComposer({ title: 'Draft', to: d.to_addresses, cc: d.cc_addresses, subject: d.subject, body: d.body_text, mailbox: mb(), draftId: d.id, onDraftSaved: loadDrafts, onSent: async (tid) => { await loadDrafts(); await loadList(); openThread(tid); } });
+          else openEmailComposer({ title: 'Draft', to: d.to_addresses, cc: d.cc_addresses, subject: d.subject, body: d.body_text, mailbox: mb(), draftId: d.id, onDraftSaved: draftsChanged, onSent: async (tid) => { await loadDrafts(); await loadList(); openThread(tid); } });
         }));
         // Done and Read or Unread on hover (the row itself opens the conversation)
         listEl.querySelectorAll('.ib-row [data-act]').forEach(b => b.addEventListener('click', async (e) => {
@@ -618,9 +631,8 @@
           const id = b.closest('.ib-row').dataset.id;
           const t = threads.find(x => x.id === id);
           try {
-            if (b.dataset.act === 'done') { await act('done', { thread_id: id, done: true }); if (S.activeThreadId === id) closeReading(); }
-            else if (t && t.is_read) { await supabaseClient.from('email_threads').update({ is_read: false }).eq('id', id); }
-            else { await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', id); if (S.box === 'mine') act('mark_read', { thread_id: id }).catch(() => {}); }
+            if (b.dataset.act === 'done') { await act('done', { thread_id: id, done: true }); if (S.activeThreadId === id) { closeReading(); setUrl(); } }
+            else await setRead(id, !(t && t.is_read));
           } catch (err) { alert(err.message); }
           renderSide(); loadList();
         }));
@@ -715,6 +727,7 @@
       S.activeThreadId = threadId;
       if (!opts.keepUrl) setUrl(fromList);
       document.getElementById('inbox-layout').classList.add('reading');
+      onePane(false);
       document.querySelectorAll('.ib-row').forEach(el => el.classList.toggle('active', el.dataset.id === threadId));
       const detailEl = document.getElementById('thread-detail');
       detailEl.innerHTML = '<p class="subtitle" style="padding:16px;">Loading...</p>';
@@ -823,11 +836,7 @@
       supabaseClient.from('notifications').update({ read_at: new Date().toISOString() })
         .eq('user_id', S.me.id).is('read_at', null).eq('link', '/inbox.html?thread=' + threadId)
         .then(() => { if (window.refreshChatBadge) refreshChatBadge(); }, () => {});
-      if (!thread.is_read) {
-        await supabaseClient.from('email_threads').update({ is_read: true }).eq('id', threadId);
-        if (S.box === 'mine') act('mark_read', { thread_id: threadId }).catch(() => {});
-        renderSide();
-      }
+      if (!thread.is_read) { setRead(threadId, true).catch(() => {}).then(renderSide); }
 
       const reload = async (keepOpen) => { await Promise.all([loadLabels(), loadDrafts()]); await renderSide(); await loadList(); if (keepOpen) openThread(threadId); };
       document.getElementById('back-btn').addEventListener('click', leaveThread);
@@ -855,7 +864,7 @@
         try {
           await act('save_draft', { draft_id: draft ? draft.id : undefined, mailbox_id: mb().id, thread_id: threadId, to: replyTo, subject: /^re:/i.test(subject) ? subject : 'Re: ' + subject, body: document.getElementById('reply-body').value });
           msg.innerHTML = '<p class="subtitle" style="font-size:12px;">Draft saved' + (canMirror(mb()) ? ', also in Gmail.' : '.') + '</p>';
-          await loadDrafts();
+          await draftsChanged();
         } catch (err) { msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; }
       });
       // Draft reply (item 55): Postie only drafts by itself when an email asks for an answer;
@@ -1061,10 +1070,15 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
     // ---------- clean up (js/inbox-cleanup.js, loaded when it is opened) ----------
 
     async function renderCleanup() {
-      if (!window.renderInboxCleanup) {
-        await new Promise((ok, fail) => { const sc = document.createElement('script'); sc.src = '/js/inbox-cleanup.js?v=1'; sc.onload = ok; sc.onerror = () => fail(new Error('Clean up did not load. Refresh and try again.')); document.head.appendChild(sc); });
+      try {
+        if (!window.renderInboxCleanup) {
+          S.cleanupLoad = S.cleanupLoad || new Promise((ok, fail) => { const sc = document.createElement('script'); sc.src = '/js/inbox-cleanup.js?v=1'; sc.onload = ok; sc.onerror = () => { S.cleanupLoad = null; fail(new Error('Clean up did not load. Refresh and try again.')); }; document.head.appendChild(sc); });
+          await S.cleanupLoad;
+        }
+        await renderInboxCleanup({ S, mb, act, onePane, canMirror });
+      } catch (err) {
+        document.getElementById('thread-list').innerHTML = `<div class="error-box" style="margin:10px;">${escapeHtml(err.message)}</div>`;
       }
-      return renderInboxCleanup({ S, mb, act, onePane, canMirror });
     }
 
     // ---------- buttons ----------
@@ -1075,7 +1089,7 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
       openEmailComposer({
         title: S.box === 'mine' ? 'New email from ' + S.mine.address : 'New email',
         mailbox: mb(),
-        onDraftSaved: loadDrafts,
+        onDraftSaved: draftsChanged,
         onSent: async (threadId) => { await loadList(); await openThread(threadId); },
       });
     });
@@ -1085,7 +1099,7 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         const q = e.target.value.trim();
-        if (q === S.search) return;
+        if (q === S.search || !mb()) return;
         S.search = q; S.activeThreadId = null; clearInterval(S.cleanupTimer);
         if (S.view === 'cleanup') { S.view = 'all'; renderSide(); }
         loadList();
