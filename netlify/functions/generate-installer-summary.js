@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 // POST { projectId, onlyIfStale?, force? }   (any signed-in staff member)
 //
@@ -72,9 +72,8 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 900,
         messages: [{ role: 'user', content: buildPrompt(project.name, stages, project.sow_text) }],
       }),
     });
@@ -83,7 +82,7 @@ exports.handler = async (event) => {
       throw new Error(`Anthropic API error: ${res.status} ${errText.slice(0, 300)}`);
     }
     const data = await res.json();
-    const summary = data.content.map((b) => b.text || '').join('').trim();
+    const summary = claudeText(data).trim();
     if (!summary) throw new Error('The AI returned an empty summary');
 
     const generatedAt = new Date().toISOString();

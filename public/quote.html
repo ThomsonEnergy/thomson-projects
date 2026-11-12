@@ -278,7 +278,7 @@
 
   <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
-  <script src="/js/solar-roi.js?v=21"></script>
+  <script src="/js/solar-roi.js?v=22"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     // ?variation=<token>: the page a client gets to approve a fixed-price variation - their original
@@ -834,7 +834,6 @@
             <p class="pg-lead">Send it to us (a photo of each page is fine) and we will update this proposal. If you accept this proposal before we have it, you are accepting it on the figures and information shown here.</p>` : '';
       const roiCols = pres.columns || [];
       const roiTableHtml = pres.sections.length ? `
-            ${pres.headline ? '<div class="sec-title" style="margin-top:24px;">How we worked it out</div>' : ''}
             <table class="qtable roi-table split">
               <thead><tr><th>Each year</th>${roiCols.length > 1 ? roiCols.map(c => `<th class="num">${esc(c)}</th>`).join('') : '<th class="num">Estimate</th>'}</tr></thead>
               <tbody>${pres.sections.map(sec => `<tr class="roi-sec"><td colspan="${roiCols.length + 1}">${esc(sec.title)}</td></tr>${sec.rows.map(([k, vals]) => `<tr><td>${esc(k)}</td>${vals.map(v => `<td class="num" style="white-space:normal;">${esc(v)}</td>`).join('')}</tr>`).join('')}`).join('')}</tbody>
@@ -871,10 +870,21 @@
             ${savingsLead ? `<p class="pg-lead">${savingsLead}</p>` : ''}
             ${roiHeadlineHtml(pres)}
             ${est ? roiChartsHtml(est, money, { dollars: pres.dollars, bills: pres.bills }) : ''}
-            ${roiListsHtml(pres)}
+            ${roiListsHtml(pres, pres.headline ? 'bill' : '')}
             ${asksHtml}
-            ${roiTableHtml}
+            ${pres.headline ? '<p class="note-line">What we assumed and how we worked it out follow the payment schedule.</p>' : roiTableHtml}
             ${planOptsHtml}
+          </div>
+        </section>` : '';
+      // What we assumed and the yearly table come after the price and payment schedule (owner, 12 Nov
+      // 2026). Without the three figures the table is the savings page's own figures, so it stays there.
+      const workingHtml = savingsHtml && pres.headline ? `
+        <section class="pg savings">
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">How we<br>worked it out</h1>
+            ${roiListsHtml(pres, 'assumed')}
+            ${roiTableHtml}
           </div>
         </section>` : '';
 
@@ -1143,7 +1153,7 @@
       // original quote rather than repeating it.
       content.innerHTML = vInfo
         ? coverHtml + variationPageHtml
-        : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + investHtml + breakdownHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+        : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + investHtml + breakdownHtml + workingHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {

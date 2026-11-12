@@ -12,7 +12,7 @@
 const fetch = require('node-fetch');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { claudeJson, safeSlice } = require('./_shared/claude-json');
+const { quickJson, claudeText, safeSlice } = require('./_shared/claude-json');
 const { INVOICE_NOTES_PROMPT } = require('../../agents/prompts/invoice-notes.js');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
@@ -81,14 +81,14 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: claudeJson({ model: 'claude-sonnet-5-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+      body: quickJson({ model: 'claude-sonnet-5-5', messages: [{ role: 'user', content: prompt }] }),
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       throw new Error(`Anthropic API error: ${res.status} ${errText.slice(0, 300)}`);
     }
     const data = await res.json();
-    const text = (data.content || []).map(b => b.text || '').join('').trim().replace(/\s*—\s*/g, ', ');
+    const text = claudeText(data).trim().replace(/\s*—\s*/g, ', ');
     if (!text || text === 'NOTHING') {
       return json(200, { ok: false, error: 'The site notes do not say what work was done. Write the notes by hand.' });
     }

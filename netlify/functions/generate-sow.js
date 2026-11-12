@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 // Drafts a full scope-of-works document from a brief, the stage names/
 // descriptions already generated, and optionally the actual content of
@@ -122,9 +122,8 @@ Write the scope of works now (plain text - no markdown headers/asterisks, use pl
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 1500,
         messages: [{ role: 'user', content }],
       }),
     });
@@ -135,7 +134,7 @@ Write the scope of works now (plain text - no markdown headers/asterisks, use pl
     }
 
     const data = await res.json();
-    const sow = data.content.map((b) => b.text || '').join('').trim();
+    const sow = claudeText(data).trim();
 
     const notes = [];
     if (leftOut.length) notes.push(`Only the first ${MAX_DOCS} documents were given to the AI; not used: ${leftOut.join(', ')}.`);
