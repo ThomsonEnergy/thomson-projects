@@ -23,7 +23,7 @@ Names only. Values never go in the repo, in chat, or in a commit.
 
 Integration credentials live in the database, not env vars, read through `getIntegrationKey()` (`netlify/functions/_shared/get-integration-key.js`). A `<NAME>_API_KEY` env var is only a fallback.
 
-Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`, `apns_key_id`, `apns_team_id`, `apns_private_key` (Apple push for the TEgo iPhone app, see `docs/IOS_APP.md`).
+Keys: `anthropic`, `assemblyai`, `abr_guid`, `servicem8`, `pylon`, `photoroom` (the picture editor's automatic cut-out, optional), `xero_client_id`, `xero_client_secret`, `xero_webhook_key`, `google_client_id`, `google_client_secret`, `google_refresh_token`, `google_history_id`, `google_oauth_pending_state`, `airwallex_api_key`, `airwallex_client_id`, `airwallex_webhook_secret`, `formbay`, `formbay_username`, `formbay_password`, `formbay_webhook_secret`, `vapid_public_key`, `vapid_private_key`, `apns_key_id`, `apns_team_id`, `apns_private_key` (Apple push for the TEgo iPhone app, see `docs/IOS_APP.md`).
 
 The staging branch starts with an empty `api_keys` table, so Xero, Gmail, Airwallex, Formbay and push do nothing there. That is deliberate: staging can never email a customer or post to the live Xero. Add sandbox keys to staging only when testing that integration.
 
