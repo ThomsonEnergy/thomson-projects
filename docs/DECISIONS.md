@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 13 Nov 2026
+
+- Planned (waiting on yes): item 81, ask suppliers for prices from a quote (RFQ1001, an email with a request PDF, not an order), the supplier's quote filed on the job by itself when it comes back on that conversation and its prices read onto the lines, Convert to PO on the job once the client approves. With it, part A as a bug fix into `main`: any email sent from a quote's Emails tab moved it to Quote Sent; now only an email that carries the quote PDF does. Detail: `docs/IDEAS_BACKLOG.md` item 81.
+
 ## 12 Nov 2026
 
 - Bug fix, LIVE (owner: "layout is in but it's not loading any emails", straight into `main`): the new Inbox list loader read the search text one line before it was defined, so every list threw and stayed on Loading. One line moved. Found by the owner on the live site minutes after the release: the cloud session could not open staging, so nobody had loaded a real inbox before release. Lesson in `docs/IDEAS_BACKLOG.md` item 77.
