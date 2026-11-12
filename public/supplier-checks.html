@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .bc-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
@@ -42,22 +42,30 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Bill checks</h1>
-    <p class="subtitle">Every supplier bill is checked line by line against its PO, and every supplier statement against our bills, so nothing is missed, paid twice or overcharged. Emails to suppliers go from invoice@ and only when you press Send.</p>
-
-    <div class="card">
-      <div class="bc-filters" id="bc-filters">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 480px;">
+        <h1>Bill checks</h1>
+        <p class="subtitle">Every supplier bill is checked line by line against its PO, and every supplier statement against our bills, so nothing is missed, paid twice or overcharged. Emails to suppliers go from invoice@ and only when you press Send.</p>
+      </div>
+      <div class="bc-filters" id="bc-filters" style="margin:0;">
         <button type="button" class="secondary active" data-f="approve">To approve</button>
         <button type="button" class="secondary" data-f="problems">Problems</button>
         <button type="button" class="secondary" data-f="statements">Statements</button>
         <button type="button" class="secondary" data-f="missing">Missing statements</button>
       </div>
-      <div id="bc-body"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="bc-body"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let filter = 'approve', bills = [], statements = [], suppliers = [], missing = [];

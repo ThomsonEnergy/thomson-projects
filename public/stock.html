@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,40 +26,47 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Stock</h1>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Stock</h1>
     <p class="subtitle">Materials on hand: cost and sell price feed quotes, POs and job costing. Cable is counted by the drum (metres, each drum shown), consumables by the pack.</p>
-
-    <div class="grid cols-2">
+      </div>
+    <div class="grid cols-2" style="flex:0 1 420px;">
       <div class="stat"><div class="label">Total stock cost</div><div class="value" id="stat-total-stock-cost">-</div></div>
       <div class="stat"><div class="label">Below minimum</div><div class="value" id="stat-below-minimum">-</div></div>
     </div>
+    </div>
 
-    <div id="stock-checks"></div>
-
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:2.4;">
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
         <input id="stock-search" placeholder="Search by name, category, or supplier..." style="max-width:320px;" />
-        <div>
-          <button class="secondary" id="stocktake-btn" style="margin-right:8px;">Stocktake (Warehouse)</button>
-          <button id="create-stock-po-btn" style="margin-right:8px;">+ Create PO</button>
-          <button class="secondary" id="suggest-restock-btn" style="margin-right:8px;">Suggest restock PO</button>
-          <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
-          <button class="secondary" id="scan-part-btn" style="margin-right:8px;">&#128247; Scan a part</button>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <button class="secondary" id="stocktake-btn">Stocktake (Warehouse)</button>
+          <button id="create-stock-po-btn">+ Create PO</button>
+          <button class="secondary" id="suggest-restock-btn">Suggest restock PO</button>
+          <button class="secondary" id="upload-pricelist-btn">Upload pricelist</button>
+          <button class="secondary" id="scan-part-btn">&#128247; Scan a part</button>
           <button id="add-material-btn" style="display:none;">+ Add material</button>
         </div>
       </div>
       <div id="stock-list"><p class="subtitle">Loading...</p></div>
     </div>
-
+      </div>
+      <div class="page-col">
+    <div id="stock-checks"></div>
     <div class="card">
       <h2>Stock purchase orders</h2>
       <p class="subtitle" style="margin-bottom:14px;">Purchase orders for general stock replenishment - not tied to any specific job.</p>
       <div id="stock-pos-list"><p class="subtitle">Loading...</p></div>
     </div>
+      </div>
+    </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allMaterials = [];

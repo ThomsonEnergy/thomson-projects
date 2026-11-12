@@ -11,7 +11,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/job.css?v=2" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,11 +27,11 @@
     </div>
   </div>
 
-  <div class="wrap">
+  <div class="wrap fill job-wrap">
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -3343,7 +3344,8 @@
                 <div id="suggest-prebuilds-msg"></div>
                 <p style="margin:12px 0 0; font-size:15px;">Quoted total (ex GST): <strong id="total-display">$0.00</strong></p>
 
-                <div style="margin-top:18px; padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) || Number(project.stc_total) > 0 || Number(project.bstc_total) > 0 || (Array.isArray(project.sm8_stcs) && project.sm8_stcs.length) ? '' : 'display:none;'}" id="credits-card">
+                <div class="qs-pair">
+                <div style="padding:12px; background:var(--surface-2); border-radius:8px; ${['solar', 'battery'].includes(template) || Number(project.stc_total) > 0 || Number(project.bstc_total) > 0 || (Array.isArray(project.sm8_stcs) && project.sm8_stcs.length) ? '' : 'display:none;'}" id="credits-card">
                   <label style="margin-top:0; font-weight:600;">STC and BSTC credits</label>
                   <p class="subtitle" style="margin:2px 0 10px;">Two lines on the proposal, claimed with the stage picked here (blank: the last stage). Ex GST; a company client sees GST added on the proposal and the invoice. BSTCs are approved and paid by Formbay separately, so they stay separate here and on the invoice.</p>
                   <div id="stc-credit-block">
@@ -3375,7 +3377,7 @@
                   </div>
                 </div>
 
-                <div id="deposit-card" style="margin-top:18px; ${info.showDeposit ? '' : 'display:none;'}">
+                <div id="deposit-card" style="${info.showDeposit ? '' : 'display:none;'}">
                   <label style="margin-top:0; font-weight:600;">Payment schedule</label>
                   <div style="max-width:160px;"><label style="margin-top:6px;">Deposit %</label><input id="p-deposit" type="number" step="1" value="${project.deposit_percent ?? 10}" /></div>
                   <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400; cursor:pointer;"><input type="checkbox" id="p-breakdown" style="width:auto; margin:0;" ${project.show_investment_breakdown ? 'checked' : ''} /> Show investment breakdown (a page after the Investment summary listing each stage's items, prebuilds by their client description, no item prices)</label>
@@ -3386,6 +3388,7 @@
                     <button type="button" class="secondary" id="add-milestone-btn" style="font-size:12px; padding:6px 10px;">+ Add milestone</button>
                     <p class="subtitle" id="milestone-total-note" style="margin-top:6px;"></p>
                   </div>
+                </div>
                 </div>
                 <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
                 <div id="qs3-msg"></div>
@@ -3405,15 +3408,19 @@
                 <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
                 <div id="generate-msg"></div>
 
+                <div class="qs-pair">
+                <div>
                 <label style="margin-top:16px; font-weight:600;">Scope of works document</label>
                 <p class="subtitle" style="margin:2px 0 6px;">Shown as its own section in the proposal, above the pricing table.</p>
                 <textarea id="p-sow" style="min-height:240px;" placeholder="Paste your scope of works here, or generate it above...">${escapeHtml(project.sow_text || '')}</textarea>
-
+                </div>
+                <div>
+                <label style="margin-top:16px; font-weight:600;">Terms and conditions</label>
+                <textarea id="p-terms" style="min-height:240px;">${escapeHtml(project.terms_text || '')}</textarea>
+                </div>
+                </div>
 
                 <div id="quote-pictures"></div>
-
-                <label style="margin-top:14px; font-weight:600;">Terms and conditions</label>
-                <textarea id="p-terms" style="min-height:140px;">${escapeHtml(project.terms_text || '')}</textarea>
                 <div style="margin-top:14px;"><button type="button" id="qs4-save">Save scope of works</button></div>
                 <div id="qs4-msg"></div>
               </div>
@@ -3985,13 +3992,15 @@
       const FIELD_TABS_FIRST = ['summary', 'contacts', 'photos', 'documents', 'feed'];
       const tabsInOrder = pricingVisible ? tabDefs : [...FIELD_TABS_FIRST.map(p => tabDefs.find(d => d.panel === p)), ...tabDefs.filter(d => !FIELD_TABS_FIRST.includes(d.panel))];
 
-      content.innerHTML = `
+      keepColumnScroll(content, () => { content.innerHTML = `
+        <div class="job-head"><div class="job-head-main">
         <h1>${escapeHtml(project.name)}</h1>
         <p class="subtitle">${pricingVisible && project.client_id ? `<a class="link-quiet" href="/clients.html?id=${encodeURIComponent(project.client_id)}" target="_blank" title="Open the client card: details, contacts, sites, payment terms">${escapeHtml(project.client_name || '')}</a>` : escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${project.job_number && project.pipeline_stage ? ` <span class="badge draft" id="pipeline-stage-badge" title="Pipeline stage">${escapeHtml(pipelineStageLabel(project.pipeline_stage))}</span>` : ''}${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
         ${isFrozenQuote && project.approved_at ? `<p class="subtitle" style="margin-top:2px;">Approved ${new Date(project.approved_at).toLocaleDateString('en-AU')}${project.approval_note ? ' - ' + escapeHtml(project.approval_note) : ' - approved online by the client'}${project.approval_email_thread_id ? ` &middot; <a class="link-quiet" href="/inbox.html?thread=${project.approval_email_thread_id}">View the email</a>` : ''}</p>` : ''}
         ${!project.job_number && project.status === 'declined' ? `<div class="error-box" style="margin:6px 0 12px;">${approvalProofHtml(project)}${pricingVisible ? (project.expired ? ' <button type="button" class="secondary vu-extend" data-key="quote" style="font-size:12px; padding:4px 10px; margin-left:6px;">Extend...</button>' : ' <button type="button" class="secondary" id="quote-reopen-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Reopen quote</button>') : ''}</div>` : ''}
         ${!project.job_number && project.status === 'sent' ? `<div id="quote-valid-until">${validUntilHtml(project, 'quote', pricingVisible)}</div>` : ''}
-        <div style="margin-bottom:20px;">
+        </div><div class="job-head-side">
+        <div class="job-head-btns">
           ${pricingVisible && !editMode ? `
             ${project.job_number ? `<button id="edit-toggle-btn" class="secondary">Edit stages</button>` : ''}
             ${!isFrozenQuote ? `<button type="button" id="schedule-staff-btn" class="secondary">Schedule staff</button>` : ''}
@@ -4014,27 +4023,40 @@
           <button type="button" id="job-search-clear" title="Clear search">&times;</button>
           <div id="job-search-results"></div>
         </div>` : ''}
-        <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:20px; overflow-x:auto;">
+        </div></div>
+        ${pricingVisible ? `<div class="job-money">${isQuoteFree ? `
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
+        ` : `
+                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
+          ${project.job_number ? `
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>` : ''}
+        `}</div>` : ''}
+        <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:10px; overflow-x:auto;">
           ${tabsInOrder.filter(d => d.show).map(d => `<button class="settings-tab${d.panel === (isStepQuote ? 'quote' : 'summary') ? ' active' : ''}" data-panel="${d.panel}">${d.label}</button>`).join('')}
         </div>
 
         <div class="job-tab-layout">
+          ${!editMode ? `<div class="job-side">
+            <div id="clock-here-card"></div>
+            <div class="card" id="job-key-people" style="display:none;"></div>
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h2 style="margin:0;">Tasks</h2>
+                <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
+              </div>
+              <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
+            </div>
+          </div>` : ''}
           <div class="job-tab-main">
 
             ${isStepQuote ? quoteStepsPanelHtml(project, centres) : ''}
 
             <div class="settings-panel${isStepQuote ? '' : ' active'}${!editMode ? ' job-card-grid' : ''}" id="panel-summary">
-              ${!editMode ? '<div id="clock-here-card"></div>' : ''}
-              ${!editMode ? '<div class="card" id="job-key-people" style="display:none;"></div>' : ''}
-              ${!editMode ? `
-              <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-                  <h2 style="margin:0;">Tasks</h2>
-                  <button type="button" id="add-task-btn" class="secondary">+ Add task</button>
-                </div>
-                <div id="job-tasks-list"><p class="subtitle">Loading...</p></div>
-              </div>
-              ` : ''}
               ${!editMode && !isStepQuote && (project.notes || Object.keys(project.template_answers || {}).length) ? `
               <div class="card">
                 ${project.notes ? `
@@ -4065,26 +4087,7 @@
               </div>
               ` : ''}
               ${!editMode ? '<div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
-              ${pricingVisible ? (isQuoteFree ? `
-                <div class="grid cols-2">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
-                </div>
-              ` : `
-                <div class="grid cols-${project.job_number ? '4' : '3'}">
-                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
-                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
-                </div>
-
-                ${project.job_number ? `
-                <div class="grid cols-2" style="margin-top:10px;">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
-                </div>
-                ` : ''}
-
+              ${pricingVisible && !isQuoteFree ? `
                 ${project.job_number ? `
                 <div class="card" style="margin-top:20px;">
                   <h2>Progress</h2>
@@ -4111,7 +4114,7 @@
                   <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items. Click the accrued figure to see the timesheets behind it.</p>
                 </div>
                 ` : ''}
-              `) : ''}
+              ` : ''}
 
               ${project.warranty_of_project_id && !editMode ? `
               <div class="card" style="border-color:#eab308;">
@@ -4703,7 +4706,7 @@
             </div>
           </div>
         </div>
-      `;
+      `; });
 
       // Item 32: each tab has its own address (?tab=photos and so on), so a refresh,
       // a shared link or a notification lands on it. replaceState, so Back still leaves the job.

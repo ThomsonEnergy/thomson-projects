@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .day-item {
@@ -40,78 +40,86 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>My Day</h1>
-    <p class="subtitle">Your bookings, your tasks, and anything free to pick up. For your timesheet history or requesting leave, see <a href="/timesheets.html" class="link-quiet">Timesheets</a>.</p>
-
-    <div class="card">
-      <h2 id="clock-heading">Clock</h2>
-      <div id="clock-checking"><p class="subtitle" style="margin:0;">Checking your clock...</p></div>
-      <div id="clock-idle" style="display:none;">
-        <div id="todays-schedule"></div>
-        <div class="grid cols-3">
-          <div style="grid-column: span 2;">
-            <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
-            <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
-            <div id="clock-job-results"></div>
-            <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
-            <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px;">+ New job (no quote)</button>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>My Day</h1>
+        <p class="subtitle">Your bookings, your tasks, and anything free to pick up. For your timesheet history or requesting leave, see <a href="/timesheets.html" class="link-quiet">Timesheets</a>.</p>
+      </div>
+    </div>
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:1.3">
+        <div class="card">
+          <h2 id="clock-heading">Clock</h2>
+          <div id="clock-checking"><p class="subtitle" style="margin:0;">Checking your clock...</p></div>
+          <div id="clock-idle" style="display:none;">
+            <div id="todays-schedule"></div>
+            <div class="grid cols-3">
+              <div style="grid-column: span 2;">
+                <label style="margin-top:0">Job - search, or leave blank for training/office time</label>
+                <input id="clock-job-search" placeholder="Job number, name, client, address..." autocomplete="off" />
+                <div id="clock-job-results"></div>
+                <div id="clock-job-selected" class="subtitle" style="margin-top:4px;"></div>
+                <button type="button" class="secondary" id="new-quick-job-btn" style="margin-top:8px;">+ New job (no quote)</button>
+              </div>
+            </div>
+            <div id="clock-category-row" style="margin-top:10px;">
+              <label style="margin-top:0">What's this time for</label>
+              <select id="clock-category"></select>
+              <div id="clock-tafe-row" style="display:none; margin-top:8px;">
+                <p class="subtitle" style="margin:0 0 6px;">TAFE is a fixed 8 hour day (7:00am to 3:30pm, 30 minute unpaid break) - no clocking in and out.</p>
+                <label style="margin-top:0">Which day?</label>
+                <input type="date" id="clock-tafe-date" />
+              </div>
+            </div>
+            <div id="clock-cost-centres" style="display:none; margin-top:10px;">
+              <label style="margin-top:0">Which stage(s) are you working on?</label>
+              <div id="clock-cc-chips"></div>
+              <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
+            </div>
+            <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
           </div>
-        </div>
-        <div id="clock-category-row" style="margin-top:10px;">
-          <label style="margin-top:0">What's this time for</label>
-          <select id="clock-category"></select>
-          <div id="clock-tafe-row" style="display:none; margin-top:8px;">
-            <p class="subtitle" style="margin:0 0 6px;">TAFE is a fixed 8 hour day (7:00am to 3:30pm, 30 minute unpaid break) - no clocking in and out.</p>
-            <label style="margin-top:0">Which day?</label>
-            <input type="date" id="clock-tafe-date" />
+          <div id="clock-active" style="display:none;">
+            <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
+            <div style="display:flex; gap:8px;">
+              <button class="danger" id="clock-out-btn" style="flex:1;">Clock out</button>
+              <button type="button" class="secondary" id="switch-job-btn" style="flex:1;">Switch job</button>
+            </div>
+            <button type="button" class="secondary" id="used-stock-btn" style="width:100%; margin-top:10px; min-height:44px; display:none;">Used stock on this job</button>
+            <div id="active-job-card" style="display:none;"></div>
           </div>
+          <div id="clock-msg"></div>
+          <button type="button" class="secondary" id="report-incident-btn" style="width:100%; margin-top:10px;">Report an incident or near miss</button>
         </div>
-        <div id="clock-cost-centres" style="display:none; margin-top:10px;">
-          <label style="margin-top:0">Which stage(s) are you working on?</label>
-          <div id="clock-cc-chips"></div>
-          <p class="subtitle" id="clock-cc-hint" style="margin:6px 0 0;"></p>
-        </div>
-        <button id="clock-in-btn" style="width:100%; margin-top:14px;">Clock in</button>
-      </div>
-      <div id="clock-active" style="display:none;">
-        <p class="subtitle" style="margin-bottom:10px;">Clocked in to <strong id="active-project-name"></strong> since <strong id="active-since"></strong> (<span id="active-elapsed"></span>)</p>
-        <div style="display:flex; gap:8px;">
-          <button class="danger" id="clock-out-btn" style="flex:1;">Clock out</button>
-          <button type="button" class="secondary" id="switch-job-btn" style="flex:1;">Switch job</button>
-        </div>
-        <button type="button" class="secondary" id="used-stock-btn" style="width:100%; margin-top:10px; min-height:44px; display:none;">Used stock on this job</button>
-        <div id="active-job-card" style="display:none;"></div>
-      </div>
-      <div id="clock-msg"></div>
-      <button type="button" class="secondary" id="report-incident-btn" style="width:100%; margin-top:10px;">Report an incident or near miss</button>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-        <h2 style="margin:0;">Your schedule</h2>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="secondary" id="my-sched-day-btn">Day</button>
-          <button type="button" class="secondary" id="my-sched-week-btn">Week</button>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+            <h2 style="margin:0;">Your schedule</h2>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="secondary" id="my-sched-day-btn">Day</button>
+              <button type="button" class="secondary" id="my-sched-week-btn">Week</button>
+            </div>
+          </div>
+          <div id="my-schedule-view"><p class="subtitle">Loading...</p></div>
         </div>
       </div>
-      <div id="my-schedule-view"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Your scheduled tasks</h2>
-      <div id="my-tasks"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Free tasks - up for grabs</h2>
-      <p class="subtitle" style="margin-bottom:8px;">Unassigned tasks. Pick one up if you reckon you can do it.</p>
-      <input type="search" id="open-task-search" placeholder="Search job number, job or task" style="margin-bottom:10px;" />
-      <div id="open-tasks"><p class="subtitle">Loading...</p></div>
+      <div class="page-col">
+        <div class="card">
+          <h2>Your scheduled tasks</h2>
+          <div id="my-tasks"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
+      <div class="page-col">
+        <div class="card">
+          <h2>Free tasks - up for grabs</h2>
+          <p class="subtitle" style="margin-bottom:8px;">Unassigned tasks. Pick one up if you reckon you can do it.</p>
+          <input type="search" id="open-task-search" placeholder="Search job number, job or task" style="margin-bottom:10px;" />
+          <div id="open-tasks"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>

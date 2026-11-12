@@ -11,8 +11,15 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
+  <style>
+    /* item 77: the open lead fills the right-hand column on a laptop */
+    .lead-dock > .card { max-width: none !important; max-height: none !important; overflow: visible !important; }
+    #lead-detail:empty::before { content: 'Click an enquiry to open it here.'; display: block; color: var(--muted); font-size: 13px; padding: 16px; border: 1px dashed var(--border); border-radius: var(--radius); }
+    @media (max-width: 900px) { .lead-detail-col { display: none; } }
+    details.card > summary { cursor: pointer; }
+  </style>
 </head>
 <body>
   <div class="topbar">
@@ -26,37 +33,45 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Leads</h1>
-    <p class="subtitle">Enquiries from the website. Click one to see the full detail and turn it into a job, quote, or estimate.</p>
-
-    <div class="grid cols-4" id="lead-stats">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Leads</h1>
+        <p class="subtitle">Enquiries from the website. Click one to see the full detail and turn it into a job, quote, or estimate.</p>
+      </div>
+    <div class="grid cols-4" id="lead-stats" style="flex:1 1 560px; max-width:760px;">
       <div class="stat"><div class="label">New enquiries</div><div class="value placeholder">-</div></div>
       <div class="stat"><div class="label">This week</div><div class="value placeholder">-</div></div>
       <div class="stat"><div class="label">Converted</div><div class="value placeholder">-</div></div>
       <div class="stat"><div class="label">Site interest (anonymous)</div><div class="value placeholder">-</div></div>
     </div>
+    </div>
 
+    <div class="page-cols">
+    <div class="page-col">
     <div class="card">
       <h2>Call requests</h2>
       <p class="subtitle" style="margin-bottom:14px;">"Book a call" requests from the website, with the time they asked for. Unclaimed ones also show as up-for-grabs on the Home page.</p>
       <div id="callback-requests-list"><p class="subtitle">Loading...</p></div>
     </div>
-
+    </div>
+    <div class="page-col" style="flex-grow:1.2;">
     <div class="card">
       <h2>Enquiries</h2>
       <p class="subtitle" style="margin-bottom:14px;">People who left contact details.</p>
       <div id="contact-leads-list"><p class="subtitle">Loading...</p></div>
     </div>
-
-    <div class="card">
-      <h2>Site interest</h2>
+    <details class="card">
+      <summary><h2 style="display:inline;">Site interest</h2></summary>
       <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left - not actionable individually, but useful for spotting what's getting attention.</p>
       <div id="anon-leads-list"><p class="subtitle">Loading...</p></div>
+    </details>
+    </div>
+    <div class="page-col lead-detail-col" style="flex-grow:1.2;"><div id="lead-detail"></div></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {
@@ -134,7 +149,10 @@
 
     async function openLeadDetail(lead, linkedProjectId) {
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
+      // Laptop: the lead opens in the right-hand column (item 77). Phone: a popup as before.
+      const dock = window.matchMedia('(min-width: 901px)').matches ? document.getElementById('lead-detail') : null;
+      if (dock) overlay.className = 'lead-dock';
+      else overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:200; padding:16px;';
       const attachments = (lead.details && lead.details.attachments) || [];
 
       overlay.innerHTML = `
@@ -184,7 +202,7 @@
 
           ${attachments.length ? `<label>Attachments</label><div id="ld-attachments" style="display:flex; flex-wrap:wrap; gap:8px;"><p class="subtitle">Loading...</p></div>` : ''}
         </div>`;
-      document.body.appendChild(overlay);
+      if (dock) dock.replaceChildren(overlay); else document.body.appendChild(overlay);
       overlay.querySelector('#ld-close-btn').addEventListener('click', () => overlay.remove());
       overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 

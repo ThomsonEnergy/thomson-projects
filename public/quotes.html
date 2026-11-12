@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,21 +26,26 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+  <div class="wrap fill">
+    <div class="page-head">
       <div>
         <h1>Quotes</h1>
         <p class="subtitle">Every quote built through this tool.</p>
       </div>
       <a href="/new-project.html" class="btn" id="new-quote-btn">+ New quote</a>
+      <div class="settings-tabs" id="quotes-tabs" style="flex:1 1 100%; flex-direction:row; position:static; border-bottom:1px solid var(--border); overflow-x:auto;"></div>
     </div>
 
-    <div class="card">
-      <div id="list"><p class="subtitle">Loading...</p></div>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     (async function () {
@@ -217,15 +222,14 @@
           <p class="subtitle" style="margin-top:12px;"><a class="link-quiet" href="/leads.html">Open the Leads page</a></p>`;
       }
 
-      list.innerHTML = `
-        <div class="settings-tabs" id="quotes-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;">
+      document.getElementById('quotes-tabs').innerHTML = `
           ${pricingVisible ? `<button class="settings-tab" data-panel="leads">Leads (${pendingLeads.length + openCalls.length})${leadsLate ? ' <span title="Waiting over 48 hours" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--amber); vertical-align:middle; margin-left:4px;"></span>' : ''}</button>` : ''}
           <button class="settings-tab active" data-panel="active">Active (${pendingQuotes.length})</button>
           <button class="settings-tab" data-panel="sent">Sent to Client (${sentQuotes.length})</button>
           <button class="settings-tab" data-panel="approved">Approved (${approvedQuotes.length})</button>
           <button class="settings-tab" data-panel="declined">Declined (${declinedQuotes.length})</button>
-          <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>
-        </div>
+          <button class="settings-tab" data-panel="archived">Archived (${archived.length})</button>`;
+      list.innerHTML = `
         ${pricingVisible ? `<div class="settings-panel" id="panel-leads">${buildLeadRowsHtml()}</div>` : ''}
         <div class="settings-panel active" id="panel-active">
           ${bulkBarHtml()}

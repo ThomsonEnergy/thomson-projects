@@ -2896,6 +2896,16 @@ function loadNotificationBell() {
 // Netlify function, which can query the live database (read-only, scoped
 // to whatever this logged-in staff member is allowed to see) to answer
 // with real numbers instead of guessing.
+// Item 77: run an innerHTML redraw and keep each scrolling column where it was.
+function keepColumnScroll(root, redraw) {
+  const sel = '.page-col, .job-side, .job-tab-main, .job-activity-sidebar';
+  const before = root ? [...root.querySelectorAll(sel)].map((el) => [el.className, el.scrollTop]) : [];
+  redraw();
+  if (!before.length) return;
+  const after = [...root.querySelectorAll(sel)];
+  before.forEach(([cls, top], i) => { if (top && after[i] && after[i].className === cls) after[i].scrollTop = top; });
+}
+
 // Shared HTML-escape for dropping any plain text (AI output, anything not
 // already known-safe) into an innerHTML template literal. Quotes are
 // escaped too, so it is also safe inside value="..." / data-x="..." attributes

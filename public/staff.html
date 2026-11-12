@@ -11,12 +11,17 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
-<link rel="stylesheet" href="/css/hr.css?v=2" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/hr.css?v=3" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .staff-head { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
   .staff-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
+  /* Item 77: cards three across on a laptop, two on a small one, stacked in the same order on a phone */
+  .staff-cols { display: grid; gap: 12px; align-items: start; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .staff-cols > .card { margin: 0; }
+  @media (max-width: 1100px) { .staff-cols { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 800px) { .staff-cols { grid-template-columns: 1fr; } }
   .staff-avatar-fallback { width: 72px; height: 72px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 22px; }
 </style>
 </head>
@@ -37,7 +42,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=3"></script>
   <script src="/js/hr-shared.js?v=4"></script>
@@ -147,7 +152,7 @@
         </div>
 
         <div class="settings-panel active" id="panel-overview"></div>
-        <div class="settings-panel" id="panel-documents">
+        <div class="settings-panel" id="panel-documents"><div class="staff-cols">
           <div class="card" ${selfView ? 'style="display:none;"' : ''}>
             <h2>Employment documents</h2>
             <p class="subtitle" style="margin-bottom:12px;">Make a document from this person's record, or view a blank template to print and fill in by hand.</p>
@@ -170,7 +175,7 @@
             <input type="file" id="doc-file-input" multiple style="margin-top:8px;" />
             <div id="doc-upload-msg"></div>
           </div>
-        </div>
+        </div></div>
         <div class="settings-panel" id="panel-photos">
           <div class="card">
             <h2>Photos</h2>
@@ -315,7 +320,7 @@
       const live = letters.filter(w => w.letter_type !== 'counselling' && warningIsLive(w));
       const unsigned = letters.filter(w => w.status === 'issued' && !w.employee_signed_at && !w.refused_to_sign).length;
       document.getElementById('panel-overview').innerHTML = `
-        <div class="grid cols-2" style="align-items:start;">
+        <div class="staff-cols">
           <div class="card" style="margin:0;">
             <h2>Contact &amp; employment</h2>
             <dl class="kv">
@@ -365,7 +370,6 @@
               <dt>KPIs in progress</dt><dd>${kpis.filter(k => k.status === 'active').length || 'None'}</dd>
             </dl>
           </div>
-        </div>
         <div class="card">
           <h2>Licences</h2>
           ${p.licences.length ? `<table class="responsive-stack"><thead><tr><th>Licence</th><th>Number</th><th>Expiry</th><th></th></tr></thead><tbody>
@@ -375,6 +379,7 @@
               <td data-label="Expiry">${expiryBadge(l.expiry_date)}</td>
               <td data-label="">${l.file_path ? `<button type="button" class="secondary lic-view" data-path="${escapeHtml(l.file_path)}" data-title="${escapeHtml(l.licence_name)}" style="font-size:12px; padding:4px 10px;">View file</button>` : '<span class="subtitle" style="font-size:12px;">No file</span>'}${HR.myRole === 'admin' ? ` <button type="button" class="secondary lic-ask" data-id="${l.id}" style="font-size:12px; padding:4px 10px;">Ask to update</button>` : ''}</td>
             </tr>`).join('')}</tbody></table>` : '<p class="subtitle">No licences recorded. Add them on the Team page.</p>'}
+        </div>
         </div>`;
       wireContractPdf(document.getElementById('panel-overview'));
       const leaveBtn = document.getElementById('leave-refresh-btn');

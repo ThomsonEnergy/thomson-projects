@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
@@ -57,6 +57,15 @@
   }
   @media (max-width: 800px) {
     .cal-day { height: 80px; font-size: 10.5px; }
+  }
+
+  /* item 77: on a laptop the calendar fills the window; six weeks fit without scrolling the page */
+  @media (min-width: 901px) {
+    #schedule-card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-bottom: 12px; }
+    #month-view:not([style*="none"]) { flex: 1; min-height: 0; display: flex !important; flex-direction: column; }
+    #cal-grid { flex: 1; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
+    #cal-grid .cal-day { height: auto; min-height: 0; }
+    #day-view { flex: 1; min-height: 0; overflow-y: auto; }
   }
 
   .day-board { display: flex; gap: 16px; align-items: flex-start; }
@@ -171,11 +180,14 @@
     </div>
   </div>
 
-  <div class="wrap wide">
+  <div class="wrap fill">
+    <div class="page-head">
+    <div>
     <h1>Schedule</h1>
     <p class="subtitle" id="schedule-subtitle">Who's on which job, and who's on leave. Approved leave shows automatically - click a day to assign someone to a job.</p>
-
+    </div>
     <div id="clocked-in-now"></div>
+    </div>
 
     <div class="card" id="schedule-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
@@ -217,7 +229,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)

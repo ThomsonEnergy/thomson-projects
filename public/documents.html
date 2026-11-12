@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,28 +26,36 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Documents</h1>
-    <p class="subtitle">Company documents and templates we send to clients (not job paperwork, that lives on each job, and not how-tos, those live in Knowledge). To send one, open the job, go to Documents, press "Add from Documents", then attach it from the job's Emails tab.</p>
-
-    <div class="card">
-      <h2>Library</h2>
-      <div id="cd-list"><p class="subtitle">Loading...</p></div>
-      <div id="cd-list-msg"></div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Documents</h1>
+        <p class="subtitle">Company documents and templates we send to clients (not job paperwork, that lives on each job, and not how-tos, those live in Knowledge). To send one, open the job, go to Documents, press "Add from Documents", then attach it from the job's Emails tab.</p>
+      </div>
     </div>
-
-    <div class="card">
-      <h2>Add a document</h2>
-      <label style="margin-top:0">Title</label>
-      <input id="cd-title" placeholder="e.g. Battery warranty information" />
-      <label>File</label>
-      <input type="file" id="cd-file" />
-      <div style="margin-top:12px;"><button id="cd-add-btn">Add</button></div>
-      <div id="cd-add-msg"></div>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <h2>Library</h2>
+          <div id="cd-list"><p class="subtitle">Loading...</p></div>
+          <div id="cd-list-msg"></div>
+        </div>
+      </div>
+      <div class="page-col" style="flex: 0 0 360px">
+        <div class="card">
+          <h2>Add a document</h2>
+          <label style="margin-top:0">Title</label>
+          <input id="cd-title" placeholder="e.g. Battery warranty information" />
+          <label>File</label>
+          <input type="file" id="cd-file" />
+          <div style="margin-top:12px;"><button id="cd-add-btn">Add</button></div>
+          <div id="cd-add-msg"></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
   <script>
     const esc = escapeHtml;
