@@ -751,6 +751,7 @@ html[data-theme="navy"] .success-box {
   font-weight: 500;
   cursor: pointer;
 }
+.settings-tabs:empty { display: none; }
 .settings-tab:hover { background: var(--surface-2); color: var(--text); }
 .settings-tab.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
 .settings-panel { display: none; }

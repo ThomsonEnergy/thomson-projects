@@ -77,7 +77,7 @@
       const budgetPercent = po.budget_cap ? Math.round((poTotalAmount(po) / Number(po.budget_cap)) * 100) : null;
 
       pageEl.innerHTML = `
-        <div class="page-col" style="flex-grow:2;">
+        <div class="page-col" style="flex-grow:2; padding-bottom:0;">
         <div class="card" id="po-head">
           <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
             <div style="min-width:0;">

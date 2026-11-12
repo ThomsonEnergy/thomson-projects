@@ -12,6 +12,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/style.css?v=25" />
 <link rel="stylesheet" href="/css/hr.css?v=3" />
+<style>
+  /* Item 77: a tab's cards side by side on a laptop (Details and Reporting two across, Evidence three), stacked in order on a phone */
+  @media (min-width: 901px) {
+    .settings-panel.inc-cols.active { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+    .inc-cols > .card { margin: 0; }
+    .inc-cols > :not(.card) { grid-column: 1 / -1; }
+  }
+  @media (min-width: 1101px) { .settings-panel.inc-cols.three.active { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+</style>
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -92,11 +101,11 @@
           <button class="settings-tab" data-panel="reporting">Reporting</button>
           <button class="settings-tab" data-panel="letters">Letters<span class="tab-count" id="c-letters"></span></button>
         </div>
-        <div class="settings-panel active" id="panel-details"></div>
+        <div class="settings-panel inc-cols active" id="panel-details"></div>
         <div class="settings-panel" id="panel-people"></div>
-        <div class="settings-panel" id="panel-evidence"></div>
+        <div class="settings-panel inc-cols three" id="panel-evidence"></div>
         <div class="settings-panel" id="panel-actions"></div>
-        <div class="settings-panel" id="panel-reporting"></div>
+        <div class="settings-panel inc-cols" id="panel-reporting"></div>
         <div class="settings-panel" id="panel-letters"></div>`;
       document.querySelectorAll('#inc-tabs .settings-tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.panel)));
       document.getElementById('btn-form10').addEventListener('click', () => showHrDocument(incidentReportHtml(inc, HR.company, people), `${ref} Form 10`));
