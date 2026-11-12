@@ -18,6 +18,8 @@
     .settings-panel.inc-cols.active { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
     .inc-cols > .card { margin: 0; }
     .inc-cols > :not(.card) { grid-column: 1 / -1; }
+    #panel-reporting > .card:first-child { grid-row: span 2; } /* SafeWork on the left, the two shorter cards stacked beside it */
+    #panel-reporting > .card:nth-child(3) { grid-column: 2; }
   }
   @media (min-width: 1101px) { .settings-panel.inc-cols.three.active { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 </style>
