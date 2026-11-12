@@ -454,8 +454,8 @@
       const key = [S.box, S.view, S.unreadOnly, S.mineOnly, S.search].join('|');
       if (key !== S.listKey) { S.listKey = key; listEl.innerHTML = '<p class="subtitle" style="padding:8px 10px;">Loading...</p>'; }
       let threads = [], header = '', latest = {}, sentRows = null, jobGroups = null;
-      const draftsView = !q && S.view === 'drafts';
       const q = S.search.trim();
+      const draftsView = !q && S.view === 'drafts';
       const labelId = !q && S.view.startsWith('label:') ? S.view.slice(6) : null;
       let label = labelId ? S.labels.find(l => l.id === labelId) : null;
       const mineBox = `<label title="Only conversations assigned to you"><input type="checkbox" id="mine-only" style="width:auto;" ${S.mineOnly ? 'checked' : ''} /> Mine</label>`;
