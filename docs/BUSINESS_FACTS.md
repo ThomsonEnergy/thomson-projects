@@ -1,6 +1,6 @@
 # Business Facts
 
-Last updated 23 Oct 2026
+Last updated 12 Nov 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
 
@@ -35,6 +35,14 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 - Rates are set in the app and pushed to Xero from the app, including after pay rises.
 - Timesheets arrive in Xero Payroll as drafts and are approved there (owner, 26 Oct 2026). A timesheet deleted in Xero (pay run redone) is sent again by the next push; one still in Xero is never sent twice.
 - Leave is requested and approved in the app (Timesheets page); approved leave goes to Xero Payroll as leave applications with the timesheet push (26 Oct 2026). Xero works out the leave hours from each person's ordinary hours.
+
+## SAA accreditation classes (owner, 12 Nov 2026)
+
+- Solar Accreditation Australia classes, and which job each one covers:
+  - **GCBS** (grid connected battery systems): battery jobs. This is the one the federal battery discount and a battery quote need.
+  - **GCPV** (grid connected PV): solar jobs.
+  - **SAPS** (stand-alone power systems): off-grid jobs.
+- Checks in the app match the class code in the licence name on Settings > Team, not the word "battery" or "solar". Jasper holds "Solar Accreditation Australia - GCPV & GCBS Design & Install (Full) Accreditation", valid to 30 Apr 2027.
 
 ## STCs and Formbay (confirmed 14 Oct 2026)
 
