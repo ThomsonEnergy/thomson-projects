@@ -121,7 +121,7 @@ const emailSendNow = (payload) => emailPostFn('send-gmail', payload, 'The email 
 
 // opts: { title, to, cc, subject, body, replyToThreadId, projectId, tagKind, quoteLink: {url, label, buttonText, checked},
 //         reviewRequest: {projectId, clientName, clientEmail} (shows "Ask for a review"),
-//         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId),
+//         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId, { attachments, to }),
 //         mailbox: { id, address, kind } (send from My inbox instead of sales@), draftId (a saved draft: Save draft
 //         button, and the draft is cleared once sent), onDraftSaved(),
 //         invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } (js/invoice-actions.js: the send goes in the invoice's history),
@@ -209,17 +209,19 @@ function openEmailComposer(opts) {
         bodyText += `\n\nIf you were happy with our work, we would really appreciate a quick review. It only takes a minute:\n[[button: Leave us a review | ${r.url}]]`;
       }
       btn.textContent = 'Sending...';
+      // the same file ticked twice (the quote PDF box and again from the job) goes once
+      const attachments = [...chosen, ...uploaded].filter((o, i, all) => all.findIndex(x => x.bucket === o.bucket && x.path === o.path) === i).map(o => ({ bucket: o.bucket, path: o.path, name: o.name }));
       const data = await emailSendNow({
         to, cc: overlay.querySelector('#ec-cc').value.trim() || undefined, subject, bodyText,
         replyToThreadId: opts.replyToThreadId || undefined,
-        // the same file ticked twice (the quote PDF box and again from the job) goes once
-        attachments: [...chosen, ...uploaded].filter((o, i, all) => all.findIndex(x => x.bucket === o.bucket && x.path === o.path) === i).map(o => ({ bucket: o.bucket, path: o.path, name: o.name })),
+        attachments,
         tagProjectId: opts.projectId || undefined, tagKind: opts.tagKind || 'client',
         mailboxId: opts.mailbox && !opts.replyToThreadId ? opts.mailbox.id : undefined, draftId: draftId || undefined,
         invoiceEvent: opts.invoiceEvent || undefined, // an invoice's email or reminder: recorded in its history once sent (item 61)
       });
       overlay.remove();
-      if (opts.onSent) await opts.onSent(data.threadId);
+      // the files that went, so the caller can tell a quote PDF going out from any other email (project.html)
+      if (opts.onSent) await opts.onSent(data.threadId, { attachments, to });
     } catch (err) {
       if (reviewRow) { try { await supabaseClient.from('review_requests').delete().eq('id', reviewRow.id); } catch (e) { /* leftover unused link is harmless */ } }
       msg.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;

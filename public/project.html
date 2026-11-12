@@ -5683,10 +5683,13 @@
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
         quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
         attachOptions: jobEmailAttachOptions(project, withQuote),
-        onSent: async () => {
+        onSent: async (threadId, sent) => {
+          // The quote is sent only when its PDF actually went in this email (the Send step's button, or the
+          // Quote PDF box ticked): an email to a supplier or anyone else from a quote leaves it a draft.
           // Only moves a quote still at draft_quote, so re-sending can't push it backwards.
-          if (isQuote && !reply && !project.job_number) {
-            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
+          const quoteWent = !!project.quote_pdf_path && (sent?.attachments || []).some(a => a.path === project.quote_pdf_path);
+          if (quoteWent && !reply && !project.job_number) {
+            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent', sent_at: new Date().toISOString() }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
             await logActivity('project', project.id, 'quote_emailed', `Quote${project.quote_number ? ' Q' + project.quote_number : ''} emailed to the client`);
           }
           await loadJobEmails(project);
