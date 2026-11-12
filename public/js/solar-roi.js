@@ -593,17 +593,15 @@ function roiSolarShape() {
 }
 
 // One stage (a solar size and a battery size) for one plan over a year: the kWh and the bill.
-// Every combination of season, clear or overcast day, and weekday or weekend is run hour by hour,
-// each priced at its own band. The battery keeps its charge for dearer hours still to come before
-// the panels can refill it (it does not spend it in a cheap midday or overnight off-peak hour when
-// peak is still ahead), and carries what is left into the next morning: each kind of day is run
-// until the charge it starts with stops changing, then counted.
-// With gridCharge set, the battery may also charge from the grid in a window (a cheap night rate,
-// say): only as much as it needs for dearer hours before the panels can refill it, and only where
-// that pays after battery losses. It never charges from the grid and spends it in the same hour.
-// exportLimitKw (null for none) caps what goes to the grid in any hour, from the panels and the
-// battery together; spare solar over it is lost (curtailed). dailyKwh is the home's own use a day
-// (roiHome); settings is roiSettings().
+// Every season, clear or overcast day, and weekday or weekend is run hour by hour, each priced at
+// its own band. The battery keeps its charge for dearer hours still ahead before the panels can
+// refill it (not spent in a cheap midday or overnight hour while peak is ahead) and carries what is
+// left into the next day: a season's clear and overcast days run in turn (7 then 3 by default), so
+// a cloudy day starts with what the sunny days left; the run repeats until it settles, then counts.
+// gridCharge: the battery may also charge from the grid in a window (a cheap night rate), only what
+// it needs for dearer hours before the panels refill it, only where that pays after losses, never
+// charged and spent in the same hour. exportLimitKw (null for none) caps what goes to the grid in
+// any hour; spare solar over it is lost. dailyKwh is the home's use a day; settings is roiSettings().
 function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh, settings, dailyKwh, exportLimitKw, exportWindow, gridCharge }) {
   const S = settings;
   const dailyGeneral = Math.max(0, (dailyKwh != null ? dailyKwh : (metrics.dailyKwh || 0)) - (metrics.controlledDailyKwh || 0));
@@ -621,8 +619,12 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
     maxKwh: roiNum(gridCharge.max_kwh) || Infinity,
   } : null;
   let spareFill = 0, spareFullDays = 0, dayWeight = 0;
-  const totals = { generation: 0, selfUse: 0, charged: 0, discharged: 0, batteryExport: 0, exported: 0, curtailed: 0, imported: 0, importBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, costBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, dischargedBy: { flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 }, load: 0, gridCharged: 0, gridChargeCost: 0 };
-  S.seasons.forEach((season, si) => S.dayTypes.forEach(dayType => ROI_DAY_KINDS.forEach((dayKind, dk) => {
+  const byBand = () => ({ flat: 0, peak: 0, shoulder: 0, off_peak: 0, solar_soak: 0 });
+  const totals = { generation: 0, selfUse: 0, charged: 0, discharged: 0, batteryExport: 0, exported: 0, curtailed: 0, imported: 0, importBy: byBand(), costBy: byBand(), dischargedBy: byBand(), load: 0, gridCharged: 0, gridChargeCost: 0 };
+  S.seasons.forEach((season, si) => ROI_DAY_KINDS.forEach((dayKind, dk) => {
+   let soc = 0; // the battery's charge, carried from day to day
+   const runs = S.dayTypes.map(dayType => {
+    const inTen = Math.max(1, Math.round(dayType.share * 10)); // of every 10 days
     const days = 365 / S.seasons.length * dayType.share * dayKind.share;
     // the day from 6am, before the battery
     const day = [];
@@ -632,7 +634,7 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
       const gen = solarKw * S.yieldPerKw * season.gen * dayType.gen * solarShape[h];
       day.push({ h, load, gen, band: plan.bandOf(h, si, dk), rate: plan.rateOf(h, si, dk) || 0 });
     }
-    // how much of the battery the spare solar of this day could fill
+    // how much of the battery this day's spare solar could fill
     if (batteryKwh > 0) {
       const spare = day.reduce((a, d) => a + Math.max(0, d.gen - d.load), 0) * eff;
       spareFill += Math.min(1, spare / batteryKwh) * days;
@@ -649,7 +651,6 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
       }
       return sum;
     };
-    let soc = 0;
     // one pass over the day; `count` is the days it stands for (0 while the battery is settling)
     const runDay = (count) => {
       let exportLeft = exp ? exp.maxKwh : 0;
@@ -703,14 +704,17 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
         totals.costBy[d.band] += deficit * count * d.rate / 100;
       }
     };
-    // settle: the same day again and again until the battery starts it with what it ended the last
-    // with. A day that never settles (the charge swings between two states) is counted as two days
-    // in a row, half the days each, so neither state is picked by chance.
-    let settled = batteryKwh <= 0;
-    for (let warm = 0; warm < 24 && !settled; warm++) { const start = soc; runDay(0); settled = Math.abs(soc - start) < 0.01; }
-    if (settled) runDay(days);
-    else { runDay(days / 2); runDay(days / 2); }
-  })));
+    return { runDay, inTen, perDay: days / inTen };
+   });
+   const sequence = runs.flatMap(r => Array(r.inTen).fill(r));
+   const runSequence = (w) => sequence.forEach(r => r.runDay(r.perDay * w)); // w: share of days counted
+   // settle: run until the battery starts the sequence with what it ended with (nothing counted);
+   // one that never settles (the charge swings between two states) counts twice at half weight
+   let settled = batteryKwh <= 0;
+   for (let warm = 0; warm < 24 && !settled; warm++) { const start = soc; runSequence(0); settled = Math.abs(soc - start) < 0.01; }
+   if (settled) runSequence(1);
+   else { runSequence(0.5); runSequence(0.5); }
+  }));
   const controlledKwh = (metrics.controlledDailyKwh || 0) * 365;
   const usageCost = Object.values(totals.costBy).reduce((s, v) => s + v, 0);
   const controlledCost = controlledKwh * (plan.controlled || 0) / 100;
@@ -722,13 +726,12 @@ function roiRunStage({ metrics, plan, loadShape, solarShape, solarKw, batteryKwh
   const adj = plan.adjust || { percentOfUse: 0, percentOfBill: 0, annualFixed: 0 };
   const bill = ((usageCost + controlledCost + totals.gridChargeCost) * (1 - adj.percentOfUse) + supplyCost) * (1 - adj.percentOfBill) - feedInCredit - batteryExportCredit + adj.annualFixed;
   const round = (v) => Math.round(v);
+  const roundBy = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, round(v)]));
   return {
     solarKw, batteryKwh,
     generation: round(totals.generation), selfUse: round(totals.selfUse), charged: round(totals.charged), discharged: round(totals.discharged),
     batteryExport: round(totals.batteryExport), exported: round(totals.exported), curtailed: round(totals.curtailed), imported: round(totals.imported), controlledKwh: round(controlledKwh),
-    importBy: Object.fromEntries(Object.entries(totals.importBy).map(([k, v]) => [k, round(v)])),
-    costBy: Object.fromEntries(Object.entries(totals.costBy).map(([k, v]) => [k, round(v)])),
-    dischargedBy: Object.fromEntries(Object.entries(totals.dischargedBy).map(([k, v]) => [k, round(v)])),
+    importBy: roundBy(totals.importBy), costBy: roundBy(totals.costBy), dischargedBy: roundBy(totals.dischargedBy),
     usageCost: round(usageCost), controlledCost: round(controlledCost), supplyCost: round(supplyCost), feedInCredit: round(feedInCredit), batteryExportCredit: round(batteryExportCredit),
     bill: round(bill), exportRate: exp ? exp.rate : null,
     gridCharged: round(totals.gridCharged), gridChargeCost: round(totals.gridChargeCost), gridChargeRate: gc ? gc.rate : null, gridCharging: !!gc,
