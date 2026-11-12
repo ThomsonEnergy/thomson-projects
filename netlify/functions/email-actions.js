@@ -7,7 +7,9 @@
 //   done             { thread_id, done }               archive (or back to the inbox), also in Gmail
 //   mark_read        { thread_id }                     read in Gmail too (personal mailboxes)
 //   mark_unread      { thread_id }                     unread again, in Gmail too (personal mailboxes)
-//   add_label        { thread_id, label_id }  remove_label { thread_id, label_id }
+//   add_label        { thread_id, label_id }  remove_label { thread_id, label_id }   (both teach a sender rule, item 81)
+//   move_label       { thread_id, from_label_id, to_label_id }   one label for another, teaches the rule
+//   merge_label      { label_id, into_label_id }   conversations and rules move, the notes join, the label goes
 //   create_label     { mailbox_id, name, description, thread_id? }
 //   update_label     { label_id, name?, description?, status? }   delete_label { label_id }
 //   accept_label / dismiss_label   { thread_id }        the agent's suggested new label
@@ -93,6 +95,23 @@ exports.handler = async (event) => {
     await startMailboxWork(); // the sweep over the last 60 days
     return label;
   }
+  // What Postie learns from a label correction (item 81): one rule per sender and mailbox.
+  // labelId set: that sender's mail goes under it; null: Postie never labels that sender.
+  const lastSender = async (t) => {
+    const { data: last } = await admin.from('emails').select('from_address').eq('thread_id', t.thread.id).eq('direction', 'inbound').order('sent_at', { ascending: false }).limit(1).maybeSingle();
+    return addrOf(last?.from_address);
+  };
+  // A "no label" lesson (labelId null) never overwrites a label a person chose for that sender,
+  // unless that label is the one going (droppingLabelId).
+  const likeExact = (s) => s.replace(/[%_]/g, '\\$&');
+  async function teachRule(t, labelId, droppingLabelId) {
+    const sender = await lastSender(t);
+    if (!sender) return;
+    const { data: have } = await admin.from('email_label_rules').select('id, label_id').eq('mailbox_id', t.mailbox.id).ilike('sender', likeExact(sender)).maybeSingle();
+    if (!labelId && have && have.label_id && have.label_id !== droppingLabelId) return;
+    await admin.from('email_label_rules').delete().eq('mailbox_id', t.mailbox.id).ilike('sender', likeExact(sender));
+    await admin.from('email_label_rules').insert({ mailbox_id: t.mailbox.id, sender, label_id: labelId, taught_by_thread_id: t.thread.id, created_by: userId });
+  }
   async function applyLabel(t, label, on) {
     if (label.mailbox_id !== t.mailbox.id) throw new Refused('That label belongs to the other inbox.');
     if (on) {
@@ -145,8 +164,46 @@ exports.handler = async (event) => {
       case 'remove_label': {
         const t = await ownThread(body.thread_id);
         const { label } = await ownLabel(body.label_id);
-        await applyLabel(t, label, body.action === 'add_label');
+        const on = body.action === 'add_label';
+        const { data: had } = on ? { data: null } : await admin.from('email_thread_labels').select('by_ai').eq('thread_id', t.thread.id).eq('label_id', label.id).maybeSingle();
+        await applyLabel(t, label, on);
+        // a person's choice becomes the rule: added by hand, that sender goes here; Postie's
+        // label taken off, that sender gets no label from Postie again (item 81)
+        if (on) await teachRule(t, label.id);
+        else if (had && had.by_ai) await teachRule(t, null, label.id);
         return json(200, { ok: true });
+      }
+      case 'move_label': {
+        const t = await ownThread(body.thread_id);
+        const { label: from } = await ownLabel(body.from_label_id);
+        const { label: to } = await ownLabel(body.to_label_id);
+        if (from.id === to.id) throw new Refused('That is the same label.');
+        await applyLabel(t, to, true);
+        await applyLabel(t, from, false);
+        await teachRule(t, to.id);
+        return json(200, { ok: true });
+      }
+      case 'merge_label': {
+        const { label, mailbox } = await ownLabel(body.label_id);
+        const { label: into } = await ownLabel(body.into_label_id);
+        if (label.id === into.id) throw new Refused('Pick a different label to merge into.');
+        if (into.mailbox_id !== mailbox.id) throw new Refused('That label belongs to the other inbox.');
+        // the database first (one row set per step), Gmail after, so a slow Gmail cannot leave two labels
+        const { data: under } = await admin.from('email_thread_labels').select('thread_id, by_ai').eq('label_id', label.id);
+        const rows = (under || []).map((u) => ({ thread_id: u.thread_id, label_id: into.id, by_ai: u.by_ai, added_by: u.by_ai ? null : userId }));
+        if (rows.length) { const { error } = await admin.from('email_thread_labels').upsert(rows, { onConflict: 'thread_id,label_id', ignoreDuplicates: true }); if (error) throw error; }
+        // rules that pointed here now point at the other label (the sender key is per mailbox, so no clash)
+        await admin.from('email_label_rules').update({ label_id: into.id }).eq('label_id', label.id);
+        const note = [into.description, label.description].filter(Boolean).join(' Also: ');
+        if (note && note !== into.description) await admin.from('email_labels').update({ description: clean(note, 300) }).eq('id', into.id);
+        if (into.status === 'done') await admin.from('email_labels').update({ status: 'open' }).eq('id', into.id);
+        await admin.from('email_labels').delete().eq('id', label.id);
+        if (canMirror(mailbox)) {
+          const { data: ths } = rows.length ? await admin.from('email_threads').select('gmail_thread_id').in('id', rows.map((r) => r.thread_id)) : { data: [] };
+          for (const th of (ths || [])) await labelInGmail(admin, mailbox, th, into, true);
+          await deleteGmailLabel(mailbox, label);
+        }
+        return json(200, { ok: true, into });
       }
       case 'create_label': {
         const mb = await ownMailbox(body.mailbox_id);
@@ -174,6 +231,18 @@ exports.handler = async (event) => {
       }
       case 'delete_label': {
         const { label, mailbox } = await ownLabel(body.label_id);
+        // deleting a label Postie made teaches: no label for these senders (item 81)
+        if (label.by_ai) {
+          const { data: under } = await admin.from('email_thread_labels').select('thread_id').eq('label_id', label.id).limit(200);
+          const senders = new Set();
+          for (const u of (under || [])) {
+            const s = await lastSender({ thread: { id: u.thread_id }, mailbox });
+            if (s && !senders.has(s)) {
+              senders.add(s);
+              await teachRule({ thread: { id: u.thread_id }, mailbox }, null, label.id);
+            }
+          }
+        }
         await deleteGmailLabel(mailbox, label);
         await admin.from('email_labels').delete().eq('id', label.id);
         return json(200, { ok: true });
