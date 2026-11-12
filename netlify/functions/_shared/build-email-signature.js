@@ -202,4 +202,35 @@ async function signatureForAgent(supabaseAdmin, { name, jobTitle, email }) {
   }, { ...(company || {}), logo_url });
 }
 
-module.exports = { buildSignature, signatureForAgent, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };
+// A sign off typed at the end of a reply is dropped before the signature goes on: the signature
+// adds "Kind regards," and the sender's name itself, so keeping it would say it twice. Caught:
+// "Kind regards," on its own line or with the name after it, the name (full, first, or the
+// company) on the line under it, "*Kind regards,*", and a [[button: ...]] line after it (a quote
+// email's link), which is kept. "Thanks", "Cheers" and "Best" count only with the name under
+// them, so a one word answer stays. A body that is only a sign off is left alone.
+const SIGN_OFF = /^\s*\*?(kind regards|warm regards|best regards|regards|cheers|thanks|thank you|many thanks|best)[,.]?\*?[,.]?\s*(.*?)\s*$/i;
+const NEEDS_NAME = /^(cheers|thanks|thank you|many thanks|best)$/i;
+const COMPANY_LINE = /^(thomson energy( australia)?( pty ltd)?|thomson energy sales)$/i;
+function withoutSignOff(bodyText, senderName) {
+  const text = String(bodyText || '');
+  const lines = text.replace(/\r/g, '').split('\n');
+  const names = new Set([senderName, String(senderName || '').split(/\s+/)[0]].map((n) => String(n || '').trim().toLowerCase()).filter(Boolean));
+  const isName = (l) => names.has(l.trim().toLowerCase()) || COMPANY_LINE.test(l.trim());
+  // button lines at the very end stay where they are
+  let i = lines.length;
+  while (i && (!lines[i - 1].trim() || BUTTON_LINE.test(lines[i - 1]))) i--;
+  const tail = lines.slice(i).filter((l) => BUTTON_LINE.test(l));
+  let nameSeen = false;
+  while (i && isName(lines[i - 1])) { nameSeen = true; i--; while (i && !lines[i - 1].trim()) i--; }
+  const m = i ? lines[i - 1].match(SIGN_OFF) : null;
+  if (!m) return text;
+  const after = m[2].replace(/^\*+|\*+$/g, '').trim();
+  if (after) { if (!isName(after)) return text; nameSeen = true; }
+  if (NEEDS_NAME.test(m[1]) && !nameSeen) return text;
+  i--;
+  while (i && !lines[i - 1].trim()) i--;
+  if (!i) return text;
+  return lines.slice(0, i).join('\n') + (tail.length ? '\n\n' + tail.join('\n') : '');
+}
+
+module.exports = { withoutSignOff, buildSignature, signatureForAgent, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };
