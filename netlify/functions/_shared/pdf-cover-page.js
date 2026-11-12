@@ -27,20 +27,10 @@ async function fetchCompanySettings(supabaseAdmin) {
   return data || {};
 }
 
-// Requests a resized, recompressed rendition via Supabase Storage's own
-// image-transformation endpoint rather than the original file - the same
-// 4.49MB drone photo renders at width 1400/quality 70 as ~250KB, plenty
-// for a full-bleed A4 background sitting behind a 50%-opacity dark wash.
-// Falls back to the original URL for anything not a Supabase Storage
-// public URL (shouldn't normally happen, but embedImageFromUrl below
-// still works fine against the untransformed original either way).
-function resizedImageUrl(url, width, quality = 70) {
-  if (!url) return url;
-  const marker = '/storage/v1/object/public/';
-  const idx = url.indexOf(marker);
-  if (idx === -1) return url;
-  return `${url.slice(0, idx)}/storage/v1/render/image/public/${url.slice(idx + marker.length)}?width=${width}&quality=${quality}`;
-}
+// The cover photo is Supabase's resized copy (_shared/storage-image.js): the same 4.49MB drone
+// photo renders at width 1400, quality 70 as about 250KB, plenty for a full-bleed A4 background
+// behind a 50% dark wash. embedImageFromUrl works on the original too if the URL is not storage.
+const { renderedImageUrl } = require('./storage-image');
 
 async function embedImageFromUrl(pdfDoc, url) {
   if (!url) return null;
@@ -70,7 +60,7 @@ async function drawCoverPage(pdfDoc, supabaseAdmin, { docTitle, preparedFor, sub
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const logoImage = await embedImageFromUrl(pdfDoc, settings.logo_url);
   const coverPhotoImage = (showCoverPhoto && settings.cover_photo_url)
-    ? await embedImageFromUrl(pdfDoc, resizedImageUrl(settings.cover_photo_url, 1400))
+    ? await embedImageFromUrl(pdfDoc, renderedImageUrl(settings.cover_photo_url, { width: 1400 }))
     : null;
 
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);

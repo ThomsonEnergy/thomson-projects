@@ -19,17 +19,7 @@ function normPhone(s) {
 const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim();
 const isOn = (v) => v === 1 || v === '1' || v === true;
 
-// Every auth user, page by page, so no account is missed however many there are (F36 in docs/BUG_REVIEW_2026-10-23.md).
-async function allAuthUsers(supabaseAdmin) {
-  const users = [];
-  for (let page = 1; page <= 50; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw error;
-    users.push(...((data && data.users) || []));
-    if (!data || !data.nextPage || !(data.users || []).length) break;
-  }
-  return users;
-}
+const { allAuthUsers } = require('./_shared/auth-users');
 
 async function loadProfiles(supabaseAdmin) {
   const [{ data: profiles, error }, users] = await Promise.all([

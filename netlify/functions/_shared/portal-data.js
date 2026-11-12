@@ -1,0 +1,322 @@
+// What the client portal shows (backlog item 74): the lists, one job, and the work so far on a
+// do and charge job. Every function takes the scope requirePortalSession worked out
+// (_shared/portal-session.js) and returns only whitelisted fields; nothing here reads a table
+// without the scope in the query. Called by portal-read.js. Reads only.
+//
+//   portalOverview(admin, scope) -> { clients, needsYou, jobs, quotes, company }
+//   scopedProject(admin, scope, projectId) -> the project row (money true or false), or null when
+//     it is not theirs: the one check before a job is read or an open is logged against it
+//   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
+//     charge job the email may see money on)
+//
+// Money (invoices, hours, prices, purchase orders, the Schedule of Rates) only goes to an email on
+// the client record (scope.clients). A job contact (scope.contactJobIds) sees the job's progress,
+// bookings, who is on site, shared photos and documents, never money. Staff names are first
+// names only. Prices are the client's prices (labour at the Schedule of Rates with their
+// agreement, materials at cost plus the stage's markup): our cost price never leaves here.
+
+const { jobActuals } = require('./job-actuals');
+const { RULES } = require('./labour-bands');
+const { firstName, listNames, sydneyToday, jobRef, fmtDay, fmtTime } = require('./schedule-emails');
+const { localDateKey } = require('./compute-labour-cost');
+const { moneyText } = require('./invoice-events');
+const { renderedImageUrl } = require('./storage-image');
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
+// a photo's grid picture is Supabase's small copy (_shared/storage-image.js); the full picture stays for the viewer
+const thumbUrl = (url) => renderedImageUrl(url, { width: 480, height: 480 });
+// a staff member's first name for the client, never the 'there' a greeting would use
+const staffFirst = (fullName) => (fullName ? firstName(fullName) : '');
+const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
+const timeText = (iso) => TIME.format(new Date(iso)).replace(/\s/g, '').toLowerCase();
+const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at';
+const OPEN_STAGES_DONE = new Set(['complete', 'archived']);
+const INVOICE_LABELS = { paid: 'Paid', overdue: 'Overdue', awaiting: 'Awaiting payment' };
+// open rows first, newest number first
+const openFirst = (a, b) => (a.open === b.open ? (b.ref || '').localeCompare(a.ref || '', undefined, { numeric: true }) : a.open ? -1 : 1);
+
+const inScope = (scope, p) => scope.clients.some((c) => c.id === p.client_id) ? 'money' : scope.contactJobIds.includes(p.id) ? 'contact' : null;
+
+// One project, only if it is in the scope: the client's own (money) or a job they are a contact on.
+async function scopedProject(admin, scope, projectId) {
+  const { data: p } = await admin.from('projects').select(PROJECT_COLS).eq('id', projectId).neq('status', 'merged').maybeSingle();
+  const how = p && inScope(scope, p);
+  return how ? { ...p, money: how === 'money' } : null;
+}
+
+// Every project in the scope: the client's own (money) plus the jobs they are a contact on.
+async function scopedProjects(admin, scope) {
+  const clientIds = scope.clients.map((c) => c.id);
+  const [own, asContact] = await Promise.all([
+    clientIds.length ? admin.from('projects').select(PROJECT_COLS).in('client_id', clientIds).neq('status', 'merged') : Promise.resolve({ data: [] }),
+    scope.contactJobIds.length ? admin.from('projects').select(PROJECT_COLS).in('id', scope.contactJobIds).neq('status', 'merged') : Promise.resolve({ data: [] }),
+  ]);
+  const byId = {};
+  (own.data || []).forEach((p) => { byId[p.id] = { ...p, money: true }; });
+  (asContact.data || []).forEach((p) => { if (!byId[p.id]) byId[p.id] = { ...p, money: false }; });
+  return Object.values(byId);
+}
+
+// Bookings the client has been told about (client_informed_at set), with first names, one line per
+// job per day. from: that date or later (the lists); without it every booking (a job's history).
+async function bookingsFor(admin, projectIds, { from } = {}) {
+  if (!projectIds.length) return [];
+  let q = admin.from('schedule_assignments')
+    .select('project_id, assignment_date, start_time, end_time, block_type, profiles(full_name)')
+    .in('project_id', projectIds).not('client_informed_at', 'is', null)
+    .order('assignment_date').order('start_time');
+  if (from) q = q.gte('assignment_date', from);
+  const { data } = await q;
+  // one line per job per day: the people on it
+  const byKey = {};
+  (data || []).forEach((a) => {
+    const key = `${a.project_id}|${a.assignment_date}`;
+    const b = (byKey[key] ||= { projectId: a.project_id, dateKey: a.assignment_date, day: fmtDay(a.assignment_date), start: null, end: null, who: [] });
+    const n = staffFirst(a.profiles?.full_name);
+    if (n && !b.who.includes(n)) b.who.push(n);
+    if (a.start_time && (!b.start || a.start_time < b.start)) b.start = a.start_time;
+    if (a.end_time && (!b.end || a.end_time > b.end)) b.end = a.end_time;
+  });
+  return Object.values(byKey).map((b) => ({ ...b, start: fmtTime(b.start), end: fmtTime(b.end) }));
+}
+
+// Who is clocked in on these jobs right now: clocked in today (Sydney); a clock-out forgotten
+// on an earlier day is not "on site now". The query keeps to the last day, the Sydney date decides.
+async function onSiteFor(admin, projectIds) {
+  if (!projectIds.length) return [];
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await admin.from('time_entries').select('project_id, clock_in, profiles(full_name)').in('project_id', projectIds).is('clock_out', null).gte('clock_in', dayAgo).order('clock_in');
+  const today = sydneyToday();
+  return (data || []).filter((e) => localDateKey(e.clock_in) === today).map((e) => ({ projectId: e.project_id, who: staffFirst(e.profiles?.full_name) || 'Someone', since: timeText(e.clock_in) }));
+}
+
+// Invoices the client has been sent (made but not sent stay hidden), with a plain status word.
+// onlyOpen: the lists want unpaid ones only; a job page shows them all.
+async function invoicesFor(admin, projectIds, { onlyOpen } = {}) {
+  if (!projectIds.length) return [];
+  let q = admin.from('invoices')
+    .select('id, project_id, invoice_number, description, sent_at, due_date, paid_at, balance_due, is_deposit, invoice_token, invoice_events!inner(kind)')
+    .in('project_id', projectIds).in('invoice_events.kind', ['emailed', 'sent_elsewhere']).order('sent_at', { ascending: false });
+  if (onlyOpen) q = q.is('paid_at', null);
+  const { data } = await q;
+  const today = sydneyToday();
+  return (data || [])
+    .map((i) => {
+      const balance = r2(i.balance_due);
+      const paid = !!i.paid_at || balance <= 0;
+      const status = paid ? 'paid' : (i.due_date && i.due_date < today) ? 'overdue' : 'awaiting';
+      return {
+        id: i.id, projectId: i.project_id, number: i.invoice_number, description: i.description || (i.is_deposit ? 'Deposit' : ''),
+        sent: i.sent_at ? fmtDay(localDateKey(i.sent_at)) : '', due: i.due_date ? fmtDay(i.due_date) : '', dueKey: i.due_date || '',
+        balance, status, label: INVOICE_LABELS[status],
+        url: `/invoice.html?token=${i.invoice_token}`,
+      };
+    })
+    .filter((i) => !onlyOpen || i.status !== 'paid');
+}
+
+// The one plain line under a job or quote: text, open (not finished), tone (live: on site now;
+// warn: waiting on the client) and needsYou. The page shows these, never re-reads the words.
+function statusLine(p, { booking, onSite, invoices }) {
+  const isJob = !!p.job_number;
+  if (!isJob) {
+    if (p.status === 'declined' || p.declined_at) return { text: 'Declined', open: false };
+    if (p.expired) return { text: 'Quote expired', open: false };
+    if (p.status === 'approved' || p.approved_at) return { text: 'Approved', open: false };
+    if (p.sent_at) return { text: 'Quote sent, waiting on you', open: true, tone: 'warn', needsYou: 'Approve your quote' };
+    return { text: 'Quote being prepared', open: true };
+  }
+  const stage = p.pipeline_stage || '';
+  if (OPEN_STAGES_DONE.has(stage) || p.status === 'complete') return { text: 'Complete', open: false };
+  if (onSite.length) return { text: `On site now: ${listNames(onSite.map((o) => `${o.who} since ${o.since}`))}`, open: true, tone: 'live' };
+  const unpaidDeposit = (invoices || []).find((i) => i.projectId === p.id && i.status !== 'paid' && /deposit/i.test(i.description));
+  if (stage === 'awaiting_payment') {
+    const overdue = (invoices || []).some((i) => i.projectId === p.id && i.status === 'overdue');
+    return overdue ? { text: 'Invoice overdue', open: true, tone: 'warn' } : { text: 'Invoice sent', open: true };
+  }
+  if (stage === 'client_handover' || stage === 'ready_to_invoice') return { text: 'Work finished, invoice to come', open: true };
+  if (booking) return { text: `Booked for ${booking.day}${booking.who.length ? `, ${listNames(booking.who)}` : ''}`, open: true };
+  if (stage === 'job_not_complete') return { text: 'In progress', open: true };
+  if (unpaidDeposit) return { text: 'Approved, deposit to pay', open: true, tone: 'warn', needsYou: 'Pay the deposit' };
+  if (stage === 'job_booked') return { text: 'Booked', open: true };
+  return { text: 'Being booked', open: true };
+}
+
+function projectRow(p, ctx) {
+  const booking = ctx.bookings.find((b) => b.projectId === p.id) || null;
+  const onSite = ctx.onSite.filter((o) => o.projectId === p.id);
+  const st = statusLine(p, { booking, onSite, invoices: ctx.invoices });
+  return {
+    id: p.id, ref: jobRef(p), name: p.name, site: p.client_address || '', kind: p.job_number ? 'job' : 'quote',
+    status: st.text, tone: st.tone || '', open: st.open, money: p.money,
+    // the proposal carries every price, so a job contact (no money) never gets its link
+    quoteUrl: p.money && !p.job_number && p.sent_at && p.quote_token ? `/quote.html?token=${p.quote_token}` : null,
+    needsYou: p.money ? st.needsYou || null : null,
+  };
+}
+
+async function company(admin) {
+  const { data } = await admin.from('company_settings').select('company_name, phone, logo_url').eq('id', 1).maybeSingle();
+  return { name: data?.company_name || 'Thomson Energy', phone: data?.phone || '', logoUrl: data?.logo_url || '' };
+}
+
+async function portalOverview(admin, scope) {
+  const projects = await scopedProjects(admin, scope);
+  const ids = projects.map((p) => p.id);
+  const moneyIds = projects.filter((p) => p.money).map((p) => p.id);
+  const [bookings, onSite, invoices, variations, offers, comp] = await Promise.all([
+    bookingsFor(admin, ids, { from: sydneyToday() }),
+    onSiteFor(admin, ids),
+    invoicesFor(admin, moneyIds, { onlyOpen: true }),
+    moneyIds.length ? admin.from('job_variation_entries').select('id, project_id, variation_number, variation_token, description').in('project_id', moneyIds).eq('variation_type', 'fixed').eq('approval_status', 'sent') : Promise.resolve({ data: [] }),
+    ids.length ? admin.from('schedule_time_offers').select('id, project_id, token').in('project_id', ids).eq('status', 'open') : Promise.resolve({ data: [] }),
+    company(admin),
+  ]);
+  const ctx = { bookings, onSite, invoices };
+  // an approved quote shows as its job, not twice
+  const jobsFromQuotes = new Set(projects.map((p) => p.source_quote_id).filter(Boolean));
+  const rows = projects.filter((p) => !(jobsFromQuotes.has(p.id) && !p.job_number)).map((p) => projectRow(p, ctx));
+  const jobs = rows.filter((r) => r.kind === 'job').sort(openFirst);
+  const quotes = rows.filter((r) => r.kind === 'quote').sort(openFirst);
+  const refOf = (id) => rows.find((r) => r.id === id)?.ref || '';
+  const needsYou = [];
+  rows.filter((r) => r.needsYou === 'Approve your quote').forEach((r) => needsYou.push({ text: `${r.ref} ${r.name}: your quote is waiting on you`, action: 'Open quote', url: r.quoteUrl, kind: 'opened_quote', projectId: r.id, detail: r.ref }));
+  (variations.data || []).forEach((v) => needsYou.push({ text: `${refOf(v.project_id)}: variation ${v.variation_number || ''} to sign`.replace(/\s+/g, ' '), action: 'Open variation', url: `/quote.html?variation=${v.variation_token}`, kind: 'opened_variation', projectId: v.project_id, detail: `Variation ${v.variation_number || ''}`.trim() }));
+  (offers.data || []).forEach((o) => needsYou.push({ text: `${refOf(o.project_id)}: pick a time that suits you`, action: 'Pick a time', url: `/pick-time.html?token=${o.token}` }));
+  invoices.filter((i) => i.status === 'overdue').forEach((i) => needsYou.push({ text: `${i.number} is overdue (${moneyText(i.balance)})`, action: 'Pay online', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
+  invoices.filter((i) => i.status === 'awaiting').forEach((i) => needsYou.push({ text: `${i.number}: ${moneyText(i.balance)} due ${i.due}`, action: 'View invoice', url: i.url, kind: 'opened_invoice', projectId: i.projectId, detail: i.number }));
+  return {
+    clients: scope.clients.map((c) => ({ id: c.id, name: c.name, main: c.main })),
+    needsYou, jobs, quotes, company: comp,
+  };
+}
+
+async function portalProject(admin, p) {
+  const today = sydneyToday();
+  const hasWork = p.money && p.proposal_template === 'direct_job' && !!p.job_number;
+  const [allBookings, onSite, invoices, photos, docs, contacts, variations, comp, client, work] = await Promise.all([
+    bookingsFor(admin, [p.id]),
+    onSiteFor(admin, [p.id]),
+    p.money ? invoicesFor(admin, [p.id]) : Promise.resolve([]),
+    admin.from('project_photos').select('id, url, caption, created_at').eq('project_id', p.id).eq('client_visible', true).order('created_at', { ascending: false }),
+    admin.from('project_documents').select('id, file_path, file_name, mime_type, created_at').eq('project_id', p.id).eq('client_visible', true).order('created_at', { ascending: false }),
+    admin.from('job_contacts').select('role, side, profiles!job_contacts_profile_id_fkey(full_name)').eq('project_id', p.id).eq('side', 'thomson'),
+    p.money ? admin.from('job_variation_entries').select('id, variation_number, variation_token, description, approval_status, variation_type, pdf_path, created_at').eq('project_id', p.id).eq('variation_type', 'fixed').in('approval_status', ['sent', 'approved']).order('created_at') : Promise.resolve({ data: [] }),
+    company(admin),
+    p.money ? admin.from('clients').select('id, agreement_token, agreement_sent_at, agreement_withdrawn_at, agreement_document_path, rate_cards(name, percent)').eq('id', p.client_id).maybeSingle() : Promise.resolve({ data: null }),
+    hasWork ? portalWork(admin, p) : Promise.resolve(null),
+  ]);
+  const bookings = allBookings.filter((b) => b.dateKey >= today);
+  const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
+  const manager = (contacts.data || []).find((c) => c.role === 'site_manager') || (contacts.data || []).find((c) => c.role === 'project_manager');
+
+  // Documents: the ticked ones, plus what we have already sent them (the quote PDF once sent,
+  // approved variations, the agreement letter). Signed links last an hour.
+  const files = (docs.data || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: fmtDay(localDateKey(d.created_at)) }));
+  if (p.money && p.sent_at && p.quote_pdf_path) files.unshift({ path: p.quote_pdf_path, name: `${jobRef(p)} quote.pdf`, mime: 'application/pdf', when: fmtDay(localDateKey(p.sent_at)) });
+  (variations.data || []).filter((v) => v.approval_status === 'approved' && v.pdf_path).forEach((v) => files.push({ path: v.pdf_path, name: `Variation ${v.variation_number || ''}.pdf`.replace(/\s+\./, '.'), mime: 'application/pdf', when: fmtDay(localDateKey(v.created_at)) }));
+  const cl = client.data;
+  const agreementOn = !!(cl && cl.agreement_sent_at && !cl.agreement_withdrawn_at && cl.agreement_token);
+  if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: fmtDay(localDateKey(cl.agreement_sent_at)) });
+  const signed = files.length ? await admin.storage.from('project-documents').createSignedUrls(files.map((f) => f.path), 3600) : { data: [] };
+  const urlByPath = {};
+  (signed.data || []).forEach((s) => { if (s.signedUrl && !s.error) urlByPath[s.path] = s.signedUrl; });
+  const documents = files.map((f) => ({ name: f.name, mime: f.mime, when: f.when, url: urlByPath[f.path] || null })).filter((f) => f.url);
+
+  return {
+    ...projectRow(p, { bookings, onSite, invoices }),
+    hasWork, work,
+    manager: manager ? staffFirst(manager.profiles?.full_name) || null : null,
+    company: comp,
+    bookings, pastBookings, onSite,
+    photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
+    documents,
+    invoices,
+    variations: (variations.data || []).map((v) => ({ number: v.variation_number, description: v.description, status: v.approval_status === 'sent' ? 'To sign' : 'Signed', url: v.approval_status === 'sent' ? `/quote.html?variation=${v.variation_token}` : null })),
+    ratesUrl: p.money ? (agreementOn ? `/rates.html?agreement=${cl.id}&token=${cl.agreement_token}` : '/rates.html') : null,
+    agreement: agreementOn && cl.rate_cards ? { name: cl.rate_cards.name, percentOff: Math.max(0, r2(100 - Number(cl.rate_cards.percent))) } : null,
+  };
+}
+
+// Work so far on a do and charge job (p already checked: in scope, money, direct_job): labour per
+// clocked day at the Schedule of Rates, materials at the client's price, purchase orders with
+// their pickup state, and what is not yet invoiced.
+const WORK_RULES = { standardHours: RULES.standardHours, minimumHours: RULES.minimumHours };
+const EMPTY_WORK = { labour: [], materials: [], purchaseOrders: [], labourOpen: 0, materialsOpen: 0, notInvoiced: 0, rules: WORK_RULES, agreement: null };
+
+async function portalWork(admin, p) {
+  const [actuals, { data: pos }] = await Promise.all([
+    jobActuals(admin, p.id, { includeBilled: true }),
+    admin.from('purchase_orders').select('id, po_number, supplier_name, status, received, order_date, cost_centre_id, purchase_order_line_items(description, quantity, unit_cost, received, is_backordered, backorder_eta)').eq('project_id', p.id).neq('po_kind', 'tools').order('order_date', { ascending: false }),
+  ]);
+  if (!actuals.ok) {
+    console.error('portal work not read for', jobRef(p), actuals.error);
+    return { ...EMPTY_WORK, note: 'The work so far is not ready to show yet. Call us if you need it today.' };
+  }
+  const d = actuals.data;
+  const bandLabel = (band) => band === 'standard' ? 'standard' : (RULES.bands[band]?.label || band);
+  const bandOrder = Object.keys(RULES.bands);
+  // each line priced at the Schedule of Rates; staffId and the first band's rate stay out of the row the client gets
+  const priced = [];
+  d.centres.forEach((c) => c.labourLines.forEach((l) => {
+    if (!l.billable && !l.invoiced) return;
+    const parts = Object.entries(l.bands).filter(([, h]) => h > 0);
+    const amount = parts.reduce((s, [band, h]) => s + h * l.rate * (RULES.bands[band]?.multiplier || 1), 0);
+    priced.push({
+      staffId: l.staffId,
+      // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
+      firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
+      row: {
+        dateKey: l.dateKey, day: fmtDay(l.dateKey), who: firstName(l.staffName), start: l.start, end: l.end,
+        hours: r2(l.hours), bands: parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', '),
+        rate: r2(l.rate), amount: r2(amount), invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
+      },
+    });
+  }));
+  priced.sort((a, b) => a.row.dateKey.localeCompare(b.row.dateKey));
+  // The minimum per person per day (the panel's applyMinimum in js/project-invoice-actuals.js): a
+  // short day not yet invoiced is rounded up on that person's first line of the day, at the rate
+  // of that line's first band, so the figure here is the figure the invoice will carry.
+  const min = Number(RULES.minimumHours) || 0;
+  const byDay = new Map();
+  priced.filter((x) => !x.row.invoiced).forEach((x) => {
+    const k = `${x.staffId}|${x.row.dateKey}`;
+    if (!byDay.has(k)) byDay.set(k, { total: 0, first: x });
+    byDay.get(k).total += x.row.hours;
+  });
+  byDay.forEach(({ total, first }) => {
+    if (min && total > 0 && total < min) {
+      first.row.amount = r2(first.row.amount + (min - total) * first.firstBandRate);
+      first.row.bands = `${first.row.bands || `${first.row.hours} h`} (min. ${min} hrs)`;
+    }
+  });
+  const labour = priced.map((x) => x.row);
+  const materials = [];
+  d.centres.forEach((c) => c.materialLines.forEach((m) => {
+    if (!m.billable && !m.invoiced) return;
+    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' });
+  }));
+  const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0]).markupPercent;
+  const purchaseOrders = (pos || []).map((po) => {
+    const m = 1 + markupOf(po.cost_centre_id) / 100;
+    const lines = (po.purchase_order_line_items || []).map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, amount: r2((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0) * m), received: !!l.received, backordered: !!l.is_backordered, eta: l.backorder_eta ? fmtDay(l.backorder_eta) : '' }));
+    const allIn = lines.length ? lines.every((l) => l.received) : !!po.received;
+    const someIn = lines.some((l) => l.received);
+    return {
+      number: po.po_number, supplier: po.supplier_name, ordered: po.order_date ? fmtDay(po.order_date) : '',
+      state: allIn ? 'Picked up' : someIn ? 'Part picked up, rest to come' : lines.some((l) => l.backordered) ? 'Ordered, part on back order' : 'Ordered, waiting for pickup',
+      total: r2(lines.reduce((s, l) => s + l.amount, 0)), lines,
+    };
+  });
+  const labourOpen = r2(labour.filter((l) => !l.invoiced).reduce((s, l) => s + l.amount, 0));
+  const materialsOpen = r2(materials.filter((m) => !m.invoiced).reduce((s, m) => s + m.amount, 0));
+  return {
+    labour, materials, purchaseOrders,
+    labourOpen, materialsOpen, notInvoiced: r2(labourOpen + materialsOpen),
+    rules: WORK_RULES,
+    agreement: d.rateCard.percentOff > 0 ? { name: d.rateCard.name, percentOff: d.rateCard.percentOff } : null,
+  };
+}
+
+module.exports = { portalOverview, portalProject, scopedProject };

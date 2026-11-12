@@ -49,7 +49,8 @@
   <script src="/js/email-view.js?v=4"></script>
   <script src="/js/email-compose.js?v=11"></script>
   <script src="/js/job-schedule.js?v=3"></script>
-  <script src="/js/job-contacts.js?v=1"></script>
+  <script src="/js/job-contacts.js?v=3"></script>
+  <script src="/js/share-with-client.js?v=1"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/assets.js?v=3"></script>
   <script src="/js/electrical-symbols.js?v=4"></script>
@@ -6973,6 +6974,7 @@
               </div>`;
           }).join('')}
         </div>`;
+      shareWithClientDocuments(projectId, listEl, visible); // js/share-with-client.js: the client-visible ticks (item 74)
       // A picture the resizer cannot handle falls back to the full-size file.
       // A link that expired while the tab sat open (lazy tiles load late) is signed again.
       listEl.querySelectorAll('img[data-full]').forEach(img => img.addEventListener('error', () => {
@@ -7980,7 +7982,7 @@
       let [{ data: photos, error }, myRole, { data: { session } }] = await Promise.all([
         supabaseClient
           .from('project_photos')
-          .select('id, url, caption, staff_id, created_at, task_id, tags, ai_caption, profiles(full_name)')
+          .select('id, url, caption, staff_id, created_at, task_id, tags, ai_caption, client_visible, profiles(full_name)')
           .eq('project_id', projectId)
           .order('created_at', { ascending: false }),
         getMyRole(),
@@ -8028,6 +8030,7 @@
 
       sitePhotoSelect.ids = sitePhotoSelect.ids.filter(id => sitePhotoSelect.urlById[id] && photos.some(p => p.id === id));
       sitePhotoSelectRefresh();
+      shareWithClientPhotos(projectId, listEl, allPhotos); // js/share-with-client.js: the client-visible ticks (item 74)
       listEl.querySelectorAll('.site-photo-view').forEach(img => {
         // In select mode a tap picks the photo and the viewer below does not open.
         img.addEventListener('click', (e) => {

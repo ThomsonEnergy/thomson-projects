@@ -61,8 +61,31 @@
     if (r.company) bits.push(esc(r.company));
     if (phone) bits.push(`<a class="link-quiet" href="${attr(telHref(phone))}">${esc(phone)}</a>`);
     if (r.email) bits.push(`<a class="link-quiet" href="mailto:${attr(r.email)}">${esc(r.email)}</a>`);
+    // a client-side or site-side person with an email can be sent their client portal login (item 74)
+    if (r.email && r.side !== 'thomson') bits.push(`<a class="link-quiet jc-portal-login" href="#" data-email="${attr(r.email)}">Send portal login</a>`);
     return bits.join(' &middot; ');
   }
+
+  // the same call the Clients page makes (sendPortalLogins in js/clients-portal.js, loaded on first use)
+  async function sendPortalLogin(a) {
+    a.textContent = 'Sending...';
+    try {
+      await loadJsOnce('/js/clients-portal.js?v=3', () => typeof sendPortalLogins === 'function');
+      const r = await sendPortalLogins([a.dataset.email], { resend: true });
+      showToast(r.text, { error: r.failed.length > 0, ms: 8000 });
+      a.textContent = r.sent.length ? 'Portal login sent' : 'Send portal login';
+    } catch (err) {
+      showToast(err.message, { error: true });
+      a.textContent = 'Send portal login';
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.jc-portal-login');
+    if (!a) return;
+    e.preventDefault();
+    sendPortalLogin(a);
+  });
 
   function renderSections() {
     const el = document.getElementById('job-contacts-sections');

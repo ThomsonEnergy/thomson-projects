@@ -111,6 +111,7 @@
                 <div id="client-agreement" style="margin-top:8px;"></div>
               </div>
             </div>
+            <div id="client-portal" style="margin-top:10px;"></div>
             <label>Notes</label>
             <textarea id="c-notes" style="min-height:70px;"></textarea>
 
@@ -217,13 +218,16 @@
     }
 
     // --- contacts sub-form ---
-    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '' } = {}) {
+    // js/clients-portal.js (the portal card, item 74) comes down on first use, like the email composer.
+    const loadClientPortalJs = () => loadJsOnce('/js/clients-portal.js?v=3', () => typeof renderClientPortal === 'function');
+
+    function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
       const row = document.createElement('div');
       row.className = 'contact-row';
       // Existing contacts keep their id on save, so job_contacts and the projects contact columns stay linked (F45)
       if (id) row.dataset.id = id;
-      row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto; gap:8px; margin-bottom:6px; align-items:center;';
+      row.style.cssText = 'display:grid; grid-template-columns:1fr 1.4fr 1fr 1.4fr auto auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <select class="ct-type" style="font-size:13px;">
           <option value="job" ${contact_type === 'job' ? 'selected' : ''}>Job contact</option>
@@ -235,6 +239,7 @@
         <input class="ct-name" placeholder="Name" value="${escapeHtml(name)}" style="font-size:13px;" />
         <input class="ct-phone" type="tel" placeholder="Phone" value="${escapeHtml(phone)}" style="font-size:13px;" />
         <input class="ct-email" type="email" autocapitalize="off" placeholder="Email" value="${escapeHtml(email)}" style="font-size:13px;" />
+        <label title="This person can log in to the client portal with this email" style="display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; margin:0;"><input type="checkbox" class="ct-portal" ${portal_access ? 'checked' : ''} style="margin:0;" /> Portal</label>
         <button type="button" class="secondary ct-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
       row.querySelector('.ct-remove').addEventListener('click', () => row.remove());
@@ -274,6 +279,7 @@
       document.getElementById('c-terms').value = 'cod';
       document.getElementById('c-rate-card').value = defaultRateCardId;
       renderClientAgreement(null);
+      document.getElementById('client-portal').innerHTML = '';
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -464,6 +470,8 @@
       document.getElementById('c-terms').value = c.payment_terms || 'cod';
       document.getElementById('c-rate-card').value = c.rate_card_id || '';
       renderClientAgreement(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
+      // The portal card's code is downloaded the first time a client is opened, so the page stays under its weight budget.
+      loadClientPortalJs().then(() => renderClientPortal(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) }));
       document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';
@@ -519,6 +527,7 @@
         name: row.querySelector('.ct-name').value.trim(),
         phone: row.querySelector('.ct-phone').value.trim(),
         email: row.querySelector('.ct-email').value.trim(),
+        portal_access: row.querySelector('.ct-portal').checked,
         sort_order: i,
       })).filter(c => c.name || c.phone || c.email);
       const contactsBefore = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_contacts || []) : [];
@@ -537,7 +546,6 @@
         if (contactErr) contactErrors.push(contactErr.message);
       }
       if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
-
       // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
       // rows taken off the form deleted (their jobs keep the address text).
       const siteRows = [...document.querySelectorAll('.site-row')].map(row => ({
@@ -566,6 +574,20 @@
       const listMsg = document.getElementById('clients-list-msg');
       listMsg.innerHTML = '<div class="success-box">Client saved.</div>';
       setTimeout(() => { listMsg.innerHTML = ''; }, 4000);
+
+      // A contact newly ticked Portal gets their login emailed straight away (js/clients-portal.js, item 74),
+      // after the save is done and shown: the emails take a second or two each and never hold it up.
+      const tickedBefore = new Set(contactsBefore.filter(c => c.portal_access).map(c => (c.email || '').trim().toLowerCase()));
+      const newlyTicked = contacts.filter(c => c.portal_access && c.email && !tickedBefore.has(c.email.toLowerCase())).map(c => c.email);
+      if (newlyTicked.length) {
+        try {
+          await loadClientPortalJs();
+          const r = await sendPortalLogins(newlyTicked);
+          showToast(r.text, { error: r.failed.length > 0, ms: 8000 });
+        } catch (err) {
+          showToast(`Portal login not sent: ${err.message}`, { error: true, ms: 8000 });
+        }
+      }
       } finally {
         btn.disabled = false;
         btn.textContent = label;
