@@ -13,7 +13,7 @@ const { withoutSignOff } = require(path.join(__dirname, '..', '..', '..', 'netli
 const cases = require('./cases.json');
 let failed = 0;
 const say = (ok, id, detail) => { if (!ok) failed++; console.log(`${ok ? 'pass' : 'FAIL'}  ${id}${detail ? `  ${detail}` : ''}`); };
-const CODE_CHECKS = 10;
+const CODE_CHECKS = 15;
 
 // 1. Code-only checks: the evidence rule and the pre-filter.
 say(evidenceFound('GC Wind Services', 'Subject: ... ats GC Wind Services Pty Ltd ...'), 'evidence: exact words found');
@@ -28,6 +28,11 @@ say(withoutSignOff('Yes, Tuesday works.\n\nKind regards,\nJasper\n', 'Jasper Tho
 say(withoutSignOff('Yes, Tuesday works.\nCheers\nJasper Thomson', 'Jasper Thomson') === 'Yes, Tuesday works.', 'sign off: "Cheers" with the full name is dropped');
 say(withoutSignOff('Thanks for your patience.', 'Jasper Thomson') === 'Thanks for your patience.', 'sign off: a real last line stays');
 say(withoutSignOff('Kind regards,', 'Jasper Thomson') === 'Kind regards,', 'sign off: a body that is only a sign off is left alone');
+say(withoutSignOff('Hi Bob,\n\nYes.\n\nKind regards,\nJasper\n\n[[button: Pick a time | https://x.y/z]]', 'Jasper Thomson') === 'Hi Bob,\n\nYes.\n\n[[button: Pick a time | https://x.y/z]]', 'sign off: dropped and a button line after it kept');
+say(withoutSignOff('Hi Bob,\n\nThanks', 'Jasper Thomson') === 'Hi Bob,\n\nThanks', 'sign off: a one word answer "Thanks" stays');
+say(withoutSignOff('All sorted.\n\nThanks\nJasper', 'Jasper Thomson') === 'All sorted.', 'sign off: "Thanks" with the name under it is dropped');
+say(withoutSignOff('All sorted.\n\nKind regards, Jasper', 'Jasper Thomson') === 'All sorted.', 'sign off: name on the same line is dropped');
+say(withoutSignOff('All sorted.\r\n\r\n*Kind regards,*\r\nJasper Thomson\r\nThomson Energy', 'Jasper Thomson') === 'All sorted.', 'sign off: bold, with the name and company under it, is dropped');
 
 // 2. The model, over the cases.
 (async () => {
