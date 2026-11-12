@@ -422,6 +422,12 @@
             <div id="company-voice-box" style="margin-bottom:6px;"></div>
             <div id="writing-style-list"><p class="subtitle">Loading...</p></div>
           </div>
+          <!-- Rules Postie learned from label corrections (email_label_rules, migration 20261202020000, js/settings-email-rules.js) -->
+          <div class="card">
+            <h2>Rules Postie learned</h2>
+            <p class="subtitle" style="margin-bottom:10px;">Every label correction in the Inbox teaches a rule for that sender: move or add a label, and their mail goes under it with no AI; take one of Postie's labels off or delete it, and Postie never labels them again (your own label replaces that). Remove a rule here to let Postie decide again.</p>
+            <div id="email-rules-list"><p class="subtitle">Loading...</p></div>
+          </div>
           <!-- Labels made by the agent (mailboxes.auto_labels, migration 20261105010000) -->
           <div class="card">
             <h2>Labels made by Postie</h2>
@@ -2943,6 +2949,7 @@
       if (panelBtn && panelBtn.style.display !== 'none') panelBtn.click();
 
       const loads = [loadMyProfile(session.user.id), loadSettings(), loadWritingStyles(), loadSpellcheckMode()];
+      loadJsOnce('/js/settings-email-rules.js?v=1', () => typeof loadEmailRulesCard === 'function').then(() => loadEmailRulesCard()).catch(() => {});
       // Xero Mapping and connection IDs sit on an admin-only panel; the mapping loads when its tab opens
       if (myRole === 'admin') loads.push(loadUsers(), loadOnboardingDocs(), loadApiKeys(), loadXeroConnection());
       if (isPricingRoleLocal(myRole)) loads.push(loadRateTiers(), loadInspectionTemplates());

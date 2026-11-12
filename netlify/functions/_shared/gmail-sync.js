@@ -192,6 +192,9 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox =
     patch.triaged_at = null;
     // they wrote back: an "answered by another email" mark no longer holds (item 80)
     patch.answered_at = null; patch.answered_by = null; patch.answered_email_id = null;
+    // and a finished label on this conversation is open again (item 81)
+    const { data: tl } = await supabaseAdmin.from('email_thread_labels').select('label_id').eq('thread_id', thread.id);
+    if (tl && tl.length) await supabaseAdmin.from('email_labels').update({ status: 'open' }).in('id', tl.map((x) => x.label_id)).eq('status', 'done');
   }
   // our reply can turn a one-off into a conversation: the older-conversations pass reads it again (item 56)
   if (direction === 'outbound' && thread.suggested_label === '') patch.suggested_label = null;

@@ -139,6 +139,12 @@ async function messagesFor(admin, threadIds) {
   return by;
 }
 
+// A label rule a person taught (item 81): by address, else by domain. label_id null: no label.
+function labelRuleFor(rules, from) {
+  const addr = addrOf(from);
+  const domain = addr.split('@')[1] || '';
+  return (rules || []).find((r) => r.sender.toLowerCase() === addr) || (rules || []).find((r) => r.sender.toLowerCase() === domain || r.sender.toLowerCase() === '@' + domain) || null;
+}
 function ruleFor(rules, from) {
   const addr = addrOf(from);
   const domain = addr.split('@')[1] || '';
@@ -242,7 +248,17 @@ ${jobLines}`,
       ? await Promise.all([admin.from('email_job_links').select('thread_id').in('thread_id', ids), admin.from('email_thread_labels').select('thread_id').in('thread_id', ids)])
       : [{ data: [] }, { data: [] }];
     const skip = new Set([...(links || []), ...(labelled || [])].map((l) => l.thread_id));
+    // a person's rule for the sender decides first (item 81): filed under their label, or left alone
+    const ruled = new Set();
+    for (const { t, lastIn } of forAi) {
+      const rule = labelRuleFor(ctx.labelRules, lastIn.from_address);
+      if (!rule) continue;
+      ruled.add(t.id);
+      const label = rule.label_id ? ctx.labels.find((l) => l.id === rule.label_id) : null;
+      if (label && !skip.has(t.id)) await fileUnder(admin, mailbox, t, label);
+    }
     const candidates = forAi.map(({ t, list, text }) => {
+      if (ruled.has(t.id)) return null;
       const conversation = !!mailbox.auto_labels && isConversation(list) && !skip.has(t.id) && results[t.id]?.job_confidence !== 'sure' && results[t.id]?.section !== 'updates';
       return (conversation || results[t.id]?.maybe_label || mentionsLabel(ctx.labels, text)) ? { id: t.id, text, conversation } : null;
     }).filter(Boolean);
@@ -514,7 +530,8 @@ async function sweepLabels(admin, apiKey, mailbox, ctx, usage, deadline) {
     const requestedAt = label.sweep_requested_at;
     const { data: rows, error } = await admin.rpc('email_label_sweep_candidates', { p_label_id: label.id, p_days: SWEEP_DAYS, p_limit: 1500 });
     if (error) throw error;
-    const list = label.by_ai ? await sameSenders(admin, label, rows || []) : (rows || []);
+    const noLabel = new Set((ctx.labelRules || []).filter((r) => !r.label_id).map((r) => r.sender.toLowerCase()));
+    const list = (label.by_ai ? await sameSenders(admin, label, rows || []) : (rows || [])).filter((r) => !labelRuleFor([...noLabel].map((s) => ({ sender: s })), r.from_address));
     let added = 0, stopped = false;
     for (let i = 0; i < list.length; i += SWEEP_BATCH) {
       if (Date.now() > deadline) { stopped = true; break; }
@@ -646,15 +663,16 @@ async function voiceContext(admin, mailbox) {
 
 // What Postie knows about a mailbox for one run: labels, sender rules, open jobs, whose voice.
 async function agentContext(admin, mailbox) {
-  const [voice, { data: labels }, { data: rules }, jobs, { data: cs }] = await Promise.all([
+  const [voice, { data: labels }, { data: rules }, jobs, { data: cs }, { data: labelRules }] = await Promise.all([
     voiceContext(admin, mailbox),
     admin.from('email_labels').select('*').eq('mailbox_id', mailbox.id),
     admin.from('email_sender_rules').select('*').eq('mailbox_id', mailbox.id),
+    admin.from('email_label_rules').select('*').eq('mailbox_id', mailbox.id),
     activeJobs(admin),
     admin.from('company_settings').select('ai_assistant_name').eq('id', 1).maybeSingle(),
   ]);
   const assistant = (cs && cs.ai_assistant_name && cs.ai_assistant_name.trim()) || 'Sparky';
-  return { ...voice, labels: labels || [], rules: rules || [], jobs, assistant };
+  return { ...voice, labels: labels || [], rules: rules || [], labelRules: labelRules || [], jobs, assistant };
 }
 
 // Draft reply pressed in the Inbox (draft-reply-background.js): one conversation, drafted the
@@ -668,11 +686,27 @@ async function draftOnRequest(admin, mailbox, thread) {
 
 // One pass over a mailbox: sorts up to `maxThreads` conversations, drafts replies, and tells
 // the owner of a personal mailbox about new Priority mail.
+// A label whose conversations have had no email for 30 days moves to Finished by itself
+// (item 81), once it is at least a week old. New mail on one of its conversations reopens it
+// (gmail-sync.js), so nothing is lost: it only leaves the open list.
+const QUIET_LABEL_DAYS = 30;
+async function finishQuietLabels(admin, mailbox) {
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+  const quietBefore = new Date(Date.now() - QUIET_LABEL_DAYS * 86400000).toISOString();
+  const { data: labels } = await admin.from('email_labels').select('id').eq('mailbox_id', mailbox.id).eq('status', 'open').lt('created_at', weekAgo);
+  for (const l of (labels || [])) {
+    const { count } = await admin.from('email_thread_labels').select('thread_id, email_threads!inner(last_message_at)', { count: 'exact', head: true })
+      .eq('label_id', l.id).gt('email_threads.last_message_at', quietBefore);
+    if (!count) await admin.from('email_labels').update({ status: 'done' }).eq('id', l.id).eq('status', 'open');
+  }
+}
+
 async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads = 200 } = {}) {
   const startedAt = Date.now();
   const usage = { input_tokens: 0, output_tokens: 0 };
   const apiKey = await getIntegrationKey('anthropic');
   const ctx = await agentContext(admin, mailbox);
+  try { await finishQuietLabels(admin, mailbox); } catch (err) { console.error(`quiet labels for ${mailbox.address}:`, err.message); }
 
   let sorted = 0, drafted = 0, priorityCount = 0;
   while (sorted < maxThreads && Date.now() - startedAt < budgetMs) {
@@ -707,6 +741,6 @@ async function runEmailAgent(admin, mailbox, { budgetMs = 5 * 60000, maxThreads 
 }
 
 module.exports = {
-  runEmailAgent, draftOnRequest, chooseLabels, evidenceFound, mentionsLabel, isConversation, applyLabelPick, fileUnder, makeAgentLabel,
+  runEmailAgent, draftOnRequest, chooseLabels, evidenceFound, mentionsLabel, isConversation, applyLabelPick, fileUnder, makeAgentLabel, labelRuleFor,
   messagesFor, threadText, findLabel, inboxWho, labelList, claude, textOf, addUsage, TRIAGE_MODEL, DRAFT_MODEL, LABEL_MODEL,
 };
