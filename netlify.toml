@@ -45,6 +45,11 @@
 [functions.sweep-licence-expiry]
   schedule = "15 13,14 * * *"
 
+# Every 15 minutes: approved supplier bills and credit notes not yet in Xero go up as Bills (H4,
+# item 83 part C) - see push-bills-to-xero-background.js. Off until api_keys xero_bills_push = 'on'.
+[functions.push-bills-to-xero-background]
+  schedule = "*/15 * * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]
