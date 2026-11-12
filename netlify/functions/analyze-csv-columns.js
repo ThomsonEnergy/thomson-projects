@@ -9,7 +9,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -51,9 +51,8 @@ Respond with ONLY a JSON object, no other text, no markdown fences, using the ex
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 300,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -64,7 +63,7 @@ Respond with ONLY a JSON object, no other text, no markdown fences, using the ex
     }
 
     const data = await res.json();
-    const raw = data.content.map((b) => b.text || '').join('').trim();
+    const raw = claudeText(data).trim();
     const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
     const mapping = JSON.parse(cleaned);
 
