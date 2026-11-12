@@ -47,7 +47,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 75 | Site sun data for the savings estimate: the sun figure, the season spread and the clear and dull days come from 10 years of daily sun records for the job's own location (from the Pylon design's site location, else the address), in place of one figure per zone | LIVE 12 Nov 2026 (release PR 379, migration 20261201010000). Still to prove on the live site: the live records fetch and Pylon's location call (the owner opens one draft Solar quote, the chat reads what was saved) | Y | Job lat/long (shared with item 4) |
 | 76 | Inbox on the whole screen: Gmail's layout (left column with Compose and the folders, one-line rows, search, hover Done) with Outlook's reading pane (newest email open at the top, reply box above it, older emails folded below) | Planned 12 Nov 2026, waiting on yes | N | None |
 | 77 | Whole screen on every page (owner's rule 12 Nov 2026): existing pages move to edge-to-edge columns as they are touched, the job Summary tab first (Tasks far left, summary in the middle) | Rule written 12 Nov 2026; pages planned one at a time | N | Item 76 is the first page |
-| 78 | AI draft replies sign off with "Kind regards," and the signature adds it again | Bug found 12 Nov 2026, waiting on yes | N | None |
+| 78 | AI draft replies sign off with "Kind regards," and the signature adds it again | Bug found 12 Nov 2026, owner's yes, building in `fix/draft-sign-off` | N | None |
 | 71 | ServiceM8 deposits come across as paid claims: a ServiceM8 Pay payment with no partial invoice behind it (J7016, #4809, $3,436.31) is recorded on the stage as a paid claim, at import and from the review screen for the jobs already across | LIVE 10 Nov 2026 (bug fix into `main`, spec ServiceM8 import), no migration | N | Owner: open Settings > Import from ServiceM8 once, "Deposits to add", tick, Import |
 | 70 | Simpler quote form: step 1 asks 13 fewer questions and fills the rest by itself, one copy of every figure, dead boxes gone (hidden STC defaults, markup 45, estimate wording, scope style, Check now, Generate PDF), duplicate cards off Summary and Details, type change applies its deposit and milestones, lead attachments and notes reach the AI, `time_and_materials` branches removed | LIVE 10 Nov 2026 (spec A3), straight to `main` on the owner's word, no migration | N | Owner: one Allow tap for the production checklist change (point 9) |
 | 63 | One-off items on a do-and-charge invoice: a material typed in (not in Stock, not added to Stock) as its own line | LIVE 9 Nov 2026 (spec A22), migration 20261130040000 | N | None |
@@ -1768,7 +1768,9 @@ The rule is in `CLAUDE.md` (How the owner works, "Use the whole screen") and the
 
 Each page's plan says what sits in which column, what stays stacked on a phone, and its Done means. Touches per page in its own plan. Kind: feature into `staging` each time, no migration.
 
-## 78. AI draft replies sign off twice (bug, found 12 Nov 2026, waiting on yes)
+## 78. AI draft replies sign off twice (bug, found 12 Nov 2026, owner's yes the same day)
+
+Building in: `fix/draft-sign-off`.
 
 **Owner, 12 Nov 2026:** the email draft still signs off with Kind regards, which the signature already says; the Writing style setting was changed to drop it and the drafts still do it.
 
