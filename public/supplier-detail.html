@@ -34,7 +34,8 @@
     <p class="subtitle">Loading...</p>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/supplier-bill-actions.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const supplierId = new URLSearchParams(window.location.search).get('id');
@@ -58,6 +59,14 @@
         .select('*, purchase_orders(id, po_number, description, received, closed_at)')
         .eq('supplier_id', supplierId)
         .order('bill_date', { ascending: false });
+
+      // packing slips filed with a bill (item 83): Open docket beside the invoice
+      const docketsByBill = {};
+      if ((bills || []).length) {
+        const { data: dockets } = await supabaseClient.from('supplier_bill_inbox').select('bill_id, file_path, file_name')
+          .in('bill_id', bills.map(b => b.id)).eq('extracted->>document_type', 'delivery_docket').not('file_path', 'is', null);
+        (dockets || []).forEach(d => (docketsByBill[d.bill_id] = docketsByBill[d.bill_id] || []).push(d));
+      }
 
       const { data: flaggedItems } = await supabaseClient
         .from('supplier_bill_line_items')
@@ -135,21 +144,22 @@
               <tbody>
                 ${bills.map(b => `
                   <tr>
-                    <td data-label="Bill #">${escapeHtml(b.bill_number || '-')}</td>
+                    <td data-label="Bill #">${b.kind === 'credit_note' ? '<span class="badge sent" style="margin-right:4px;">Credit</span>' : ''}${escapeHtml(b.bill_number || '-')}${b.file_path ? ` <a href="#" class="link-quiet bill-file-link" data-path="${escapeHtml(b.file_path)}" title="${escapeHtml(b.file_name || 'Open the invoice')}" style="font-size:12px;">Open invoice</a>` : ''}${(docketsByBill[b.id] || []).map(d => ` <a href="#" class="link-quiet bill-file-link" data-path="${escapeHtml(d.file_path)}" title="${escapeHtml(d.file_name || '')}" style="font-size:12px;">Open docket</a>`).join('')}</td>
                     <td data-label="Date">${b.bill_date ? new Date(b.bill_date).toLocaleDateString('en-AU') : '-'}</td>
-                    <td data-label="PO">${escapeHtml(b.purchase_orders?.po_number || '-')}</td>
-                    <td class="num" data-label="Amount">${money(b.amount)}</td>
+                    <td data-label="PO">${b.purchase_orders ? `<a href="/purchase-order.html?id=${escapeHtml(b.purchase_orders.id)}" class="link-quiet">${escapeHtml(b.purchase_orders.po_number || 'PO')}</a>` : '-'}</td>
+                    <td class="num" data-label="Amount">${b.kind === 'credit_note' ? `<span style="color:var(--green);">${money(b.amount)}</span>` : money(b.amount)}</td>
                     <td data-label="Terms due">${dayText(b.due_date)}</td>
                     <td data-label="Pay on">${b.paid ? '-' : (b.approved_for_payment ? dayText(b.pay_on || b.due_date) : '<span class="subtitle" style="font-size:12px;">after approval</span>')}</td>
-                    <td data-label="Status">${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">Paid ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}${b.paid_method ? ' by ' + escapeHtml(poPaidLabel(b.paid_method)) : ''}</span>`
+                    <td data-label="Status">${b.xero_bill_id ? `<span class="badge sent" title="${escapeHtml(b.xero_bill_error || ('In Xero as ' + (b.xero_bill_number || '')))}" style="margin-right:4px; ${b.xero_bill_error ? 'color:var(--amber);' : ''}">Xero${b.xero_bill_error ? ', see note' : ''}</span>` : b.xero_bill_error ? `<span class="badge draft" title="${escapeHtml(b.xero_bill_error)}" style="margin-right:4px; color:var(--red);">Xero: not sent</span>` : ''}${b.paid ? `<span class="badge accepted" title="${escapeHtml(b.payment_reference || '')}">${b.paid_method === 'refund' ? 'Refunded' : b.kind === 'credit_note' ? 'Settled' : 'Paid'} ${b.paid_at ? dayText(b.paid_at.slice(0, 10)) : ''}${b.paid_method && b.paid_method !== 'refund' ? ' by ' + escapeHtml(poPaidLabel(b.paid_method)) : ''}</span>`
+                      : b.kind === 'credit_note' ? '<span class="badge sent">Credit, nets off the next bill</span>'
                       : b.approved_for_payment ? '<span class="badge sent">Approved</span>'
                       : b.purchase_orders && !b.purchase_orders.closed_at ? '<span class="badge draft">Waiting on PO close</span>'
                       : '<span class="badge draft">Not approved</span>'}</td>
-                    <td data-label="">${!b.paid && !b.approved_for_payment ? (
+                    <td data-label="">${b.kind === 'credit_note' ? (!b.paid && canPay ? `<button class="secondary refund-credit-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="The money came back to us instead of coming off the next bill">Refunded</button>` : '') : !b.paid && !b.approved_for_payment ? (
                       b.purchase_orders
                         ? (b.purchase_orders.closed_at ? '<span class="subtitle" style="font-size:12px;">See Bill checks</span>' : '<span class="subtitle" style="font-size:12px;">Approved when the PO is closed</span>')
                         : (supplier.needs_review ? '<span class="subtitle" style="font-size:12px;">Check supplier details first</span>' : `<button class="secondary approve-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Approve</button>`)
-                    ) : ''}${!b.paid && canPay ? `<button class="secondary paid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="${b.approved_for_payment ? 'Record the payment' : 'Paid upfront or at the counter: approves it too'}">Paid</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
+                    ) : ''}${!b.paid && canPay && b.kind !== 'credit_note' ? `<button class="secondary paid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="${b.approved_for_payment ? 'Record the payment' : 'Paid upfront or at the counter: approves it too'}">Paid</button>` : ''}${!b.paid && b.kind !== 'credit_note' ? `<button class="secondary move-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="This bill is for another PO">Move</button>` : ''}${!b.paid ? `<button class="secondary remove-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px; color:var(--red);" title="Not ours, paid by the customer, entered twice: take it out of TEops">Remove</button>` : ''}${(b.approved_for_payment || b.paid) && !b.xero_bill_id ? `<button class="secondary xero-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;" title="Send this to Xero as a Bill now (the worker does it every 15 minutes once it is switched on)">Push to Xero</button>` : ''}${b.paid && canPay ? `<button class="secondary unpaid-bill-btn" data-id="${b.id}" style="font-size:12px; padding:6px 10px;">Not paid</button>` : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>`}
@@ -192,6 +202,16 @@
         busy(btn, 'Approving...', () => callServer('supplier-checks', { action: 'approve_bill', id: btn.dataset.id }))));
       // Paid any time (item 51): approved or not, with the date, how and a reference (shared panel, Admin/Finance)
       document.querySelectorAll('.paid-bill-btn').forEach(btn => btn.addEventListener('click', () => loadPoScan().then(() => openBillPaidPanel(bills.find(b => b.id === btn.dataset.id), loadSupplier)).catch(err => alert(err.message))));
+      // a bill on the wrong PO, or not ours; a credit note refunded (js/supplier-bill-actions.js, items 82 and 83)
+      document.querySelectorAll('.move-bill-btn').forEach(btn => btn.addEventListener('click', () => openMoveBillPanel(bills.find(b => b.id === btn.dataset.id), { supplierId, onDone: loadSupplier })));
+      document.querySelectorAll('.remove-bill-btn').forEach(btn => btn.addEventListener('click', () => removeBill(bills.find(b => b.id === btn.dataset.id), loadSupplier)));
+      document.querySelectorAll('.refund-credit-btn').forEach(btn => btn.addEventListener('click', () => refundCreditNote(bills.find(b => b.id === btn.dataset.id), loadSupplier)));
+      // to Xero as a Bill now (item 83 part C): the same step the worker runs every 15 minutes
+      document.querySelectorAll('.xero-bill-btn').forEach(btn => btn.addEventListener('click', () => busy(btn, 'Sending...', () => callServer('push-bill-to-xero', { bill_id: btn.dataset.id }))));
+      document.querySelectorAll('.bill-file-link').forEach(a => a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await openSignedDocInNewTab(a.dataset.path); } catch (err) { alert(friendlyError(err)); }
+      }));
       document.querySelectorAll('.unpaid-bill-btn').forEach(btn => btn.addEventListener('click', () => {
         const note = prompt('Mark this bill as not paid. Why?', '');
         if (note === null) return;
@@ -555,6 +575,11 @@
 
     // inboxItemId: set when the bill came from the Emailed bills page; saving ticks it off there.
     async function openReviewPanel(extracted, preselectedPoId = null, sourceFile = null, inboxItemId = null) {
+      // a credit note has its own screen (js/supplier-bill-actions.js, item 82): a bill with a minus in front
+      if ((extracted || {}).document_type === 'credit_note') {
+        await openCreditReviewPanel({ supplierId, supplierName: currentSupplier?.name, extracted, sourceFile, inboxItemId, preselectedPoId, onDone: loadSupplier });
+        return;
+      }
       const { data: allMaterials } = await supabaseClient.from('materials').select('id, name, cost_price, sell_price, quantity_on_hand');
       const materials = allMaterials || [];
       // the Stock item with each line's part number or barcode (the database's own rule, _material_by_code)

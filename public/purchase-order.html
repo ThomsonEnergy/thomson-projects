@@ -31,14 +31,17 @@
     <div id="po-page" class="page-cols"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
-  <script src="/js/email-compose.js?v=11"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/email-compose.js?v=13"></script>
+  <script src="/js/po-bills.js?v=1"></script>
+  <script src="/js/po-bills-match.js?v=1"></script>
+  <script src="/js/supplier-bill-actions.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // One purchase order, one page: the next step at the top, the lines with a tick box each
     // (tick what arrived, one Receive button), everything else under More. Backlog item 31.
     const poId = new URLSearchParams(window.location.search).get('id');
-    let current = null; // { po, bills, emailed }
+    let current = null; // { po, bills, emailed, toMatch }
     let myRole = 'staff';
 
     async function load() {
@@ -48,6 +51,8 @@
         const [full, role] = await Promise.all([loadPurchaseOrderFull(poId), getMyRole()]);
         myRole = role;
         if (!full) { pageEl.innerHTML = '<div class="error-box">That purchase order could not be found.</div>'; return; }
+        // emailed bills from this supplier still waiting for a PO (js/po-bills-match.js, item 83)
+        full.toMatch = isPricingRole(role) && full.po.supplier_id && !full.po.closed_at ? billsToMatchFor(await loadBillsToMatch([full.po.supplier_id]), full.po) : [];
         current = full;
         render();
       } catch (err) {
@@ -60,20 +65,23 @@
     }
 
     function render() {
-      const { po, bills, emailed } = current;
+      const { po, bills, emailed, toMatch } = current;
       const pageEl = document.getElementById('po-page');
       const ref = po.po_number || 'Purchase order';
       if (typeof setPageTitle === 'function') setPageTitle(ref); else document.title = `${ref} - TEops`;
       const c = poLineCounts(po);
       const open = !po.closed_at;
-      const next = poNextStep(po, bills, { emailed, role: myRole });
+      const next = toMatch.length
+        ? { key: 'bills', label: `${toMatch.length} emailed bill${toMatch.length === 1 ? '' : 's'} to match`, hint: 'A bill from this supplier has no PO number on it. If it is for this PO, say so under Bills and it is saved here.' }
+        : poNextStep(po, bills, { emailed, role: myRole });
       const pricing = isPricingRole(myRole);
       const supplierName = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
       const genericDesc = /^(PO for |Stock purchase order$|PO for vehicle$|Pulled from Warehouse stock$|Purchased for vehicle$|Tools and equipment$|Perishables \(tools register\)$)/.test(po.description || '');
-      const decideCount = bills.filter(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red)).length;
-      const billsSummary = !bills.length ? 'No bills on this PO yet'
+      const decideCount = bills.filter(b => !b.paid && b.kind !== 'credit_note' && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l, b).red)).length;
+      const billsSummary = toMatch.length ? `${toMatch.length} to match`
+        : !bills.length ? 'No bills on this PO yet'
         : decideCount ? `${decideCount} bill${decideCount === 1 ? '' : 's'} need${decideCount === 1 ? 's' : ''} a decision`
-        : `${bills.length} bill${bills.length === 1 ? '' : 's'}, ${bills.every(b => b.paid) ? 'paid' : bills.some(b => b.approved_for_payment) ? 'approved for payment' : 'matched'}`;
+        : `${bills.length} bill${bills.length === 1 ? '' : 's'}${bills.some(b => b.kind === 'credit_note') ? ' (a credit among them)' : ''}, ${bills.every(b => b.paid) ? 'paid' : bills.some(b => b.approved_for_payment) ? 'approved for payment' : 'matched'}`;
       const budgetPercent = po.budget_cap ? Math.round((poTotalAmount(po) / Number(po.budget_cap)) * 100) : null;
 
       keepColumnScroll(pageEl, () => { pageEl.innerHTML = `
@@ -133,10 +141,11 @@
         </div>` : ''}
 
         ${pricing ? `
-        <details class="po-fold card" id="po-bills" ${decideCount ? 'open' : ''}>
-          <summary>Bills <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto; ${decideCount ? 'color:var(--red);' : ''}">${escapeHtml(billsSummary)}</span></summary>
+        <details class="po-fold card" id="po-bills" ${decideCount || toMatch.length ? 'open' : ''}>
+          <summary>Bills <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto; ${decideCount ? 'color:var(--red);' : toMatch.length ? 'color:var(--amber);' : ''}">${escapeHtml(billsSummary)}</span></summary>
           <div style="margin-top:8px;">
-            ${bills.length ? renderPoBills(bills, po, myRole) : '<p class="subtitle" style="font-size:13px;">A supplier\'s invoice emailed to invoice@ lands here by its PO number, or upload it under More.</p>'}
+            ${renderBillsToMatch(toMatch, po)}
+            ${bills.length ? renderPoBills(bills, po, myRole) : toMatch.length ? '' : '<p class="subtitle" style="font-size:13px;">A supplier\'s invoice emailed to invoice@ lands here by its PO number, or upload it under More.</p>'}
           </div>
         </details>` : ''}
 
@@ -182,7 +191,8 @@
         role: myRole, onComplete: load,
         bar: document.getElementById('po-receive-bar'), selectAll: document.getElementById('po-select-all'),
       });
-      wirePoBillButtons(pageEl, load);
+      wirePoBillButtons(pageEl, load, bills);
+      wireBillsToMatch(pageEl, toMatch, po, load);
       const logEl = document.getElementById('po-log');
       logEl.addEventListener('toggle', () => { if (logEl.open && !logEl.dataset.loaded) { logEl.dataset.loaded = '1'; renderActivityLog('purchase_order', po.id, 'po-log-body'); } });
     }

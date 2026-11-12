@@ -167,6 +167,19 @@ async function carryQuoteCosts(supabaseAdmin, quote, job, stageIdMap) {
     }
   }
 
+  // Supplier price requests and the quotes that came back (item 81) follow the job, with their
+  // files, so Approve on the job's Supplier quotes tab makes the PO on the job.
+  for (const table of ['supplier_quote_requests', 'supplier_quotes']) {
+    const { error } = await supabaseAdmin.from(table).update({ project_id: job.id }).eq('project_id', quote.id);
+    if (error) throw error;
+  }
+  const { data: sqDocs } = await supabaseAdmin.from('supplier_quotes').select('document_id').eq('project_id', job.id).not('document_id', 'is', null);
+  const sqDocIds = [...new Set((sqDocs || []).map(d => d.document_id))];
+  if (sqDocIds.length) {
+    const { error } = await supabaseAdmin.from('project_documents').update({ project_id: job.id }).in('id', sqDocIds);
+    if (error) throw error;
+  }
+
   const parts = [];
   if (moved.shifts) parts.push(`${moved.shifts} shift${moved.shifts === 1 ? '' : 's'} (${fmtHours(moved.hours)})`);
   if (moved.draws) parts.push(`${moved.draws} Stock draw${moved.draws === 1 ? '' : 's'}`);

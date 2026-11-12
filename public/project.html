@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -48,7 +48,8 @@
   <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
-  <script src="/js/email-compose.js?v=11"></script>
+  <script src="/js/email-compose.js?v=13"></script>
+  <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=3"></script>
   <script src="/js/share-with-client.js?v=1"></script>
@@ -3976,6 +3977,7 @@
         { panel: 'contacts', label: 'Contacts', show: !editMode },
         { panel: 'costcentres', label: 'Cost Centres', show: true },
         { panel: 'pos', label: 'Purchase Orders', show: !!project.job_number && !editMode },
+        { panel: 'supplier-quotes', label: 'Supplier quotes', show: pricingVisible && !editMode },
         { panel: 'variations', label: 'Variations', show: !!project.job_number && !editMode },
         { panel: 'invoices', label: 'Invoices', show: !!project.job_number && !editMode && pricingVisible },
         { panel: 'stcs', label: 'STCs', show: !!project.job_number && !editMode && pricingVisible },
@@ -4432,6 +4434,10 @@
             </div>
             ` : ''}
 
+            ${pricingVisible && !editMode ? `
+            <div class="settings-panel" id="panel-supplier-quotes"><div id="supplier-quotes-root"><p class="subtitle">Loading...</p></div></div>
+            ` : ''}
+
             ${project.job_number && !editMode ? `
             <div class="settings-panel${!editMode ? ' job-card-grid' : ''}" id="panel-variations">
               <div class="card">
@@ -4741,6 +4747,10 @@
       }
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
+      // Supplier quotes (item 81): its own file, loaded when the tab opens
+      if (document.getElementById('supplier-quotes-root')) tabLoaders['supplier-quotes'] = () => loadJsOnce('/js/supplier-quotes.js?v=1', () => typeof mountSupplierQuotes === 'function')
+        .then(() => mountSupplierQuotes({ el: document.getElementById('supplier-quotes-root'), project, centres, onPoMade: () => { if (project.job_number) loadPurchaseOrders(project.id, centres); } }))
+        .catch(err => { document.getElementById('supplier-quotes-root').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; });
       if (document.getElementById('job-invoices-list')) tabLoaders.invoices = () => { loadJobInvoices(project); loadSm8Invoices(project.id); };
       if (document.getElementById('variation-records-list')) loadVariations(project.id);
       loadJobTasks(project.id);
@@ -5677,10 +5687,13 @@
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
         quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
         attachOptions: jobEmailAttachOptions(project, withQuote),
-        onSent: async () => {
+        onSent: async (threadId, sent) => {
+          // The quote is sent only when its PDF actually went in this email (the Send step's button, or the
+          // Quote PDF box ticked): an email to a supplier or anyone else from a quote leaves it a draft.
           // Only moves a quote still at draft_quote, so re-sending can't push it backwards.
-          if (isQuote && !reply && !project.job_number) {
-            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
+          const quoteWent = !!project.quote_pdf_path && (sent?.attachments || []).some(a => a.path === project.quote_pdf_path);
+          if (quoteWent && !reply && !project.job_number) {
+            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent', sent_at: new Date().toISOString() }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
             await logActivity('project', project.id, 'quote_emailed', `Quote${project.quote_number ? ' Q' + project.quote_number : ''} emailed to the client`);
           }
           await loadJobEmails(project);
@@ -8241,21 +8254,14 @@
       // A PO with a line on another job, the Warehouse or a van shows only this job's share
       // (poJobShare), with the whole PO's figure under it so the supplier's bill still adds up.
       const shares = pos.map(po => [po, poJobShare(po, projectId)]);
+      // emailed bills still waiting for a PO, counted on the row (js/po-bills-match.js, item 83); pricing roles see them
+      const toMatch = typeof loadBillsToMatch === 'function' && isPricingRole(await getMyRole()) ? await loadBillsToMatch([...new Set(pos.map(po => po.supplier_id).filter(Boolean))]) : [];
       listEl.innerHTML = shares.map(([po, share]) => {
         const stage = stageName(po.cost_centre_id);
-        const stageNote = stage ? `<span class="subtitle">${escapeHtml(stage)}</span>` : '';
+        const stageNote = (stage ? `<span class="subtitle">${escapeHtml(stage)}</span>` : '') + (billsToMatchNote(toMatch, po) ? ' ' + billsToMatchNote(toMatch, po) : '');
         if (share.whole) return renderPoRow(po, { showWhere: false, note: stageNote });
         return renderPoRow(po, { showWhere: false, note: share.note + stageNote, progress: share.progress, total: share.amount, totalNote: `of PO ${money(poTotalAmount(po))}` });
       }).join('') + `<p class="subtitle" style="margin-top:6px;">Total on this job: ${money(shares.reduce((s, [, share]) => s + share.amount, 0))}</p>`;
-    }
-
-    function fuzzyMatchScore(a, b) {
-      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
-      const wordsA = new Set(norm(a));
-      const wordsB = norm(b);
-      if (!wordsA.size || !wordsB.length) return 0;
-      const matches = wordsB.filter(w => wordsA.has(w)).length;
-      return matches / Math.max(wordsA.size, wordsB.length);
     }
 
     async function openSuggestPoPanel(projectId, centres) {

@@ -11,6 +11,8 @@
 //      every 30 days (_shared/writing-style.js), before the drafts below use it.
 //   4. The email agent: sections, labels (and label sweeps over older mail), job tags and
 //      drafts (_shared/email-agent.js).
+//   5. Supplier quotes (item 81): a supplier's reply to a request for quote with a file is filed on
+//      the job and read by Tally (_shared/supplier-quote-intake.js).
 // One run per mailbox at a time (mailboxes.busy_until). Starts itself again if time runs out.
 
 const { getAdminClient } = require('./_shared/require-admin');
@@ -19,6 +21,7 @@ const { processMessageId, startMailboxWork, catchUpSharedMailbox } = require('./
 const { scanInbox, suggestForSenders, runQueuedActions } = require('./_shared/mailbox-cleanup');
 const { runEmailAgent } = require('./_shared/email-agent');
 const { learnWritingStyle, wantsLearning } = require('./_shared/writing-style');
+const { sweepSupplierQuotes } = require('./_shared/supplier-quote-intake');
 const { runAgent } = require('./_shared/agent-log');
 const { requireInternal } = require('./_shared/require-internal');
 
@@ -148,6 +151,16 @@ async function mailboxWork() {
       parts.push(`${mb.address}: ${String(err.message).slice(0, 120)}`);
     } finally {
       await release(admin, mb);
+    }
+  }
+  // supplier quotes that came back to a request for quote, once the mail above is in
+  if (Date.now() - startedAt < BUDGET_MS) {
+    try {
+      const sq = await sweepSupplierQuotes(admin, usage);
+      if (sq.filed || sq.read) parts.push(`supplier quotes: ${sq.filed} filed, ${sq.read} read`);
+    } catch (err) {
+      console.error('supplier quote sweep failed:', err.message);
+      parts.push(`supplier quotes: ${String(err.message).slice(0, 120)}`);
     }
   }
   if (more) await startMailboxWork();

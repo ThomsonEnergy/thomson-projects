@@ -42,7 +42,7 @@ function loadEmailComposer() {
   if (window.openEmailComposer) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = '/js/email-compose.js?v=11';
+    s.src = '/js/email-compose.js?v=13';
     s.onload = resolve;
     s.onerror = () => reject(new Error('Could not load the email window. Check the connection and try again.'));
     document.head.appendChild(s);

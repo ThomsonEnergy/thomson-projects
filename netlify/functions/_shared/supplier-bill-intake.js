@@ -11,6 +11,15 @@
 //   3. leaves it on the Emailed bills page to be checked, or, when auto-save is on
 //      (api_keys supplier_bill_auto_save = 'on') and the match is confident, saves the
 //      bill against the PO itself.
+// A packing slip or delivery docket (document_type delivery_docket, or "other" with goods listed
+// and no total) is never a bill: it is put aside with a plain reason and filed with its invoice
+// (same email or same number) when that is saved (item 83). A PO is preselected only when our PO
+// number is on the document (or in the email) and it is that supplier's PO, or the total matches a
+// PO of theirs exactly; anything weaker is listed as a suggestion for a person to pick.
+// A credit note (document_type credit_note, item 82) is matched to the PO whose bills carry its items
+// (our PO number on it first) and saved through supplier_credit_note_save: a bill with a minus in
+// front, approved at once, its lines taking the credited goods off the PO (and out of stock or off
+// the job when they were received) or dropping the PO line's price.
 // It never approves a bill for payment, never touches Xero, stock or material prices.
 
 const fetch = require('node-fetch');
@@ -328,9 +337,13 @@ function matchPurchaseOrder({ pos, supplierId, ex, subject, bodyText, prefix }) 
   const strongOnes = top.filter(c => c.strength === 3);
   const confidence = strongOnes.length === 1 ? 'confident' : (top.length ? 'guess' : 'none');
   const best = strongOnes.length === 1 ? strongOnes[0] : top[0];
+  // preselected only when it is sure: our PO number on the document, or a PO of theirs with exactly this total.
+  // A weaker suggestion is listed, never preselected, so Save bill needs a deliberate pick (item 83).
+  const sure = strongOnes.length === 1 ? strongOnes[0] : top.find(c => c.strength === 1 && /total matches/.test(c.reason)) || null;
   let reason = best ? best.reason : (supplierId ? 'No open PO found for this supplier' : 'Supplier not recognised and no PO number found');
   if (strongOnes.length > 1) reason = 'More than one of our PO numbers is on this bill';
-  return { po_id: best?.po_id || null, confidence, reason, candidates: top.map(({ strength, ...c }) => c) };
+  else if (!sure && best && !onBill.size && !inEmail.size) reason = `No PO number on this bill: pick the PO (${best.reason.charAt(0).toLowerCase() + best.reason.slice(1)})`;
+  return { po_id: sure?.po_id || null, confidence, reason, candidates: top.map(({ strength, ...c }) => c) };
 }
 
 async function loadOpenPurchaseOrders(supabaseAdmin) {
@@ -351,7 +364,147 @@ async function findDuplicateBill(supabaseAdmin, supplierId, billNumber) {
   // INV-0103, inv103 and INV 103 are the same bill (normNum, same rule as the bill check)
   const want = normNum(billNumber);
   if (!want) return null;
-  const { data } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('supplier_id', supplierId).not('bill_number', 'is', null);
+  const { data } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('supplier_id', supplierId).eq('kind', 'bill').not('bill_number', 'is', null);
+  return (data || []).find(b => normNum(b.bill_number) === want)?.id || null;
+}
+
+// A packing slip, delivery docket or order confirmation: the reader says so, or it is "other" with
+// goods listed and no total to pay. Never a bill (item 83).
+function isDocket(ex) {
+  const type = ex.document_type || 'invoice';
+  if (type === 'delivery_docket') return true;
+  return type === 'other' && !(Number(ex.total) > 0) && !(Number(ex.subtotal) > 0) && (ex.line_items || []).length > 0;
+}
+
+// Files the packing slips that belong to a saved bill: the ones put aside from the same email as the
+// bill's own inbox row, or with the bill's number. They show as Open docket beside the bill.
+async function fileDocketsWithBill(supabaseAdmin, billId, { gmailMessageId = null } = {}) {
+  const { data: bill } = await supabaseAdmin.from('supplier_bills').select('id, supplier_id, bill_number').eq('id', billId).maybeSingle();
+  if (!bill || !bill.supplier_id) return 0;
+  const { data: rows } = await supabaseAdmin.from('supplier_bill_inbox').select('id, gmail_message_id, extracted')
+    .eq('supplier_id', bill.supplier_id).eq('status', 'not_a_bill').is('bill_id', null).eq('extracted->>document_type', 'delivery_docket');
+  const want = normNum(bill.bill_number);
+  const mine = (rows || []).filter(r => (gmailMessageId && r.gmail_message_id === gmailMessageId) || (want && normNum(r.extracted?.bill_number) === want));
+  for (const r of mine) {
+    await supabaseAdmin.from('supplier_bill_inbox').update({
+      status: 'saved', bill_id: bill.id, match_reason: `Packing slip${r.extracted?.bill_number ? ' ' + r.extracted.bill_number : ''}: nothing to pay. Filed with bill ${bill.bill_number || ''}.`.replace(/\s+/g, ' '),
+    }).eq('id', r.id);
+  }
+  return mine.length;
+}
+
+// Which PO a credit note is for: our PO number on it (sure when it is this supplier's), else the supplier's
+// POs (open or closed in the last 180 days) whose bills carry the credited part numbers or descriptions.
+async function matchCreditPurchaseOrder(supabaseAdmin, { supplierId, ex, subject, prefix }) {
+  const candidates = [];
+  const add = (po, reason, strength) => {
+    if (!po || candidates.some(c => c.po_id === po.id)) return;
+    candidates.push({ po_id: po.id, po_number: po.po_number, label: poLabel(po), amount: Number(po.amount) || 0, supplier_id: po.supplier_id, reason, strength });
+  };
+  const since = new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
+  const { data: pos } = await supabaseAdmin.from('purchase_orders')
+    .select('id, po_number, description, amount, status, supplier_id, supplier_name, order_date, closed_at, project_id, projects(name, job_number, quote_number), supplier_bills(id, kind, supplier_bill_line_items(description, part_number))')
+    .or(`closed_at.is.null,closed_at.gte.${since}`);
+  const all = pos || [];
+  const strip = (set) => new Set([...set].map(d => d.replace(/^0+/, '')));
+  const onDoc = strip(new Set([...poNumbersIn(ex.our_order_reference, prefix, { bareNumbersCount: true }), ...poNumbersIn(subject, prefix, { bareNumbersCount: false })]));
+  all.filter(po => po.po_number && onDoc.has(digitsOf(po.po_number))).forEach(po => {
+    if (supplierId && po.supplier_id === supplierId) add(po, `${po.po_number} is on the credit note`, 3);
+    else add(po, `${po.po_number} is on the credit note, but that PO is for ${po.supplier_name || 'another supplier'}`, 2);
+  });
+  const mine = supplierId ? all.filter(po => po.supplier_id === supplierId) : [];
+  const parts = new Set((ex.line_items || []).map(l => partNorm(l.part_number)).filter(Boolean));
+  const descs = (ex.line_items || []).map(l => l.description).filter(Boolean);
+  mine.map(po => {
+    const billed = (po.supplier_bills || []).filter(b => b.kind !== 'credit_note').flatMap(b => b.supplier_bill_line_items || []);
+    if (!billed.length) return { po, score: 0 };
+    const byPart = billed.some(l => parts.has(partNorm(l.part_number)));
+    const score = byPart ? 1 : (descs.length ? descs.reduce((sum, d) => sum + Math.max(0, ...billed.map(l => fuzzyMatchScore(l.description, d))), 0) / descs.length : 0);
+    return { po, score };
+  }).filter(x => x.score >= 0.6).sort((a, b) => b.score - a.score)
+    .forEach(x => add(x.po, `Bills on ${x.po.po_number} carry these items`, 2));
+  mine.filter(po => !po.closed_at).sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || ''))).forEach(po => add(po, 'Open PO for this supplier', 0));
+  candidates.sort((a, b) => b.strength - a.strength);
+  const top = candidates.slice(0, 3);
+  const sure = top.filter(c => c.strength >= 2 && (!supplierId || c.supplier_id === supplierId));
+  const best = sure.length === 1 ? sure[0] : top[0];
+  const confidence = sure.length === 1 ? 'confident' : (top.length ? 'guess' : 'none');
+  const reason = best ? best.reason : (supplierId ? 'No PO found whose bills carry these items: pick the PO, or save it as a credit on the account' : 'Supplier not recognised');
+  return { po_id: sure.length === 1 ? sure[0].po_id : null, confidence, reason, candidates: top.map(({ strength, ...c }) => c) };
+}
+
+// Saves a credit note inbox row through supplier_credit_note_save against the PO (or none: a credit on the
+// account). Each credited line is matched to a PO line the way a bill's lines are; a line at the PO line's
+// price means the goods went back (goods_returned), a different price is a price credit. overrides:
+// { [line index]: goods_returned } from the Emailed bills card when a person switched one.
+async function saveInboxItemAsCredit(supabaseAdmin, itemId, { poId = null, userId = null, amount = null, overrides = {} } = {}) {
+  const { data: item, error: itemErr } = await supabaseAdmin.from('supplier_bill_inbox').select('*').eq('id', itemId).maybeSingle();
+  if (itemErr) throw itemErr;
+  if (!item) throw new Error('That emailed credit note was not found.');
+  if (item.status === 'saved') throw new Error('That credit note is already saved.');
+  if (!item.supplier_id) throw new Error('Pick the supplier first.');
+  const ex = item.extracted || {};
+  if ((ex.document_type || 'invoice') !== 'credit_note') throw new Error('That is not a credit note.');
+  const { data: supplier } = await supabaseAdmin.from('suppliers').select('*').eq('id', item.supplier_id).single();
+  let po = null;
+  if (poId) {
+    const { data } = await supabaseAdmin.from('purchase_orders')
+      .select('id, po_number, supplier_id, supplier_name, purchase_order_line_items(id, material_id, description, quantity, unit_cost)').eq('id', poId).maybeSingle();
+    if (!data) throw new Error('That PO no longer exists.');
+    if (data.supplier_id !== supplier.id) throw new Error(`${data.po_number || 'That PO'} is for ${data.supplier_name || 'another supplier'}, not ${supplier.name}.`);
+    po = data;
+  }
+  const poLines = po?.purchase_order_line_items || [];
+  if (poLines.length) {
+    const matIds = [...new Set(poLines.map(pl => pl.material_id).filter(Boolean))];
+    const [{ data: mats }, { data: links }] = await Promise.all([
+      matIds.length ? supabaseAdmin.from('materials').select('id, part_number').in('id', matIds) : { data: [] },
+      matIds.length ? supabaseAdmin.from('material_supplier_links').select('material_id, part_number').eq('supplier_id', supplier.id).in('material_id', matIds) : { data: [] },
+    ]);
+    poLines.forEach(pl => {
+      pl.part_numbers = [...(mats || []).filter(m => m.id === pl.material_id).map(m => m.part_number),
+        ...(links || []).filter(k => k.material_id === pl.material_id).map(k => k.part_number)].map(partNorm).filter(Boolean);
+    });
+  }
+  const lines = creditLinesPlan(ex, poLines, overrides);
+  const creditAmount = Math.abs(amount != null ? Number(amount) : (Number(ex.total) || 0));
+  const { data: creditId, error } = await supabaseAdmin.rpc('supplier_credit_note_save', { p: {
+    supplier_id: supplier.id, credit_number: ex.bill_number || null, credit_date: ex.bill_date || null, amount: creditAmount,
+    po_id: po?.id || null, file_path: item.file_path, file_name: item.file_name, user_id: userId,
+    notes: `Emailed to invoice@${item.email_from ? ' by ' + item.email_from : ''}`,
+    lines: lines.map(l => ({ description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, unit: l.unit, material_id: l.material_id, po_line_item_id: l.po_line_item_id, goods_returned: l.goods_returned })),
+  } });
+  if (error) throw new Error(error.message);
+  await supabaseAdmin.from('supplier_bill_inbox').update({
+    status: 'saved', bill_id: creditId, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),
+  }).eq('id', itemId);
+  await checkBillAndSiblings(supabaseAdmin, creditId);
+  return creditId;
+}
+
+// What each credited line will do, for the save and for the Emailed bills card: matched to a PO line (part
+// number, Stock item, description), goods_returned when the credit's unit price is the PO line's (within 1%).
+function creditLinesPlan(ex, poLines, overrides = {}) {
+  return (ex.line_items || []).filter(l => l.description).map((l, i) => {
+    const quantity = Math.abs(Number(l.quantity) || 1);
+    const unitCost = Math.abs(Number(l.unit_cost) || 0);
+    const partNumber = String(l.part_number || '').trim() || null;
+    const hit = isFreight(l.description) ? null : matchPoLine(poLines, { part_number: partNumber, description: l.description });
+    const pl = hit?.line || null;
+    const samePrice = pl ? Math.abs(unitCost - Number(pl.unit_cost)) <= Math.max(0.01, Number(pl.unit_cost) * 0.01) : false;
+    const goods = pl ? (overrides[i] != null ? !!overrides[i] : samePrice) : null;
+    return {
+      index: i, description: l.description, part_number: partNumber, quantity, unit_cost: unitCost, unit: String(l.unit || '').trim().slice(0, 20) || null,
+      material_id: pl?.material_id || null, po_line_item_id: pl?.id || null, po_line_description: pl?.description || null, po_line_unit_cost: pl ? Number(pl.unit_cost) : null, goods_returned: goods,
+      what: !pl ? 'money only' : goods ? 'returned: comes off the PO, and out of Stock or off the job if received' : 'price credit: goods kept, the PO line\'s price drops',
+    };
+  });
+}
+
+async function findDuplicateCredit(supabaseAdmin, supplierId, number) {
+  const want = normNum(number);
+  if (!want) return null;
+  const { data } = await supabaseAdmin.from('supplier_bills').select('id, bill_number').eq('supplier_id', supplierId).eq('kind', 'credit_note').not('bill_number', 'is', null);
   return (data || []).find(b => normNum(b.bill_number) === want)?.id || null;
 }
 
@@ -388,16 +541,32 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
   const [pos, prefix] = await Promise.all([loadOpenPurchaseOrders(supabaseAdmin), poPrefix(supabaseAdmin)]);
   const po = matchPurchaseOrder({ pos, supplierId: sid, ex, subject: row.email_subject, bodyText, prefix });
 
-  const dupId = await findDuplicateBill(supabaseAdmin, sid, ex.bill_number);
-  // the same bill emailed twice before either was saved
+  const docType = isDocket(ex) ? 'delivery_docket' : (ex.document_type || 'invoice');
+  const dupId = docType === 'statement' ? null : await findDuplicateBill(supabaseAdmin, sid, ex.bill_number);
+  // the same bill emailed twice before either was saved (a packing slip with the invoice's number is not a twin)
   let waitingTwin = null;
-  if (!dupId && sid && ex.bill_number) {
-    const { data: twins } = await supabaseAdmin.from('supplier_bill_inbox').select('id')
-      .eq('supplier_id', sid).eq('status', 'to_check').neq('id', row.id).eq('extracted->>bill_number', String(ex.bill_number)).limit(1);
-    waitingTwin = twins?.[0] || null;
+  if (!dupId && sid && ex.bill_number && docType !== 'delivery_docket') {
+    const { data: twins } = await supabaseAdmin.from('supplier_bill_inbox').select('id, extracted')
+      .eq('supplier_id', sid).eq('status', 'to_check').neq('id', row.id).eq('extracted->>bill_number', String(ex.bill_number)).limit(5);
+    waitingTwin = (twins || []).find(t => !isDocket(t.extracted || {})) || null;
   }
-  const docType = ex.document_type || 'invoice';
   let status = 'to_check', reason = po.reason, confidence = po.confidence;
+  if (docType === 'delivery_docket') {
+    // a packing slip: nothing to pay. Filed with its invoice now (already saved) or when the invoice is saved.
+    confidence = 'none';
+    const num = ex.bill_number ? ' ' + ex.bill_number : '';
+    if (dupId) {
+      status = 'saved';
+      reason = `Packing slip${num}: nothing to pay. Filed with the invoice.`;
+    } else {
+      status = 'not_a_bill';
+      reason = `Packing slip${num}: nothing to pay. It is filed with the invoice when that is saved.`;
+    }
+    return {
+      status, supplier_id: sid, po_id: dupId ? null : po.po_id, bill_id: dupId, match_confidence: confidence, match_reason: reason,
+      po_candidates: po.candidates, duplicate_of_bill_id: null, extracted: { ...ex, document_type: 'delivery_docket' },
+    };
+  }
   if (dupId) {
     status = 'duplicate';
     reason = `Bill ${ex.bill_number} from ${supplierMatch.supplier.name} is already saved`;
@@ -412,10 +581,20 @@ async function analyse(supabaseAdmin, row, { supplierId = null, abnCheck = null,
     // the price list reader (_shared/price-list-intake.js) picks these up
     status = 'not_a_bill';
     reason = 'Looks like a price list: read on the Price lists page';
+  } else if (docType === 'credit_note') {
+    // a credit note: matched to the PO whose bills carry its items (item 82); saved as a credit, never as a bill
+    const cm = await matchCreditPurchaseOrder(supabaseAdmin, { supplierId: sid, ex, subject: row.email_subject, prefix });
+    confidence = cm.confidence; reason = `Credit note: ${cm.reason}`;
+    const dupCredit = sid && ex.bill_number ? await findDuplicateCredit(supabaseAdmin, sid, ex.bill_number) : null;
+    if (dupCredit) { status = 'duplicate'; reason = `Credit note ${ex.bill_number} from ${supplierMatch.supplier.name} is already saved`; }
+    if (!sid) { confidence = 'none'; reason = `Credit note from "${ex.supplier || 'unknown'}": supplier not recognised, pick the supplier`; }
+    return {
+      status, supplier_id: sid, po_id: dupCredit ? null : cm.po_id, bill_id: null, match_confidence: confidence, match_reason: reason,
+      po_candidates: cm.candidates, duplicate_of_bill_id: dupCredit,
+    };
   } else if (docType !== 'invoice') {
     confidence = 'guess';
-    const looksLike = { credit_note: 'a credit note', statement: 'a statement' }[docType] || 'something other than a bill (price list, quote, remittance or similar)';
-    reason = `This looks like ${looksLike}, not a bill. ${po.reason}`;
+    reason = `This looks like ${docType === 'statement' ? 'a statement' : 'something other than a bill (price list, quote, remittance or similar)'}, not a bill. ${po.reason}`;
   } else if (sharedBy) {
     confidence = 'none';
     reason = `${sharedBy.map(x => x.name).join(' and ')} share this ${sharedHow}${ex.our_account_number && sharedHow !== 'account number' ? ` and our account number ${ex.our_account_number} matches neither` : ''}${ex.our_account_number ? '' : ' and the bill has no account number'}: pick which account by the account number on the bill${sharedHow === 'account number' ? ' (two suppliers have the same account number saved: fix it on their pages)' : ''}. ${po.reason}`;
@@ -463,6 +642,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
   if (item.status === 'saved') throw new Error('That bill is already saved.');
   if (!item.supplier_id) throw new Error('Pick the supplier first.');
   const ex = item.extracted || {};
+  if (isDocket(ex)) throw new Error('That is a packing slip, not a bill: nothing to pay. It is filed with the invoice when that is saved.');
 
   const { data: supplier } = await supabaseAdmin.from('suppliers').select('*').eq('id', item.supplier_id).single();
   const dupId = await findDuplicateBill(supabaseAdmin, supplier.id, ex.bill_number);
@@ -574,6 +754,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     status: 'saved', bill_id: bill.id, po_id: po?.id || null, resolved_by: userId, resolved_at: new Date().toISOString(),
   }).eq('id', itemId);
   await checkBillAndSiblings(supabaseAdmin, bill.id);
+  await fileDocketsWithBill(supabaseAdmin, bill.id, { gmailMessageId: item.gmail_message_id });
 
   const who = userId ? '' : ' automatically';
   const desc = `Bill ${ex.bill_number || ''} (${money(billAmount)}) from ${supplier.name} saved${who} from an invoice@ email`.replace(/\s+/g, ' ');
@@ -642,7 +823,7 @@ async function processOne(supabaseAdmin, row, autoSave, usage) {
   const abnCheck = (extracted.document_type || 'invoice') === 'invoice'
     ? await checkSupplierDetails(extracted, matchSupplier(allSuppliers, extracted)?.supplier || null) : null;
   const result = await analyse(supabaseAdmin, withExtract, { abnCheck, allowCreate: true });
-  await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted, processed_at: new Date().toISOString(), error: null }).eq('id', row.id);
+  await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted: result.extracted || extracted, processed_at: new Date().toISOString(), error: null }).eq('id', row.id);
 
   if (autoSave && result.status === 'to_check' && result.match_confidence === 'confident' && result.supplier_id && result.po_id && (extracted.document_type || 'invoice') === 'invoice') {
     try {
@@ -702,5 +883,5 @@ async function processSupplierBills({ budgetMs = 10 * 60 * 1000, extractAttachme
 
 module.exports = {
   INVOICE_ADDRESS, getBillLabelId, isSupplierBillMessage, startSupplierBillProcessing,
-  processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore,
+  processSupplierBills, enqueueBillMessage, analyse, saveInboxItemAsBill, saveInboxItemAsCredit, creditLinesPlan, fileDocketsWithBill, matchPurchaseOrder, matchSupplier, fuzzyMatchScore, supplierNameScore,
 };
