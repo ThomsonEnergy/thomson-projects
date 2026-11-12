@@ -10,7 +10,7 @@
 // ready-to-send gate before a quote is emailed or moved to Quote Sent.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { evaluate } = require('./_shared/solar-compliance-rules');
+const { evaluate, accreditationFlags } = require('./_shared/solar-compliance-rules');
 const { quoteHasBattery } = require('../../public/js/template-questions.js');
 
 exports.handler = async (event) => {
@@ -32,7 +32,7 @@ exports.handler = async (event) => {
     const { supabaseAdmin } = auth;
 
     const [{ data: project, error: projErr }, { data: docs }, { data: licences }, { data: assets }, { data: photos }] = await Promise.all([
-      supabaseAdmin.from('projects').select('*, cost_centres(*, cost_centre_line_items(ai_suggested, description, quantity, prebuild_client_description))').eq('id', projectId).single(),
+      supabaseAdmin.from('projects').select('*, cost_centres(*, cost_centre_line_items(ai_suggested, description, quantity, prebuild_client_description, item_type))').eq('id', projectId).single(),
       supabaseAdmin.from('project_documents').select('folder').eq('project_id', projectId),
       supabaseAdmin.from('profile_licences').select('licence_name, profiles!profile_licences_profile_id_fkey!inner(active)').eq('profiles.active', true),
       supabaseAdmin.from('customer_assets').select('asset_type, serial_numbers').eq('project_id', projectId),
@@ -64,11 +64,7 @@ exports.handler = async (event) => {
       solarCentres,
       quotedTotal,
       unconfirmedAiLines: (project.cost_centres || []).reduce((n, c) => n + (c.cost_centre_line_items || []).filter((li) => li.ai_suggested).length, 0),
-      hasAccreditedStaff:
-        licenceNames.some((n) => /saa|accreditation/i.test(n)) &&
-        licenceNames.some((n) => /electrical/i.test(n)),
-      // A licence row named with SAA (or accreditation) and battery, for example "SAA accreditation - battery endorsement".
-      hasBatteryAccreditedStaff: licenceNames.some((n) => /saa|accreditation/i.test(n) && /batter/i.test(n)),
+      ...accreditationFlags(licenceNames),
       hasBatteryAssetSerial: (assets || []).some((a) => /batter/i.test(a.asset_type || '') && (a.serial_numbers || '').trim()),
       hasBatteryLocationPhoto: (photos || []).length > 0,
       hasComplianceCertDoc: (docs || []).some((d) => d.folder === 'Compliance certificate'), // legacy folder only; the rule reads projects.ccew_file_path first

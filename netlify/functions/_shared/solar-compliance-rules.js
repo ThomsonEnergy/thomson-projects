@@ -23,6 +23,24 @@ const { roiBatteryKwhFromLines } = require('../../../public/js/solar-roi.js');
 // battery lines on the quote. Needs the line items' description and quantity in ctx.project.
 const quotedBatteryKwh = (ctx) => Number(ctx.project.battery_kwh) || roiBatteryKwhFromLines(ctx.project.cost_centres) || 0;
 
+// Who holds which Solar Accreditation Australia class, from the licence names on Settings > Team:
+// GCBS for batteries, GCPV for solar, SAPS for off-grid (docs/BUSINESS_FACTS.md). Matched on the class
+// code, so "GCPV & GCBS Design & Install" counts for both. Used by the quote check and job creation.
+function accreditationFlags(licenceNames) {
+  const names = (licenceNames || []).map(String);
+  return {
+    hasAccreditedStaff: names.some((n) => /\bgcpv\b/i.test(n)) && names.some((n) => /electric/i.test(n)),
+    hasBatteryAccreditedStaff: names.some((n) => /\bgcbs\b/i.test(n)),
+  };
+}
+
+// A stage line that names the battery: a battery word and a model or size figure, not labour
+// ("Sungrow SBH 25kW High Voltage LFP Battery", "Powerwall 3"); a bare "Battery" does not count.
+const namesBatteryModel = (ctx) => (ctx.project.cost_centres || []).some((c) => (c.cost_centre_line_items || c.line_items || []).some((li) => {
+  const text = `${li.description || ''} ${li.prebuild_client_description || ''}`;
+  return li.item_type !== 'labour' && /batter|powerwall|sigenstor/i.test(text) && /\d/.test(text);
+}));
+
 const yes = (ctx, id) => (ctx.answers || {})[id] === 'Yes';
 const num = (ctx, id) => parseFloat((ctx.answers || {})[id]);
 
@@ -90,8 +108,8 @@ const SOLAR_QUOTE_RULES = [
 const BATTERY_QUOTE_RULES = [
   {
     id: 'battery_model_specified',
-    label: 'Pull the battery from Pylon (or link the Pylon design) so the quote names the battery make and model',
-    check: (ctx) => ctx.equipment.batteries.length > 0 || !!ctx.project.pylon_project_id,
+    label: 'Name the battery make and model on a stage line (for example "Sungrow SBH 25kWh battery"), or pull it from Pylon',
+    check: (ctx) => namesBatteryModel(ctx) || ctx.equipment.batteries.length > 0 || !!ctx.project.pylon_project_id,
   },
   {
     id: 'battery_size_in_range',
@@ -130,7 +148,7 @@ const BATTERY_QUOTE_RULES = [
   },
   {
     id: 'battery_accreditation_on_file',
-    label: 'Have a staff member with SAA grid connected battery systems (GCBS) accreditation on file (Settings > Team: a licence named "SAA ... battery")',
+    label: 'Have a staff member with SAA grid connected battery systems (GCBS) accreditation on file (Settings > Team: a licence naming GCBS)',
     check: (ctx) => ctx.hasBatteryAccreditedStaff,
   },
 ];
@@ -153,7 +171,7 @@ const HANDOVER_RULES = [
   },
   {
     id: 'accreditation_on_file',
-    label: 'Confirm the installer/designer\'s SAA accreditation number and electrical licence number are on file (Settings > Team)',
+    label: 'Confirm the installer/designer\'s SAA grid connected PV (GCPV) accreditation and electrical licence are on file (Settings > Team: a licence naming GCPV)',
     check: (ctx) => ctx.hasAccreditedStaff,
   },
   // Reads projects.ccew_file_path (the Compliance - CCEW card on the job Summary tab); hasComplianceCertDoc only keeps a pre-card project_documents folder passing.
@@ -184,7 +202,7 @@ const BATTERY_HANDOVER_RULES = [
   },
   {
     id: 'battery_accreditation_on_file',
-    label: 'Confirm the installer\'s SAA grid connected battery systems (GCBS) accreditation is on file (Settings > Team)',
+    label: 'Confirm the installer\'s SAA grid connected battery systems (GCBS) accreditation is on file (Settings > Team: a licence naming GCBS)',
     check: (ctx) => ctx.hasBatteryAccreditedStaff,
   },
   {
@@ -224,4 +242,4 @@ function evaluate(phase, ctx) {
   });
 }
 
-module.exports = { GENERAL_QUOTE_RULES, SOLAR_QUOTE_RULES, BATTERY_QUOTE_RULES, HANDOVER_RULES, BATTERY_HANDOVER_RULES, QUOTE_RULES: SOLAR_QUOTE_RULES, rulesFor, evaluate };
+module.exports = { accreditationFlags, GENERAL_QUOTE_RULES, SOLAR_QUOTE_RULES, BATTERY_QUOTE_RULES, HANDOVER_RULES, BATTERY_HANDOVER_RULES, QUOTE_RULES: SOLAR_QUOTE_RULES, rulesFor, evaluate };
