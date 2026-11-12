@@ -84,6 +84,7 @@
 
           <div class="card" id="proposal-pictures-card"></div>
           <div class="card" id="photo-tags-card"></div>
+          <div class="card" id="product-pictures-card"></div>
 
           <div class="card">
             <h2>Company details</h2>
@@ -702,6 +703,9 @@
             <label>Pylon API key <span class="key-status" data-key="pylon"></span></label>
             <input id="key-pylon" type="password" placeholder="Paste key (used from Phase 5 onward)" autocomplete="off" />
 
+            <label>Photoroom API key (cuts equipment out of a picture, about 2 US cents each) <span class="key-status" data-key="photoroom"></span></label>
+            <input id="key-photoroom" type="password" placeholder="From photoroom.com/api - leave blank to cut out by hand" autocomplete="off" />
+
             <label>Xero Client ID <span class="key-status" data-key="xero_client_id"></span></label>
             <input id="key-xero-client-id" type="password" placeholder="From your Custom Connection's Configuration tab" autocomplete="off" />
 
@@ -874,6 +878,7 @@
       renderLogoPreview();
       loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-product-pictures.js?v=1', () => typeof loadProductPicturesCard === 'function').then(() => loadProductPicturesCard()).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
       document.getElementById('estimate-disclaimer-text').value = data.default_estimate_disclaimer || '';
@@ -2497,6 +2502,7 @@
         { key_name: 'anthropic', key_value: document.getElementById('key-anthropic').value.trim() },
         { key_name: 'assemblyai', key_value: document.getElementById('key-assemblyai').value.trim() },
         { key_name: 'pylon', key_value: document.getElementById('key-pylon').value.trim() },
+        { key_name: 'photoroom', key_value: document.getElementById('key-photoroom').value.trim() },
         { key_name: 'xero_client_id', key_value: document.getElementById('key-xero-client-id').value.trim() },
         { key_name: 'xero_client_secret', key_value: document.getElementById('key-xero-client-secret').value.trim() },
         { key_name: 'xero_webhook_key', key_value: document.getElementById('key-xero-webhook-key').value.trim() },
