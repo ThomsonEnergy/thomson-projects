@@ -1240,7 +1240,10 @@ function roiHeadlineHtml(pres) {
 // The two lists under the pictures: what came off the bill, then what we assumed, then what would
 // change the figures. Plain words, one line each. Each list is a heading and a block of lines (class
 // "rows"), so the proposal can carry a long list over onto the next sheet a line at a time.
-function roiListsHtml(pres) {
+// only: 'bill' or 'assumed' for one list (the proposal puts What we assumed after the payment schedule)
+function roiListsHtml(pres, only) {
+  const want = (k) => !only || only === k;
+  pres = { ...pres, fromBill: want('bill') ? pres.fromBill : [], assumed: want('assumed') ? pres.assumed : [], whatChanges: want('assumed') && pres.whatChanges };
   if (!pres.fromBill.length && !pres.assumed.length) return '';
   const list = (title, items) => (items.length ? `<div class="sec-title roi-list-title" style="font-family:Archivo, Helvetica, Arial, sans-serif; font-weight:500; font-size:12.5px; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin:16px 0 2px;">${roiEsc(title)}</div><div class="rows roi-list">${items.map(([k, v]) => `<div style="padding:6px 0; border-bottom:1px solid #d9dde5; font-size:12.5px; line-height:1.5; color:#0a0a0a;"><strong>${roiEsc(k)}:</strong> ${roiEsc(v)}</div>`).join('')}</div>` : '');
   return `${list('From your bill', pres.fromBill)}${list('What we assumed', pres.assumed)}${pres.whatChanges ? `<p class="note-line roi-changes" style="margin:10px 0 0; font-size:12px; line-height:1.55; color:#5b6472;">${roiEsc(pres.whatChanges)}</p>` : ''}`;

@@ -12,7 +12,7 @@
 const fetch = require('node-fetch');
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -54,9 +54,8 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 1000,
         messages: [{
           role: 'user',
           content: [contentBlock, { type: 'text', text: prompt }],
@@ -70,7 +69,7 @@ If a field genuinely isn't visible or determinable, use null rather than guessin
     }
 
     const data = await res.json();
-    const raw = data.content.map((b) => b.text || '').join('').trim();
+    const raw = claudeText(data).trim();
     const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
     const extracted = JSON.parse(cleaned);
 
