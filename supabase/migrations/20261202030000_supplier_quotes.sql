@@ -246,7 +246,7 @@ begin
         q.file_path, q.file_name)
     returning * into v_po;
     insert into job_tasks (project_id, description, created_by)
-    values (q.project_id, format('Follow up PO %s with %s', v_po.po_number, coalesce(v_supplier_name, 'the supplier')), auth.uid());
+    values (q.project_id, format('Follow up %s with %s', v_po.po_number, coalesce(v_supplier_name, 'the supplier')), auth.uid());
   end if;
 
   insert into purchase_order_line_items (po_id, material_id, description, quantity, unit_cost, added_by)
