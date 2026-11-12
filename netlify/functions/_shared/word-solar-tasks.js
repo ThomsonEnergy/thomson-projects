@@ -12,7 +12,7 @@
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
-const { claudeJson } = require('./claude-json');
+const { quickJson, claudeText } = require('./claude-json');
 
 async function wordSolarTasks({ missing, equipment = {} }) {
   if (!Array.isArray(missing) || !missing.length) return [];
@@ -45,9 +45,8 @@ Respond with ONLY a JSON array, no other text, no markdown fences. One object pe
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: claudeJson({
+    body: quickJson({
       model: 'claude-sonnet-5-5',
-      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -58,7 +57,7 @@ Respond with ONLY a JSON array, no other text, no markdown fences. One object pe
   }
 
   const data = await res.json();
-  const raw = data.content.map((b) => b.text || '').join('').trim();
+  const raw = claudeText(data).trim();
   const cleaned = raw.replace(/^```json/i, '').replace(/```$/, '').trim();
   const worded = JSON.parse(cleaned);
 

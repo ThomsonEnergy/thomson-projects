@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requireActiveUser } = require('./_shared/require-active-user');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 // Shared "clean this up" pass for any AI-generated text a staff member has
 // since hand-edited (added, removed, or reworded parts of an AI draft, or
@@ -39,9 +39,8 @@ Respond with ONLY the cleaned-up text - no commentary, no markdown fences, no qu
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -52,7 +51,7 @@ Respond with ONLY the cleaned-up text - no commentary, no markdown fences, no qu
     }
 
     const data = await res.json();
-    const cleaned = data.content.map((b) => b.text || '').join('').trim();
+    const cleaned = claudeText(data).trim();
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, text: cleaned }) };
   } catch (err) {

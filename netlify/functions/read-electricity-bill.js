@@ -12,7 +12,7 @@ const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { billMetrics } = require('../../public/js/solar-roi.js');
 const { suggestSizes } = require('../../public/js/solar-sizing.js');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 const BILL_FOLDER = 'Electricity bill';
 // Files past this many are not sent (one request, one reading); their names come back as left_out_files
@@ -104,9 +104,8 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 2000,
         messages: [{ role: 'user', content: [...blocks, { type: 'text', text: PROMPT }] }],
       }),
     });
@@ -115,7 +114,7 @@ exports.handler = async (event) => {
       throw new Error(`Anthropic API error: ${res.status} ${text}`);
     }
     const data = await res.json();
-    const raw = data.content.map((b) => b.text || '').join('').trim();
+    const raw = claudeText(data).trim();
     const cleaned = raw.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
     let extracted;
     try { extracted = JSON.parse(cleaned); } catch (_) { throw new Error('The bill could not be read as a bill. Try clearer photos, one page each, or the PDF from the retailer.'); }

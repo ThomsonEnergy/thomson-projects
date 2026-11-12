@@ -2,7 +2,7 @@
 // figures for a design, but its solar project carries the site's own location
 // (site_location: [longitude, latitude]). Used by site-sun.js to look up the site's sun records.
 // Reading only. Returns { lat, lng } or null: any failure here is null, never an error, because
-// the caller has another way to find the place (the address). Pylon gets ten seconds in all.
+// the caller has another way to find the place (the address). Pylon gets four seconds in all.
 //
 // The id on a quote (projects.pylon_project_id) is a Pylon project's when "Create job in Pylon"
 // made it (push-to-pylon.js) and a design's when it was typed in for the equipment sync
@@ -27,7 +27,7 @@ async function pylonSiteLocation(pylonId, postcode) {
     if (!pylonId) return null;
     const apiKey = await getIntegrationKey('pylon');
     const headers = { Authorization: `Bearer ${apiKey}`, Accept: 'application/vnd.api+json' };
-    const until = Date.now() + 10000;
+    const until = Date.now() + 4000; // leaves the rest of the function's time for the sun records
     const get = async (path) => {
       const left = until - Date.now();
       if (left < 500) return null;

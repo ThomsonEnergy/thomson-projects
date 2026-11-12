@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { claudeJson } = require('./_shared/claude-json');
+const { quickJson, claudeText } = require('./_shared/claude-json');
 
 // Drafts a prebuild's client-facing description in the house format: an
 // ALL CAPS "SUPPLY AND INSTALL NEW ..." title line, then a short trade-
@@ -67,9 +67,8 @@ Respond with ONLY the description text (title line, blank line, paragraph) - no 
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
-      body: claudeJson({
+      body: quickJson({
         model: 'claude-sonnet-5-5',
-        max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -80,7 +79,7 @@ Respond with ONLY the description text (title line, blank line, paragraph) - no 
     }
 
     const data = await res.json();
-    const description = data.content.map((b) => b.text || '').join('').trim();
+    const description = claudeText(data).trim();
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, description }) };
   } catch (err) {
