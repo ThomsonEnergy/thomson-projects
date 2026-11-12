@@ -17,6 +17,10 @@
 // a new picture, captioned "Indicative picture".
 
 const QUOTE_PICTURE_CAPTIONS = ['Your site', 'Similar system', 'Indicative picture'];
+// The newest pictures box on the page: how a picture made elsewhere (the picture editor, open for
+// minutes) is added, so it lands on the box now showing even when the page was redrawn meanwhile.
+let quotePicturesAdd = null;
+let quotePicturesComposing = false; // the editor is being opened: a second tap does nothing
 
 function mountQuotePictures({ el, project, onSettled }) {
   if (!el) return;
@@ -63,6 +67,7 @@ function mountQuotePictures({ el, project, onSettled }) {
     }).finally(() => { inFlight--; });
     return queue;
   }
+  quotePicturesAdd = (url, caption) => { list.push({ url, caption }); render(); save(); };
   // leaving with a caption still being typed or a save on its way asks first
   window.addEventListener('beforeunload', (e) => { if (typing || inFlight) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -99,10 +104,13 @@ function mountQuotePictures({ el, project, onSettled }) {
       row.querySelector('.qp-remove').addEventListener('click', () => { list.splice(i, 1); render(); save(); });
       // the picture editor: this picture is the wall, the result is added as a new picture
       row.querySelector('.qp-compose').addEventListener('click', () => {
+        if (quotePicturesComposing) return;
+        quotePicturesComposing = true;
         const picture = list[i];
         loadJsOnce('/js/photo-compose.js?v=1', () => typeof openPhotoComposer === 'function')
-          .then(() => openPhotoComposer({ project, baseUrl: picture.url, others: list.filter(p => p !== picture), onSaved: (url) => { list.push({ url, caption: 'Indicative picture' }); render(); save(); } }))
-          .catch((err) => say(friendlyError(err), true));
+          .then(() => openPhotoComposer({ project, baseUrl: picture.url, others: list.filter(p => p !== picture), onSaved: (url) => quotePicturesAdd(url, 'Indicative picture') }))
+          .catch((err) => say(friendlyError(err), true))
+          .finally(() => { quotePicturesComposing = false; });
       });
     });
   }

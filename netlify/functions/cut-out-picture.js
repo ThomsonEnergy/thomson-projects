@@ -44,7 +44,7 @@ exports.handler = async (event) => {
     const form = new FormData();
     form.append('image_file', new Blob([picture], { type: isPng(picture) ? 'image/png' : 'image/jpeg' }), isPng(picture) ? 'picture.png' : 'picture.jpg');
     form.append('format', 'png');
-    const res = await fetch(SERVICE_URL, { method: 'POST', headers: { 'x-api-key': key, Accept: 'image/png, application/json' }, body: form, signal: AbortSignal.timeout(25000) });
+    const res = await fetch(SERVICE_URL, { method: 'POST', headers: { 'x-api-key': key, Accept: 'image/png, application/json' }, body: form, signal: AbortSignal.timeout(8000) }); // inside a function's ten seconds, so the message below is the one the person sees
     if (!res.ok) {
       console.error('cut-out-picture: the service answered', res.status, (await res.text().catch(() => '')).slice(0, 300));
       const why = res.status === 401 || res.status === 403 ? 'The cut-out service refused the key. Check it in Settings, API Keys.'

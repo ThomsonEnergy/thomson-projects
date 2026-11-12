@@ -9,17 +9,20 @@
 // What it reads: product_pictures (Settings > Company Details > Product pictures), other jobs'
 // pictures tagged with this quote's brands (js/photo-tags.js, already on the page), and
 // cut-out-picture.js for the automatic cut-out when its key is set.
-// What it writes: one picture into the proposal's own folder (uploadPhotos, 'reference').
+// What it writes: one picture into the proposal's own folder (uploadPhotos, 'reference'), and
+// "not for other customers" on another job's picture when a person says so.
 //
 // Two views. Place: the wall picture with the equipment on it (drag it, size it with the slider or
 // two fingers, crop the wall picture). Cut out: the equipment's own picture, where it is cut out
 // automatically (one tap, when the service is set up) or by hand: Trace (draw around it and
 // everything outside the line goes), Box (a rectangle), Rub out and Bring back (a brush to tidy the
-// edge). Undo steps back one cut at a time. Works with a finger and with a mouse.
+// edge). Undo steps back one cut at a time. Works with a finger and with a mouse. One editor at a
+// time; closing it lets go of its pictures (a phone has little room for them).
 
 const COMPOSE_WORK = 1200; // the equipment picture is worked on at up to this many pixels on its long side
 const COMPOSE_OUT = 1920;  // the saved picture's long side, at most
 const COMPOSE_UNDO = 15;   // cuts kept for Undo
+let composeOverlay = null; // the editor on the screen, if there is one
 
 // A picture as a canvas no bigger than max on its long side. Fetched as a file first, so drawing
 // it never locks the canvas (a picture from another address drawn straight in would).
@@ -30,7 +33,8 @@ async function composeLoad(source, max) {
     if (!res.ok) throw new Error('That picture could not be opened. Try again.');
     blob = await res.blob();
   }
-  const bitmap = await createImageBitmap(blob);
+  let bitmap;
+  try { bitmap = await createImageBitmap(blob); } catch (err) { throw new Error('That picture could not be read. Use a JPG or PNG picture.'); }
   const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -40,10 +44,11 @@ async function composeLoad(source, max) {
   return canvas;
 }
 
-// The part of a mask that is kept, as { x, y, w, h } in its own pixels (null when nothing is).
-function composeKeptBox(mask) {
-  const { width, height } = mask;
-  const data = mask.getContext('2d').getImageData(0, 0, width, height).data;
+// The part of a picture that shows (is not see-through), as { x, y, w, h } in its own pixels;
+// null when nothing does.
+function composeKeptBox(canvas) {
+  const { width, height } = canvas;
+  const data = canvas.getContext('2d').getImageData(0, 0, width, height).data;
   let x0 = width, y0 = height, x1 = -1, y1 = -1;
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -53,15 +58,20 @@ function composeKeptBox(mask) {
   return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
+// Hands a canvas's memory back at once (a phone does not wait for it otherwise).
+const composeFree = (canvas) => { if (canvas) { canvas.width = 0; canvas.height = 0; } };
+
 async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
+  if (composeOverlay && document.body.contains(composeOverlay)) return;
   const overlay = openModal(`
       <h2 style="margin-bottom:4px;">Put the equipment on this picture</h2>
       <p class="subtitle" id="pc-hint" style="margin:0 0 8px; font-size:12.5px;">Opening the picture...</p>
-      <div id="pc-wrap" style="border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0;">
+      <div id="pc-wrap" style="border-radius:8px; overflow:hidden; touch-action:none; text-align:center; line-height:0; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;">
         <canvas id="pc-stage" style="max-width:100%; touch-action:none; cursor:grab;"></canvas>
       </div>
       <div id="pc-tools" style="margin-top:10px;"></div>
       <div id="pc-msg" style="font-size:12.5px; min-height:18px; margin-top:6px;"></div>`, { maxWidth: 860, zIndex: 110 });
+  composeOverlay = overlay;
   const $ = (sel) => overlay.querySelector(sel);
   const stage = $('#pc-stage'), wrap = $('#pc-wrap'), tools = $('#pc-tools'), hint = $('#pc-hint'), msg = $('#pc-msg');
   const ctx = stage.getContext('2d');
@@ -70,16 +80,37 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
 
   let base = null;          // the wall picture, a canvas
   let crop = null;          // the part of it in use: { x, y, w, h } in its pixels
-  let ov = null;            // the equipment: { img, mask, cut, box, cx, cy, size, history }
+  let ov = null;            // the equipment: { img, mask, cut, box, cx, cy, w, history }; cx, cy and w are in the wall picture's pixels, so cropping the wall never moves it
   let view = 'place';       // 'place' or 'cut'
   let mode = 'move';        // place: 'move' or 'cropbase'; cut: 'trace', 'box', 'rub' or 'bring'
   let brush = 0.05;         // brush width as a share of the equipment picture's long side
   let autoCut = false;      // the automatic cut-out is set up
-  let stroke = null;        // the cut being drawn: { points: [[x, y]] } in the equipment picture's pixels, or a box in the stage's
-  let busy = false;
+  let stroke = null;        // the cut being drawn: { points: [[x, y]] } in the equipment picture's pixels, or { start, box } in the stage's
+  let strokeId = null;      // the finger or mouse drawing it: any other is ignored until it lifts
+  let drag = null;          // place view: { from, cx, cy } for one finger, { spread, w } for two
+  let busy = false;         // saving, or waiting on the automatic cut-out: nothing else is taken meanwhile
   const pointers = new Map();
   // the cut out view sits on a chequered ground, so what is see-through shows as see-through
   const CHEQUERS = 'repeating-conic-gradient(#d9d9d9 0% 25%, #f4f4f4 0% 50%) 50% / 20px 20px';
+
+  const onResize = () => { if (base) redraw(); };
+  window.addEventListener('resize', onResize);
+  function close() {
+    window.removeEventListener('resize', onResize);
+    overlay.remove();
+    [base, ov && ov.img, ov && ov.mask, ov && ov.cut].forEach(composeFree);
+    base = null; ov = null;
+    if (composeOverlay === overlay) composeOverlay = null;
+  }
+  function setBusy(on, text) {
+    busy = on;
+    tools.style.pointerEvents = on ? 'none' : '';
+    tools.style.opacity = on ? '0.5' : '';
+    if (text !== undefined) say(text);
+  }
+  const dropStroke = () => { stroke = null; strokeId = null; };
+  // while it is busy no button or slider does anything, however it is pressed (a key press too)
+  ['click', 'input'].forEach(type => tools.addEventListener(type, (e) => { if (busy) { e.stopPropagation(); e.preventDefault(); } }, true));
 
   // ---------- drawing ----------
   // The picture on the stage in this view, and its size on the screen.
@@ -93,25 +124,28 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
     stage.style.width = `${cssW}px`; stage.style.height = `${cssH}px`;
     stage.width = Math.round(cssW * dpr); stage.height = Math.round(cssH * dpr);
   }
-  // The equipment with its cut applied (what the mask keeps of the picture).
-  function applyCut() {
-    const c = ov.cut.getContext('2d');
+  // An equipment picture with its cut applied (what the mask keeps of the picture).
+  function applyCut(o = ov) {
+    const c = o.cut.getContext('2d');
     c.globalCompositeOperation = 'source-over';
-    c.clearRect(0, 0, ov.cut.width, ov.cut.height);
-    c.drawImage(ov.img, 0, 0);
+    c.clearRect(0, 0, o.cut.width, o.cut.height);
+    c.drawImage(o.img, 0, 0);
     c.globalCompositeOperation = 'destination-in';
-    c.drawImage(ov.mask, 0, 0);
+    c.drawImage(o.mask, 0, 0);
     c.globalCompositeOperation = 'source-over';
   }
-  // Where the equipment sits on a picture W by H: its kept part, centred on (cx, cy), size wide.
-  const placed = (W, H) => { const w = ov.size * W, h = w * ov.box.h / ov.box.w; return { x: ov.cx * W - w / 2, y: ov.cy * H - h / 2, w, h }; };
+  // Where the equipment sits on the cropped wall picture drawn W wide: its kept part, centred on
+  // (cx, cy) and w wide in the wall picture's own pixels.
+  const placed = (W) => { const k = W / crop.w, w = ov.w * k, h = w * ov.box.h / ov.box.w; return { x: (ov.cx - crop.x) * k - w / 2, y: (ov.cy - crop.y) * k - h / 2, w, h }; };
+  // keeps the equipment's centre on the part of the wall picture in use, so it cannot be lost off the edge
+  const keepOnWall = () => { if (!ov) return; ov.cx = Math.min(crop.x + crop.w, Math.max(crop.x, ov.cx)); ov.cy = Math.min(crop.y + crop.h, Math.max(crop.y, ov.cy)); };
   function draw() {
     const W = stage.width, H = stage.height;
     ctx.clearRect(0, 0, W, H);
     if (view === 'place') {
       ctx.drawImage(base, crop.x, crop.y, crop.w, crop.h, 0, 0, W, H);
       if (ov && ov.box) {
-        const p = placed(W, H);
+        const p = placed(W);
         ctx.drawImage(ov.cut, ov.box.x, ov.box.y, ov.box.w, ov.box.h, p.x, p.y, p.w, p.h);
         if (mode === 'move') { ctx.save(); ctx.setLineDash([8, 6]); ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.strokeRect(p.x, p.y, p.w, p.h); ctx.restore(); }
       }
@@ -130,31 +164,39 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
     if (!stroke) return;
     ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = '#ff3b30'; ctx.setLineDash([6, 4]);
     if (stroke.box) ctx.strokeRect(stroke.box.x, stroke.box.y, stroke.box.w, stroke.box.h);
-    else if (mode === 'trace' && stroke.points.length > 1) { ctx.beginPath(); stroke.points.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k))); ctx.stroke(); }
+    else if (mode === 'trace' && stroke.points && stroke.points.length > 1) { ctx.beginPath(); stroke.points.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k))); ctx.stroke(); }
     ctx.restore();
   }
   const redraw = () => { fit(); draw(); };
 
   // ---------- the cut (the mask), with Undo ----------
-  // The mask as it stands, taken before a cut so Undo can put it back. Kept as a small file.
+  // The mask as it stands, taken before a cut so Undo can put it back. Kept as a small file, and
+  // the copy it was made from is let go as soon as the file is ready.
   function remember() {
     const copy = document.createElement('canvas');
     copy.width = ov.mask.width; copy.height = ov.mask.height;
     copy.getContext('2d').drawImage(ov.mask, 0, 0);
-    ov.history.push(new Promise((resolve) => copy.toBlob(resolve, 'image/png')));
+    ov.history.push(new Promise((resolve) => copy.toBlob((blob) => { composeFree(copy); resolve(blob); }, 'image/png')));
     if (ov.history.length > COMPOSE_UNDO) ov.history.shift();
+  }
+  // Puts the last remembered mask back. False when there was none.
+  async function restoreLast() {
+    const o = ov;
+    const blob = await o.history.pop();
+    if (!blob) return false;
+    const bitmap = await createImageBitmap(blob);
+    const m = o.mask.getContext('2d');
+    m.globalCompositeOperation = 'source-over';
+    m.clearRect(0, 0, o.mask.width, o.mask.height);
+    m.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    applyCut(o);
+    return true;
   }
   async function undo() {
     if (!ov || !ov.history.length || busy) return;
-    const blob = await ov.history.pop();
-    if (!blob) return;
-    const bitmap = await createImageBitmap(blob);
-    const m = ov.mask.getContext('2d');
-    m.globalCompositeOperation = 'source-over';
-    m.clearRect(0, 0, ov.mask.width, ov.mask.height);
-    m.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    applyCut(); draw(); toolsCut();
+    await restoreLast();
+    draw(); toolsCut();
   }
   // Keeps only what is inside a shape (Trace and Box).
   function keepInside(path) {
@@ -176,50 +218,46 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
     m.globalCompositeOperation = 'source-over';
     applyCut();
   }
-  // The whole picture back, less anything that was see-through to begin with (a product picture).
-  function wholeMask() {
-    const m = ov.mask.getContext('2d');
+  // The whole picture back. (What was see-through in the picture to begin with stays see-through:
+  // the mask only ever takes away.)
+  function wholeMask(o = ov) {
+    const m = o.mask.getContext('2d');
     m.globalCompositeOperation = 'source-over';
-    m.clearRect(0, 0, ov.mask.width, ov.mask.height);
-    m.drawImage(ov.img, 0, 0);
+    m.fillStyle = '#fff';
+    m.fillRect(0, 0, o.mask.width, o.mask.height);
   }
 
   async function cutAutomatically() {
-    if (busy) return;
-    busy = true; say('Cutting it out...');
+    if (busy || !ov) return;
+    const target = ov;
+    setBusy(true, 'Cutting it out...');
     try {
       const jpeg = document.createElement('canvas');
-      jpeg.width = ov.img.width; jpeg.height = ov.img.height;
+      jpeg.width = target.img.width; jpeg.height = target.img.height;
       const j = jpeg.getContext('2d');
-      j.fillStyle = '#fff'; j.fillRect(0, 0, jpeg.width, jpeg.height); j.drawImage(ov.img, 0, 0);
+      j.fillStyle = '#fff'; j.fillRect(0, 0, jpeg.width, jpeg.height); j.drawImage(target.img, 0, 0);
       const image = jpeg.toDataURL('image/jpeg', 0.9).split(',')[1];
+      composeFree(jpeg);
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/.netlify/functions/cut-out-picture', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ image }) });
       const out = await res.json().catch(() => ({}));
       if (!out.ok || !out.png) throw new Error(out.error || 'The automatic cut-out did not answer. Cut it out by hand with Trace.');
       const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${out.png}`)).blob());
+      // only for the picture it was asked about, still on the cut out screen
+      if (ov !== target || view !== 'cut' || !document.body.contains(overlay)) { bitmap.close(); return; }
       remember();
       const m = ov.mask.getContext('2d');
       m.globalCompositeOperation = 'source-over';
       m.clearRect(0, 0, ov.mask.width, ov.mask.height);
       m.drawImage(bitmap, 0, 0, ov.mask.width, ov.mask.height);
       bitmap.close();
-      if (!composeKeptBox(ov.mask)) { await undoQuietly(); throw new Error('It found nothing to cut out in this picture. Cut it out by hand with Trace.'); }
-      applyCut(); draw(); toolsCut();
-      say('Cut out. Tidy the edge with Rub out and Bring back if it needs it, then press Done.');
+      applyCut();
+      if (!composeKeptBox(ov.cut)) { await restoreLast(); throw new Error('It found nothing to cut out in this picture. Cut it out by hand with Trace.'); }
+      draw(); toolsCut();
+      setBusy(false, 'Cut out. Tidy the edge with Rub out and Bring back if it needs it, then press Done.');
     } catch (err) {
-      say(err.message || 'The automatic cut-out failed.', true);
-    } finally { busy = false; }
-  }
-  // puts the last remembered mask back without touching the screen (a cut that came back empty)
-  async function undoQuietly() {
-    const blob = await ov.history.pop();
-    if (!blob) return;
-    const bitmap = await createImageBitmap(blob);
-    const m = ov.mask.getContext('2d');
-    m.clearRect(0, 0, ov.mask.width, ov.mask.height);
-    m.drawImage(bitmap, 0, 0);
-    bitmap.close();
+      if (document.body.contains(overlay)) { say(friendlyError(err, 'The automatic cut-out failed. Cut it out by hand with Trace.'), true); draw(); }
+    } finally { if (busy) setBusy(false); }
   }
 
   // ---------- the two toolbars ----------
@@ -238,18 +276,18 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
         ${btn('pc-cropbase', mode === 'cropbase' ? 'Stop cropping' : 'Crop the wall picture')}
         ${cropped ? btn('pc-uncrop', 'Whole wall picture again') : ''}
       </div>
-      ${ov ? `<label style="margin:10px 0 0; font-size:12.5px;">Size<input type="range" id="pc-size" min="5" max="100" step="1" value="${Math.round(ov.size * 100)}" style="width:100%; margin:4px 0 0;" /></label>` : ''}
+      ${ov ? `<label style="margin:10px 0 0; font-size:12.5px;">Size<input type="range" id="pc-size" min="5" max="100" step="1" value="${Math.min(100, Math.round(ov.w / crop.w * 100))}" style="width:100%; margin:4px 0 0;" /></label>` : ''}
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
         ${ov ? btn('pc-save', 'Save as a new picture', '') : ''}
         ${btn('pc-cancel', 'Cancel')}
       </div>`;
     $('#pc-choose').addEventListener('click', chooseEquipment);
-    $('#pc-cancel').addEventListener('click', () => overlay.remove());
-    $('#pc-cropbase').addEventListener('click', () => { mode = mode === 'cropbase' ? 'move' : 'cropbase'; stroke = null; toolsPlace(); draw(); });
-    if (cropped) $('#pc-uncrop').addEventListener('click', () => { crop = { x: 0, y: 0, w: base.width, h: base.height }; mode = 'move'; toolsPlace(); redraw(); });
+    $('#pc-cancel').addEventListener('click', close);
+    $('#pc-cropbase').addEventListener('click', () => { mode = mode === 'cropbase' ? 'move' : 'cropbase'; dropStroke(); toolsPlace(); draw(); });
+    if (cropped) $('#pc-uncrop').addEventListener('click', () => { crop = { x: 0, y: 0, w: base.width, h: base.height }; mode = 'move'; dropStroke(); toolsPlace(); redraw(); });
     if (!ov) return;
-    $('#pc-tidy').addEventListener('click', () => { mode = 'trace'; toolsCut(); redraw(); });
-    $('#pc-size').addEventListener('input', (e) => { ov.size = Number(e.target.value) / 100; draw(); });
+    $('#pc-tidy').addEventListener('click', () => { mode = 'trace'; dropStroke(); toolsCut(); redraw(); });
+    $('#pc-size').addEventListener('input', (e) => { ov.w = Number(e.target.value) / 100 * crop.w; draw(); });
     $('#pc-save').addEventListener('click', saveResult);
   }
   function toolsCut() {
@@ -263,21 +301,24 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
         ${autoCut ? btn('pc-auto', 'Cut out automatically') : ''}
         ${pick('pc-trace', 'Trace')}${pick('pc-box', 'Box')}${pick('pc-rub', 'Rub out')}${pick('pc-bring', 'Bring back')}
       </div>
+      ${autoCut ? '<p class="subtitle" style="margin:6px 0 0; font-size:11.5px;">Cut out automatically sends this one picture to the cut-out service (Photoroom). Nothing else about the quote goes with it.</p>' : ''}
       ${mode === 'rub' || mode === 'bring' ? `<label style="margin:10px 0 0; font-size:12.5px;">Brush size<input type="range" id="pc-brush" min="1" max="20" step="1" value="${Math.round(brush * 100)}" style="width:100%; margin:4px 0 0;" /></label>` : ''}
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
         ${btn('pc-done', 'Done', '')}
         <button type="button" id="pc-undo" class="secondary" style="font-size:13px; padding:7px 11px;" ${ov.history.length ? '' : 'disabled'}>Undo</button>
         ${btn('pc-whole', 'Start again')}
+        ${btn('pc-cancel', 'Cancel')}
       </div>`;
-    ['trace', 'box', 'rub', 'bring'].forEach(m => $(`#pc-${m}`).addEventListener('click', () => { mode = m; stroke = null; toolsCut(); draw(); }));
+    ['trace', 'box', 'rub', 'bring'].forEach(m => $(`#pc-${m}`).addEventListener('click', () => { mode = m; dropStroke(); toolsCut(); draw(); }));
     if (autoCut) $('#pc-auto').addEventListener('click', cutAutomatically);
     const b = $('#pc-brush'); if (b) b.addEventListener('input', () => { brush = Number(b.value) / 100; });
     $('#pc-undo').addEventListener('click', undo);
     $('#pc-whole').addEventListener('click', () => { remember(); wholeMask(); applyCut(); draw(); toolsCut(); });
+    $('#pc-cancel').addEventListener('click', close);
     $('#pc-done').addEventListener('click', () => {
-      const box = composeKeptBox(ov.mask);
+      const box = composeKeptBox(ov.cut);
       if (!box) { say('Nothing is left of the picture. Press Undo or Start again.', true); return; }
-      ov.box = box; say(''); mode = 'move'; toolsPlace(); redraw();
+      ov.box = box; say(''); mode = 'move'; dropStroke(); toolsPlace(); redraw();
     });
   }
 
@@ -288,8 +329,9 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
       supabaseClient.from('product_pictures').select('id, brand, model, url').order('brand').order('model').then(({ data }) => data || []).catch(() => []),
       typeof recentInstallPhotos === 'function' && brands.length ? recentInstallPhotos({ brands, excludeProjectId: project.id }).catch(() => []) : [],
     ]);
-    // the quote's own makes first
-    const mine = (p) => brands.some(b => String(p.brand || '').toLowerCase().includes(b) || String(p.model || '').toLowerCase().includes(b));
+    // the quote's own makes first (a make is matched as a whole word, so "sma" is not found in "Smart")
+    const names = (p) => ` ${`${p.brand || ''} ${p.model || ''}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+    const mine = (p) => brands.some(b => names(p).includes(` ${String(b).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `));
     products.sort((a, b) => Number(mine(b)) - Number(mine(a)));
     const tile = (kind, i, url, label, onLight) => `<button type="button" class="pc-pick" data-kind="${kind}" data-i="${i}" title="${escapeHtml(label)}" style="padding:0; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:${onLight ? '#f4f4f4' : 'none'}; cursor:pointer;"><img src="${escapeHtml(supaImageVariant(url, 200, 60))}" alt="${escapeHtml(label)}" loading="lazy" style="width:100%; aspect-ratio:1; object-fit:${onLight ? 'contain' : 'cover'}; display:block;" /><span style="display:block; font-size:11px; padding:3px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3;">${escapeHtml(label)}</span></button>`;
     const grid = (html) => `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px;">${html}</div>`;
@@ -298,7 +340,7 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
         <p class="subtitle" style="margin:0 0 10px; font-size:12.5px;">A product picture is already cut out. Any other picture is cut out on the next screen.</p>
         <div style="max-height:60vh; overflow:auto;">
           <label style="margin-top:0; font-weight:600;">Product pictures</label>
-          ${products.length ? grid(products.map((p, i) => tile('product', i, p.url, [p.brand, p.model].filter(Boolean).join(' ') || 'Product picture', true)).join('')) : '<p class="subtitle" style="margin:2px 0 0; font-size:12.5px;">None yet. Add them once in Settings, Company Details, Product pictures.</p>'}
+          ${products.length ? grid(products.map((p, i) => tile('product', i, p.url, [p.brand, p.model].filter(Boolean).join(' ') || 'Product picture', true)).join('')) : '<p class="subtitle" style="margin:2px 0 0; font-size:12.5px;">None yet. An Admin adds them once in Settings, Company Details, Product pictures.</p>'}
           ${installs.length ? `<label style="margin-top:14px; font-weight:600;">Recent installs with this gear</label>${grid(installs.map((p, i) => tile('install', i, p.url, p.ai_caption || 'Install picture')).join(''))}` : ''}
           ${(others || []).length ? `<label style="margin-top:14px; font-weight:600;">Pictures on this quote</label>${grid(others.map((p, i) => tile('other', i, p.url, p.caption || 'Picture')).join(''))}` : ''}
         </div>
@@ -307,31 +349,61 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
           <button type="button" class="secondary" id="pc-pick-close" style="font-size:13px; padding:7px 11px;">Cancel</button>
         </div>
         <div id="pc-pick-msg" style="font-size:12.5px; min-height:18px; margin-top:6px;"></div>`, { maxWidth: 640, zIndex: 120 });
+    let opening = false;
     const use = async (source) => {
+      if (opening) return;
+      opening = true;
       const note = picker.querySelector('#pc-pick-msg');
       note.innerHTML = '<span class="subtitle">Opening the picture...</span>';
       try { await setEquipment(source); picker.remove(); }
-      catch (err) { note.innerHTML = `<span style="color:var(--red);">${escapeHtml(err.message || 'That picture could not be opened.')}</span>`; }
+      catch (err) { note.innerHTML = `<span style="color:var(--red);">${escapeHtml(friendlyError(err, 'That picture could not be opened.'))}</span>`; }
+      opening = false;
+    };
+    // Another customer's place: a person looks at the whole picture before it is used, the same
+    // as Recent installs on the quote, and can take it off the offer for good.
+    const lookFirst = (p, tileEl) => {
+      const look = openModal(`
+          <h2 style="margin-bottom:4px;">Use this picture?</h2>
+          <p class="subtitle" style="margin:0 0 10px;">It is from another job. Check there is nobody in it and nothing that says whose place it is (a street number, a number plate, paperwork), and cut the equipment out so the rest of their place does not show.</p>
+          <img src="${escapeHtml(supaImageVariant(p.url, 1200, 75))}" alt="" style="width:100%; max-height:55vh; object-fit:contain; background:var(--surface-2); border-radius:8px; display:block;" />
+          <p class="subtitle" style="margin:8px 0 0; font-size:12.5px;">${escapeHtml(p.ai_caption || '')}</p>
+          <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button type="button" id="pc-look-yes">Use this picture</button><button type="button" class="secondary" id="pc-look-never">Not for other customers</button><button type="button" class="secondary" id="pc-look-no">Back</button></div>
+          <div id="pc-look-msg" style="font-size:12px;"></div>`, { maxWidth: 640, zIndex: 130 });
+      look.querySelector('#pc-look-no').addEventListener('click', () => look.remove());
+      look.querySelector('#pc-look-yes').addEventListener('click', () => { look.remove(); use(supaImageVariant(p.url, 1600, 90)); });
+      look.querySelector('#pc-look-never').addEventListener('click', async () => {
+        const { error } = await supabaseClient.from('project_photos').update({ ok_for_proposals: false }).eq('id', p.id);
+        if (error) { look.querySelector('#pc-look-msg').innerHTML = `<div class="error-box" style="margin-top:8px;">${escapeHtml(friendlyError(error))}</div>`; return; }
+        look.remove(); tileEl.remove();
+        showToast('That picture will not be offered again.');
+      });
     };
     picker.querySelector('#pc-pick-close').addEventListener('click', () => picker.remove());
     picker.querySelector('#pc-file').addEventListener('change', (e) => { if (e.target.files[0]) use(e.target.files[0]); });
     // a product picture is opened as it is (it keeps its clear background); a photo at a sensible size
     picker.querySelectorAll('.pc-pick').forEach(b => b.addEventListener('click', () => {
-      const i = Number(b.dataset.i);
-      use(b.dataset.kind === 'product' ? products[i].url : supaImageVariant((b.dataset.kind === 'install' ? installs : others)[i].url, 1600, 85));
+      const i = Number(b.dataset.i), kind = b.dataset.kind;
+      if (kind === 'product') use(products[i].url);
+      else if (kind === 'other') use(supaImageVariant(others[i].url, 1600, 90));
+      else lookFirst(installs[i], b);
     }));
   }
   // Takes a picture as the equipment. One with a clear background already goes straight onto the
-  // wall; any other opens in the cut out view first.
+  // wall; any other opens in the cut out view first. A replacement takes the place and size of the
+  // one before it, and the one before it stays until the new one has opened.
   async function setEquipment(source) {
     const img = await composeLoad(source, COMPOSE_WORK);
     const mask = document.createElement('canvas'), cut = document.createElement('canvas');
     mask.width = cut.width = img.width; mask.height = cut.height = img.height;
-    ov = { img, mask, cut, box: null, cx: 0.5, cy: 0.55, size: 0.35, history: [] };
-    wholeMask(); applyCut();
-    ov.box = composeKeptBox(mask);
-    if (!ov.box) { ov = null; throw new Error('That picture is empty.'); }
-    const clear = ov.box.w < img.width - 2 || ov.box.h < img.height - 2 || mask.getContext('2d').getImageData(0, 0, 1, 1).data[3] < 200;
+    const next = { img, mask, cut, box: null, history: [] };
+    wholeMask(next); applyCut(next);
+    next.box = composeKeptBox(cut);
+    if (!next.box) { [img, mask, cut].forEach(composeFree); throw new Error('That picture is empty.'); }
+    Object.assign(next, ov ? { cx: ov.cx, cy: ov.cy, w: ov.w } : { cx: crop.x + crop.w / 2, cy: crop.y + crop.h * 0.55, w: crop.w * 0.35 });
+    if (ov) [ov.img, ov.mask, ov.cut].forEach(composeFree);
+    ov = next;
+    dropStroke();
+    const clear = next.box.w < img.width - 2 || next.box.h < img.height - 2 || cut.getContext('2d').getImageData(0, 0, 1, 1).data[3] < 200;
     say('');
     if (clear) { mode = 'move'; toolsPlace(); } else { mode = 'trace'; toolsCut(); if (autoCut) say('Press "Cut out automatically", or cut it out by hand.'); }
     redraw();
@@ -340,26 +412,27 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   // ---------- saving ----------
   async function saveResult() {
     if (busy || !ov || !ov.box) return;
-    busy = true;
-    const saveBtn = $('#pc-save'); saveBtn.disabled = true; saveBtn.textContent = 'Saving...';
+    setBusy(true, 'Saving...');
     try {
       const scale = Math.min(1, COMPOSE_OUT / Math.max(crop.w, crop.h));
       const out = document.createElement('canvas');
       out.width = Math.round(crop.w * scale); out.height = Math.round(crop.h * scale);
       const o = out.getContext('2d');
       o.drawImage(base, crop.x, crop.y, crop.w, crop.h, 0, 0, out.width, out.height);
-      const p = placed(out.width, out.height);
+      const p = placed(out.width);
       o.drawImage(ov.cut, ov.box.x, ov.box.y, ov.box.w, ov.box.h, p.x, p.y, p.w, p.h);
-      const blob = await new Promise((resolve) => out.toBlob(resolve, 'image/jpeg', 0.88));
+      // the same quality uploadPhotos() compresses to, so the picture is not squeezed a second time
+      const blob = await new Promise((resolve) => out.toBlob(resolve, 'image/jpeg', 0.82));
+      composeFree(out);
       if (!blob) throw new Error('The picture could not be made. Try again.');
       const urls = await uploadPhotos([new File([blob], 'indicative-picture.jpg', { type: 'image/jpeg' })], 'reference');
       if (!urls || !urls[0]) throw new Error('The picture did not upload. Check your signal and try again.');
-      overlay.remove();
+      close();
       if (onSaved) onSaved(urls[0]);
     } catch (err) {
-      say(typeof friendlyError === 'function' ? friendlyError(err) : err.message, true);
-      saveBtn.disabled = false; saveBtn.textContent = 'Save as a new picture';
-    } finally { busy = false; }
+      setBusy(false);
+      say(friendlyError(err), true);
+    }
   }
 
   // ---------- finger and mouse ----------
@@ -367,105 +440,120 @@ async function openPhotoComposer({ project, baseUrl, others, onSaved }) {
   const at = (e) => { const r = stage.getBoundingClientRect(); return [(e.clientX - r.left) * stage.width / r.width, (e.clientY - r.top) * stage.height / r.height]; };
   const boxFrom = (a, b) => ({ x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) });
   const spread = () => { const [a, b] = [...pointers.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]); };
-  let drag = null; // place view: { from, cx, cy } for one finger, { spread, size } for two
+  const capture = (e) => { try { stage.setPointerCapture(e.pointerId); } catch (err) { /* an older WebView */ } };
+
+  // The cut in hand ends: applied, or dropped when the phone took the gesture away (cancelled).
+  function finish(cancelled) {
+    const done = stroke;
+    dropStroke();
+    if (!done || !base) return;
+    if (view === 'place') { // cropping the wall picture
+      const b = done.box;
+      // the part of the box that is on the picture; under a twentieth of it is a slip of the finger
+      const x0 = b ? Math.max(0, b.x) : 0, y0 = b ? Math.max(0, b.y) : 0, x1 = b ? Math.min(stage.width, b.x + b.w) : 0, y1 = b ? Math.min(stage.height, b.y + b.h) : 0;
+      if (!cancelled && x1 - x0 > stage.width * 0.05 && y1 - y0 > stage.height * 0.05) {
+        const kx = crop.w / stage.width, ky = crop.h / stage.height;
+        crop = { x: crop.x + x0 * kx, y: crop.y + y0 * ky, w: (x1 - x0) * kx, h: (y1 - y0) * ky };
+        keepOnWall();
+        mode = 'move'; toolsPlace(); redraw();
+      } else draw();
+      return;
+    }
+    if (mode === 'rub' || mode === 'bring') {
+      // a brush stroke the phone cancelled is taken back
+      if (cancelled) { restoreLast().then(() => { if (base) { draw(); toolsCut(); } }); return; }
+    } else if (!cancelled) {
+      const k = ov.img.width / stage.width;
+      if (mode === 'box') {
+        const b = done.box;
+        if (b && b.w > 8 && b.h > 8) { const path = new Path2D(); path.rect(b.x * k, b.y * k, b.w * k, b.h * k); keepInside(path); }
+      } else if (done.points && done.points.length > 8) {
+        const path = new Path2D();
+        done.points.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
+        path.closePath();
+        keepInside(path);
+      }
+    }
+    draw(); toolsCut();
+  }
 
   stage.addEventListener('pointerdown', (e) => {
     if (busy || !base) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return; // only the main button draws
     e.preventDefault();
-    try { stage.setPointerCapture(e.pointerId); } catch (err) { /* an older WebView */ }
     const p = at(e);
-    pointers.set(e.pointerId, p);
-    if (view === 'place') {
-      if (mode === 'cropbase') { stroke = { start: p, box: null }; return; }
-      if (!ov) return;
-      drag = pointers.size === 2 ? { spread: spread(), size: ov.size } : { from: p, cx: ov.cx, cy: ov.cy };
-      stage.style.cursor = 'grabbing';
+    if (view === 'cut' || mode === 'cropbase') {
+      if (strokeId !== null) return; // a second finger does nothing while a cut is being drawn
+      strokeId = e.pointerId;
+      capture(e);
+      if (view === 'place' || mode === 'box') { stroke = { start: p, box: null }; return; }
+      const k = ov.img.width / stage.width;
+      stroke = { points: [[p[0] * k, p[1] * k]] };
+      if (mode === 'rub' || mode === 'bring') { remember(); dab(stroke.points[0], stroke.points[0]); draw(); }
       return;
     }
-    const k = ov.img.width / stage.width;
-    if (mode === 'box') { stroke = { start: p, box: null }; return; }
-    stroke = { points: [[p[0] * k, p[1] * k]] };
-    if (mode === 'rub' || mode === 'bring') { remember(); dab(stroke.points[0], stroke.points[0]); draw(); }
+    if (!ov || pointers.size >= 2) return; // a third finger does nothing
+    capture(e);
+    pointers.set(e.pointerId, p);
+    drag = pointers.size === 2 ? { spread: spread(), w: ov.w } : { from: p, cx: ov.cx, cy: ov.cy };
+    stage.style.cursor = 'grabbing';
   });
   stage.addEventListener('pointermove', (e) => {
-    if (!pointers.has(e.pointerId)) return;
-    e.preventDefault();
     const p = at(e);
-    pointers.set(e.pointerId, p);
-    if (view === 'place') {
-      if (mode === 'cropbase') { if (stroke) { stroke.box = boxFrom(stroke.start, p); draw(); } return; }
-      if (!drag || !ov) return;
-      if (drag.spread && pointers.size === 2) {
-        ov.size = Math.min(1, Math.max(0.05, drag.size * spread() / drag.spread));
-        const s = $('#pc-size'); if (s) s.value = Math.round(ov.size * 100);
-      } else if (drag.from) {
-        ov.cx = Math.min(1.2, Math.max(-0.2, drag.cx + (p[0] - drag.from[0]) / stage.width));
-        ov.cy = Math.min(1.2, Math.max(-0.2, drag.cy + (p[1] - drag.from[1]) / stage.height));
-      }
+    if (strokeId !== null) {
+      if (e.pointerId !== strokeId || !stroke) return;
+      e.preventDefault();
+      if (e.pointerType === 'mouse' && e.buttons === 0) { finish(false); return; } // the button came up where the page did not see it
+      if (stroke.start) { stroke.box = boxFrom(stroke.start, p); draw(); return; }
+      const k = ov.img.width / stage.width;
+      const next = [p[0] * k, p[1] * k], last = stroke.points[stroke.points.length - 1];
+      if (Math.hypot(next[0] - last[0], next[1] - last[1]) < 2) return;
+      stroke.points.push(next);
+      if (mode === 'rub' || mode === 'bring') dab(last, next);
       draw();
       return;
     }
-    if (!stroke) return;
-    if (mode === 'box') { stroke.box = boxFrom(stroke.start, p); draw(); return; }
-    const k = ov.img.width / stage.width;
-    const next = [p[0] * k, p[1] * k], last = stroke.points[stroke.points.length - 1];
-    if (Math.hypot(next[0] - last[0], next[1] - last[1]) < 2) return;
-    stroke.points.push(next);
-    if (mode === 'rub' || mode === 'bring') dab(last, next);
+    if (!pointers.has(e.pointerId) || !ov) return;
+    e.preventDefault();
+    if (e.pointerType === 'mouse' && e.buttons === 0) { pointers.delete(e.pointerId); drag = null; stage.style.cursor = 'grab'; return; }
+    pointers.set(e.pointerId, p);
+    if (!drag) return;
+    const k = crop.w / stage.width; // the wall picture's pixels for each of the stage's
+    if (drag.spread && pointers.size === 2) {
+      ov.w = Math.min(crop.w, Math.max(crop.w * 0.05, drag.w * spread() / drag.spread));
+      const s = $('#pc-size'); if (s) s.value = Math.round(ov.w / crop.w * 100);
+    } else if (drag.from) {
+      ov.cx = drag.cx + (p[0] - drag.from[0]) * k;
+      ov.cy = drag.cy + (p[1] - drag.from[1]) * k;
+      keepOnWall();
+    }
     draw();
   });
-  const lift = (e) => {
+  const lift = (e, cancelled) => {
+    if (strokeId !== null) { if (e.pointerId === strokeId) finish(cancelled); return; }
     if (!pointers.has(e.pointerId)) return;
     pointers.delete(e.pointerId);
-    if (view === 'place') {
-      if (mode === 'cropbase' && stroke) {
-        const b = stroke.box; stroke = null;
-        // a box under a twentieth of the picture is a slip of the finger, not a crop
-        if (b && b.w > stage.width * 0.05 && b.h > stage.height * 0.05) {
-          const kx = crop.w / stage.width, ky = crop.h / stage.height;
-          const x = Math.max(0, b.x), y = Math.max(0, b.y);
-          crop = { x: crop.x + x * kx, y: crop.y + y * ky, w: Math.min(stage.width - x, b.w) * kx, h: Math.min(stage.height - y, b.h) * ky };
-          mode = 'move'; toolsPlace(); redraw();
-        } else draw();
-        return;
-      }
-      // one finger left after a pinch carries on as a drag from where it is
-      drag = pointers.size === 1 && ov ? { from: [...pointers.values()][0], cx: ov.cx, cy: ov.cy } : null;
-      if (!pointers.size) stage.style.cursor = 'grab';
-      return;
-    }
-    const done = stroke; stroke = null;
-    if (!done) return;
-    const k = ov.img.width / stage.width;
-    if (mode === 'box') {
-      const b = done.box;
-      if (b && b.w > 8 && b.h > 8) { const path = new Path2D(); path.rect(b.x * k, b.y * k, b.w * k, b.h * k); keepInside(path); }
-    } else if (mode === 'trace' && done.points.length > 8) {
-      const path = new Path2D();
-      done.points.forEach(([x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
-      path.closePath();
-      keepInside(path);
-    }
-    draw(); toolsCut();
+    // one finger left after a pinch carries on as a drag from where it is
+    drag = pointers.size === 1 && ov ? { from: [...pointers.values()][0], cx: ov.cx, cy: ov.cy } : null;
+    if (!pointers.size) stage.style.cursor = 'grab';
   };
-  stage.addEventListener('pointerup', lift);
-  stage.addEventListener('pointercancel', lift);
-  const onResize = () => { if (document.body.contains(overlay)) { if (base) redraw(); } else window.removeEventListener('resize', onResize); };
-  window.addEventListener('resize', onResize);
+  stage.addEventListener('pointerup', (e) => lift(e, false));
+  stage.addEventListener('pointercancel', (e) => lift(e, true));
 
   // ---------- start ----------
   try {
-    base = await composeLoad(supaImageVariant(baseUrl, COMPOSE_OUT, 85), COMPOSE_OUT).catch(() => composeLoad(baseUrl, COMPOSE_OUT));
+    base = await composeLoad(supaImageVariant(baseUrl, COMPOSE_OUT, 90), COMPOSE_OUT).catch(() => composeLoad(baseUrl, COMPOSE_OUT));
   } catch (err) {
     hint.textContent = '';
-    say(err.message || 'The picture could not be opened.', true);
+    say(friendlyError(err, 'The picture could not be opened.'), true);
     tools.innerHTML = btn('pc-cancel', 'Close');
-    $('#pc-cancel').addEventListener('click', () => overlay.remove());
+    $('#pc-cancel').addEventListener('click', close);
     return;
   }
+  if (!document.body.contains(overlay)) { composeFree(base); base = null; return; }
   crop = { x: 0, y: 0, w: base.width, h: base.height };
   toolsPlace(); redraw();
   // is the automatic cut-out set up? (the key lives on the server; a miss just leaves the button out)
   supabaseClient.auth.getSession().then(({ data: { session } }) => (session ? fetch('/.netlify/functions/cut-out-picture', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ check: true }) }) : null))
-    .then(res => (res ? res.json() : {})).then(out => { autoCut = !!(out && out.ok && out.available); if (autoCut && view === 'cut') toolsCut(); }).catch(() => {});
+    .then(res => (res ? res.json() : {})).then(out => { autoCut = !!(out && out.ok && out.available); if (autoCut && view === 'cut' && base && !busy) toolsCut(); }).catch(() => {});
 }

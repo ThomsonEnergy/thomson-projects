@@ -48,21 +48,22 @@ async function loadProductPicturesCard() {
       e.target.value = '';
       if (!files.length) return;
       msg.innerHTML = `<span class="subtitle">Uploading ${files.length} picture${files.length === 1 ? '' : 's'}...</span>`;
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        let added = 0;
-        // one at a time, so a picture that fails does not lose the ones before it
-        for (const file of files) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      let added = 0;
+      const failed = [];
+      // one at a time, and a picture that fails does not stop the rest
+      for (const file of files) {
+        try {
           const [url] = await uploadPhotos([file], 'product-pictures');
-          if (!url) continue;
+          if (!url) throw new Error('It did not upload.');
           // the file's name is the best first guess at the model: the person tidies it in the box
           const model = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 80);
           const { error } = await supabaseClient.from('product_pictures').insert({ brand: '', model, url, created_by: session ? session.user.id : null });
           if (error) throw error;
           added++;
-        }
-        note = `<span class="subtitle">${added} picture${added === 1 ? '' : 's'} added. Type the make and model under each one.</span>`;
-      } catch (err) { note = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; }
+        } catch (err) { failed.push(`${file.name}: ${friendlyError(err)}`); }
+      }
+      note = `${added ? `<span class="subtitle">${added} picture${added === 1 ? '' : 's'} added. Type the make and model under each one.</span>` : ''}${failed.length ? `<div class="error-box" style="margin-top:6px;">${failed.length} could not be added. ${escapeHtml(failed.join(' '))}</div>` : ''}`;
       await load();
       render();
     });
