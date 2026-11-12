@@ -1788,6 +1788,8 @@ The rule is in `CLAUDE.md` (How the owner works, "Use the whole screen") and the
 
 **Found (survey of all 60 pages, 12 Nov 2026):** 55 pages sit in `.wrap` (1100px wide, or 1400px with `wide`) centred with 32px padding, so a laptop shows a strip down the middle with empty sides. No page except Chat and Inbox splits into columns that scroll on their own: every page stacks full-width cards and the whole window scrolls. Worst for scrolling: Timesheets (nine cards stacked), Overheads, STCs, Leads, Stock, Bugs, Ops, Tasks, Knowledge, Logs, My Day, Prebuilds, the job page. Sizes are oversized for a laptop: topbar 76px, card padding 22px with 20px between cards, buttons 10px by 18px, table cells 10px tall padding, stat tiles 24px numbers.
 
+**Building in: `claude/bold-albattani-b268hw` (owner's "Yes build", 13 Nov 2026), one PR into `staging` with the four parts as four commits (a cloud session pushes one branch, and the owner checks the preview once).** As built: see `docs/PROJECT_SPEC.md` A5 and A17.
+
 **Plan: four PRs in one chat, in order, each into `staging`, no migration.**
 
 **PR 1, the frame and the sizes (every page at once, `style.css` only plus the `?v=` bump).**
