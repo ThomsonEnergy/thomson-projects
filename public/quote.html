@@ -272,7 +272,7 @@
   </div>
   <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=134"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script>
@@ -775,8 +775,10 @@
         ...(pd.inverter_types || []).map(m => ({ kind: 'Inverter', item: m })),
         ...(pd.storage_types || []).map(m => ({ kind: 'Battery', item: m })),
       ].filter(r => r.item && r.item.description);
-      const hasBatteryGear = (pd.storage_types || []).some(m => m && m.description);
-      const systemHtml = (onSystemPage && (equipmentRows.length || designHtml || picturesHtml)) ? `
+      // what the battery discount depends on: every Battery proposal (its battery is named on the quote's
+      // lines, no Pylon design needed), and a Solar one whose Pylon design has a battery
+      const hasBatteryGear = template === 'battery' || (pd.storage_types || []).some(m => m && m.description);
+      const systemHtml = (onSystemPage && (equipmentRows.length || designHtml || picturesHtml || hasBatteryGear)) ? `
         <section class="pg">
           ${slabsSvg('light')}
           ${headHtml}
