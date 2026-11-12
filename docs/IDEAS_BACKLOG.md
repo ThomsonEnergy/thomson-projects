@@ -18,8 +18,8 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 8 | invoice@ supplier bill intake agent | Live 18 Oct 2026, suggest-only for 2 weeks | N | Owner checks matches, then auto-save on |
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Built 20 Oct 2026, all four LIVE (spec A10, A11c, A12, A12a) | N | Airwallex payouts still to build (needs the payout key) |
-| 83 | Supplier bills easy to follow and easy to move: packing slips never saved as bills, no guessed PO preselected, the invoice file on the PO and supplier pages, Move to another PO and Remove bill, the Emailed bills page with the file beside the card, and the Xero bill map (H4) | Reviewed 13 Nov 2026, waiting on yes (part A fix, part B feature, part C Xero) | Y (B, C) | Purchase account codes from the owner for C |
-| 82 | Supplier credit notes against POs: a credit note emailed to invoice@ (or uploaded) saves against the PO, takes the credited lines off the PO (and out of Stock or off the job when the goods went back), and nets off in Pay bills due and the supplier balance | Planned 13 Nov 2026, waiting on yes | Y | None |
+| 83 | Supplier bills easy to follow and easy to move: packing slips never saved as bills, no guessed PO preselected, the invoice file on the PO and supplier pages, Move to another PO and Remove bill, the Emailed bills page with the file beside the card, and the Xero bill map (H4) | Building 13 Nov 2026 (yes to A, B and C) | Y (B, C) | Purchase account codes from the owner for C |
+| 82 | Supplier credit notes against POs: a credit note emailed to invoice@ (or uploaded) saves against the PO, takes the credited lines off the PO (and out of Stock or off the job when the goods went back), and nets off in Pay bills due and the supplier balance | Building 13 Nov 2026 (yes) | Y | None |
 | 81 | Ask suppliers for prices from a quote (RFQ1017), supplier quotes on a tab with Approve (issues the PO) and Deny; a supplier email from a quote no longer marks it Quote Sent | Planned 13 Nov 2026, waiting on yes | N | Gmail on staging for the reply test |
 | 10 | Purchase order upgrades (stock PO, move unused lines, undo received, open/closed, email PO PDF) | Built 19 Oct 2026, LIVE (spec A10) | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
@@ -1899,7 +1899,9 @@ Done means: (1) right-click "Hakka Hire: invoice", Merge into another label: its
 
 Touches: `public/inbox.html`, `public/settings.html` (one line to load) and `public/js/settings-email-rules.js` (new), `netlify/functions/email-actions.js`, `netlify/functions/_shared/email-agent.js`, `netlify/functions/mailbox-work-background.js`, migration `20261202020000_email_label_rules.sql`, `docs/PROJECT_SPEC.md` A18, `docs/IDEAS_BACKLOG.md`, `docs/DECISIONS.md`. Overlaps: item 80 on `inbox.html` (built first, same chat). Kind: feature into `staging`, migration yes (one new table, same row rules as the section rules), no money, stock or payroll. Size: large. Test on staging: sales@staging.test, Inbox, the seven Done means (the "next email lands under the label" check needs the AI key on staging). Simpler: no edit screen for rename, finish or delete; no repeated correction of the same sender; finished matters leave the sidebar by themselves. Best model: Fable 5.1, effort xhigh.
 
-## 82. Supplier credit notes against POs (planned 13 Nov 2026, waiting on yes)
+## 82. Supplier credit notes against POs (planned 13 Nov 2026, owner's yes 13 Nov, building)
+
+Building in: `claude/supplier-credit-notes-pos-cf3zxo` (with item 83 B).
 
 **Owner, 13 Nov 2026:** "PO2009 has some items accepted that will be credited. We should allow credit notes from suppliers to credit POs."
 
@@ -1928,7 +1930,9 @@ Overlaps: item 77 PR 3 and 4 (whole-screen pass, waiting on yes) will touch the 
 Kind: feature (into `staging`); migration yes; money yes, stock yes, RLS no, payroll no (backup before the production migration).
 Size: large (a day).
 
-## 83. Supplier bills easy to follow and easy to move; the Xero bill map (reviewed 13 Nov 2026, waiting on yes)
+## 83. Supplier bills easy to follow and easy to move; the Xero bill map (reviewed 13 Nov 2026, owner's "yes build all" 13 Nov, building)
+
+Building in: `claude/supplier-credit-notes-pos-cf3zxo` (A into `main` first, then B with item 82 into `staging`, then C).
 
 **Owner, 13 Nov 2026:** the whole supplier invoice process is hard to follow, a bill on the wrong PO is hard to undo. O'Connors sent a packing slip and an invoice: the packing slip went on the PO and the invoice shows as a duplicate. An invoice with no PO number was put on a PO and should not be in TEops at all (the customer paid it directly). Map how bills will show in Xero. When a bill is added to a PO, have the supplier's invoice attached or linked.
 
