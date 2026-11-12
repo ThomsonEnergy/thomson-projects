@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* Whole screen (owner's rule, 12 Nov 2026): three columns under the top bar, like Team chat.
@@ -21,7 +21,7 @@
      Phone: the folders as a strip above the list, then the conversation on its own screen.
      --ib-vh follows the visible screen (iPhone keyboard), set by fitHeight(). */
   body.inbox-page { overflow:hidden; height:100%; }
-  .inbox-app { --ib-top:76px; display:grid; grid-template-columns:212px minmax(380px, 30%) minmax(0,1fr); height:calc(var(--ib-vh, 100dvh) - var(--ib-top)); background:var(--bg); }
+  .inbox-app { --ib-top:var(--top-h); display:grid; grid-template-columns:212px minmax(380px, 30%) minmax(0,1fr); height:calc(var(--ib-vh, 100dvh) - var(--ib-top)); background:var(--bg); }
   .inbox-app.one-pane { grid-template-columns:212px minmax(0,1fr); }
   .inbox-app.one-pane .ib-read { display:none; }
   .ib-side, .ib-list, .ib-read { min-height:0; min-width:0; display:flex; flex-direction:column; }
@@ -168,7 +168,6 @@
     .ib-list-body { overflow-x:hidden; }
     .msg-head .to { display:none; }
   }
-  @media (max-width: 700px) { .inbox-app { --ib-top:64px; } }
 </style>
 </head>
 <body class="inbox-page">

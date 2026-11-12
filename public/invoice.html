@@ -10,7 +10,8 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/document-fonts.css?v=1" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/client-page.css?v=1" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   /* The invoice is laid out as A4 sheets (794 x 1123 px at 96 dpi), the same on screen and in the PDF.
@@ -118,7 +119,7 @@
   .as-paper .doc-sum { display: none !important; }
 </style>
 </head>
-<body>
+<body class="client-page">
   <div class="topbar">
     <span id="brand-mark" class="brand">INVOICE</span>
     <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
