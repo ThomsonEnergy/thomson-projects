@@ -1783,7 +1783,7 @@ The rule is in `CLAUDE.md` (How the owner works, "Use the whole screen") and the
 2. The job page Summary tab (`public/project.html`): Tasks on the far left, the summary cards in the middle, the activity log on the right, each column scrolling on its own; the tab bar and the job header stay put. The other tabs follow the same frame.
 3. Then the pages people sit on longest: Jobs, Quotes, Leads, Schedule, Stock, Settings.
 
-Each page's plan says what sits in which column, what stays stacked on a phone, and its Done means. Touches per page in its own plan. Kind: feature into `staging` each time, no migration.
+Each page's plan says what sits in which column, what stays stacked on a phone, and its Done means. Lesson from item 76 (12 Nov 2026): a page rebuilt in a cloud session that cannot reach staging ships only after someone has loaded it with real data on the preview or staging (the owner, or a laptop chat); `npm run check` is syntax only and missed a variable read before it was defined. Touches per page in its own plan. Kind: feature into `staging` each time, no migration.
 
 ## 78. AI draft replies sign off twice (bug, found 12 Nov 2026, built the same day, spec A18)
 
