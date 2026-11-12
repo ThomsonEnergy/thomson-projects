@@ -39,20 +39,27 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Reviews</h1>
-    <p class="subtitle">Reviews clients left through the "Ask for a review" link in job emails. Reviews posted straight on Google are on Google, not here.</p>
-
-    <div class="grid cols-4" id="rv-stats" style="margin-bottom:14px;"></div>
-
-    <div class="card">
-      <div class="rv-filters" id="rv-filters">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 320px;">
+        <h1>Reviews</h1>
+        <p class="subtitle">Reviews clients left through the "Ask for a review" link in job emails. Reviews posted straight on Google are on Google, not here.</p>
+      </div>
+      <div class="grid cols-4" id="rv-stats" style="flex:1 1 560px; max-width:760px;"></div>
+      <div class="rv-filters" id="rv-filters" style="margin:0; flex:1 1 100%;">
         <button type="button" class="secondary active" data-f="answered">Answered</button>
         <button type="button" class="secondary" data-f="waiting">Waiting for an answer</button>
         <button type="button" class="secondary" data-f="low">3 stars or less</button>
         <button type="button" class="secondary" data-f="all">All requests</button>
       </div>
-      <div id="rv-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="rv-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
-  .sb-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .sb-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0; }
   .sb-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
   .sb-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .sb-item { padding:14px 0; border-top:1px solid var(--border); }
@@ -47,11 +47,10 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Emailed bills</h1>
-    <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. Nothing is approved for payment or sent to Xero from here.</p>
-
-    <div class="card">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 420px; min-width:0;"><h1>Emailed bills</h1>
+      <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. Nothing is approved for payment or sent to Xero from here.</p></div>
       <div class="sb-filters" id="sb-filters">
         <button type="button" class="secondary active" data-f="check">To check</button>
         <button type="button" class="secondary" data-f="waiting">Being read</button>
@@ -59,7 +58,13 @@
         <button type="button" class="secondary" data-f="aside">Put aside</button>
         <button type="button" class="secondary" data-f="all">All</button>
       </div>
-      <div id="sb-list"><p class="subtitle">Loading...</p></div>
+    </div>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="sb-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 

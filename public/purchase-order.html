@@ -26,9 +26,9 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <p style="margin:0 0 10px;"><a href="/purchase-orders.html" class="link-quiet">&larr; All purchase orders</a></p>
-    <div id="po-page"><p class="subtitle">Loading...</p></div>
+  <div class="wrap fill">
+    <p style="margin:0 0 10px; flex-shrink:0;"><a href="/purchase-orders.html" class="link-quiet">&larr; All purchase orders</a></p>
+    <div id="po-page" class="page-cols"><p class="subtitle">Loading...</p></div>
   </div>
 
   <script src="/js/supabase-client.js?v=132"></script>
@@ -77,6 +77,7 @@
       const budgetPercent = po.budget_cap ? Math.round((poTotalAmount(po) / Number(po.budget_cap)) * 100) : null;
 
       pageEl.innerHTML = `
+        <div class="page-col" style="flex-grow:2;">
         <div class="card" id="po-head">
           <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
             <div style="min-width:0;">
@@ -121,7 +122,9 @@
               <div style="background:var(--surface-2); border-radius:999px; height:8px; overflow:hidden;"><div style="background:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, budgetPercent)}%; height:100%;"></div></div>
             </div>` : ''}
         </div>
+        </div>
 
+        <div class="page-col">
         ${po.supplier_notes || po.internal_notes || po.file_path ? `
         <div class="card" id="po-notes-card">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;"><h2 style="margin:0;">Notes</h2><button type="button" class="secondary btn-sm" id="po-notes-btn">Edit</button></div>
@@ -141,7 +144,8 @@
           <summary>Log <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto;">who did what, when</span></summary>
           <div id="po-log-body" style="margin-top:8px;"></div>
         </details>
-        <div id="po-msg"></div>`;
+        <div id="po-msg"></div>
+        </div>`;
 
       // the next step
       const nextBtn = document.getElementById('po-next-btn');

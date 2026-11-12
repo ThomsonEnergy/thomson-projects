@@ -26,19 +26,19 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Jobs</h1>
-    <p class="subtitle">Every job with its money position at a glance. To move jobs between stages, use the <a class="link-quiet" href="/dashboard.html">Pipeline</a>.</p>
-
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
-      <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div><div class="subtitle" id="stat-cost-incl" style="margin:2px 0 0; font-size:12px;"></div></div>
-      <div class="stat"><div class="label">Total partial invoiced</div><div class="value" id="stat-invoiced">-</div></div>
-      <div class="stat"><div class="label">Total pending</div><div class="value" id="stat-pending">-</div></div>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 320px;">
+        <h1>Jobs</h1>
+        <p class="subtitle">Every job with its money position at a glance. To move jobs between stages, use the <a class="link-quiet" href="/dashboard.html">Pipeline</a>.</p>
+      </div>
+      <div class="grid cols-4" style="flex:1 1 560px; max-width:760px;">
+        <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
+        <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div><div class="subtitle" id="stat-cost-incl" style="margin:2px 0 0; font-size:12px;"></div></div>
+        <div class="stat"><div class="label">Total partial invoiced</div><div class="value" id="stat-invoiced">-</div></div>
+        <div class="stat"><div class="label">Total pending</div><div class="value" id="stat-pending">-</div></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; flex:1 1 100%;">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1 1 320px;">
           <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
           <button type="button" class="secondary" id="new-job-btn" style="white-space:nowrap;">+ New job</button>
@@ -49,9 +49,16 @@
         </div>
         <p class="subtitle" id="bulk-delete-projects-hint" style="margin:0;">Enable Dev Mode in Settings to bulk-select and delete jobs.</p>
       </div>
-      <div id="bulk-delete-projects-msg"></div>
-      <div class="settings-tabs" id="jobs-folders" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:16px; overflow-x:auto;"></div>
-      <div id="projects-list"><p class="subtitle">Loading...</p></div>
+      <div class="settings-tabs" id="jobs-folders" style="flex:1 1 100%; flex-direction:row; position:static; border-bottom:1px solid var(--border); overflow-x:auto;"></div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="bulk-delete-projects-msg"></div>
+          <div id="projects-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 

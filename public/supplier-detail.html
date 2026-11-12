@@ -13,6 +13,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  .sd-side { display:flex; flex-direction:column; align-items:flex-end; gap:8px; max-width:100%; }
+  @media (max-width: 900px) { .sd-side { align-items:stretch; } }
+</style>
 </head>
 <body>
   <div class="topbar">
@@ -26,7 +30,7 @@
     </div>
   </div>
 
-  <div class="wrap wide" id="content">
+  <div class="wrap fill" id="content">
     <p class="subtitle">Loading...</p>
   </div>
 
@@ -83,27 +87,31 @@
       else document.title = `${supplier.name || 'Supplier'} - TEops`;
 
       document.getElementById('content').innerHTML = `
-        <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-top:8px;">
-          <div>
-            <h1>${escapeHtml(supplier.name)}${supplier.kind === 'contractor' ? ' <span class="badge draft" style="vertical-align:middle;">Contractor</span>' : ''}</h1>
+        <div class="page-head" style="align-items:flex-start;">
+          <div style="flex:1 1 320px; min-width:0;">
+            <a href="/suppliers.html" class="link-quiet">&larr; Suppliers</a>
+            <h1 style="margin-top:6px;">${escapeHtml(supplier.name)}${supplier.kind === 'contractor' ? ' <span class="badge draft" style="vertical-align:middle;">Contractor</span>' : ''}</h1>
             <p class="subtitle">${supplier.abn ? 'ABN ' + escapeHtml(supplier.abn) + (supplier.abn_legal_name ? ' (' + escapeHtml(supplier.abn_legal_name) + (supplier.gst_registered === false ? ', not registered for GST' : '') + ')' : '') + ' &middot; ' : ''}${escapeHtml(terms)}${supplier.contact_email ? ' &middot; ' + escapeHtml(supplier.contact_email) : ''}${supplier.contact_phone ? ' &middot; ' + escapeHtml(supplier.contact_phone) : ''}</p>
           </div>
-          <div>
+          <div class="sd-side">
+            <div>
             <button class="secondary" id="edit-supplier-btn" style="margin-right:8px;">Edit details</button>
             <button class="secondary" id="upload-bill-btn" style="margin-right:8px;">Upload bill</button>
             <button class="secondary" id="upload-pricelist-btn" style="margin-right:8px;">Upload pricelist</button>
             <button class="secondary" id="upload-statement-btn">Upload statement</button>
-          </div>
-        </div>
-
-        ${supplier.needs_review ? `<div class="error-box" style="margin:10px 0;">Created automatically from ${supplier.created_from === 'price_list' ? 'a price list' : 'an emailed bill'}. Check the details, especially the bank account (call them on a number you already have), then press Edit details and Save. Bills from them cannot be approved for payment until then.</div>` : ''}
-        <div class="grid cols-4">
+            </div>
+        ${supplier.needs_review ? `<div class="error-box" style="margin:0; max-width:640px;">Created automatically from ${supplier.created_from === 'price_list' ? 'a price list' : 'an emailed bill'}. Check the details, especially the bank account (call them on a number you already have), then press Edit details and Save. Bills from them cannot be approved for payment until then.</div>` : ''}
+        <div class="grid cols-4" style="gap:8px;">
           <div class="stat"><div class="label">Invoiced, not paid</div><div class="value">${sm(summary?.invoiced_not_paid)}</div></div>
           <div class="stat"><div class="label">Approved for payment</div><div class="value">${sm(summary?.approved_for_payment)}</div></div>
           <div class="stat"><div class="label">Not approved</div><div class="value">${sm(summary?.not_approved)}</div></div>
           <div class="stat"><div class="label">Overdue</div><div class="value" style="color:${Number(summary?.overdue) > 0 ? 'var(--red)' : 'inherit'};">${sm(summary?.overdue)}</div></div>
         </div>
+          </div>
+        </div>
+
+        <div class="page-cols">
+        <div class="page-col" style="flex-grow:2;">
 
         ${flaggedItems.length ? `
         <div class="card">
@@ -147,7 +155,9 @@
             </table>`}
           </div>
         </div>
+        </div>
 
+        <div class="page-col">
         <div class="card">
           <h2>Purchase orders</h2>
           <div id="pos-list">
@@ -158,6 +168,8 @@
         <div class="card">
           <h2>Activity log</h2>
           <div id="supplier-activity-log"><p class="subtitle">Loading...</p></div>
+        </div>
+        </div>
         </div>
       `;
 

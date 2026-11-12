@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
-  .pl-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+  .pl-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0; }
   .pl-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
   .pl-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .pl-group { padding:12px 0; border-top:1px solid var(--border); }
@@ -42,18 +42,23 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Price lists</h1>
-    <p class="subtitle">Supplier price lists emailed to sales@ or invoice@. TEops reads every line and keeps our material cost prices up to date: changes under 20% on an item it already knows are applied straight away, bigger ones and first-time matches wait here. Nothing is ever deleted.</p>
-
-    <div class="card">
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 420px; min-width:0;"><h1>Price lists</h1>
+      <p class="subtitle">Supplier price lists emailed to sales@ or invoice@. TEops reads every line and keeps our material cost prices up to date: changes under 20% on an item it already knows are applied straight away, bigger ones and first-time matches wait here. Nothing is ever deleted.</p></div>
       <div class="pl-filters" id="pl-filters">
         <button type="button" class="secondary active" data-f="check">To check</button>
         <button type="button" class="secondary" data-f="lists">Price lists</button>
         <button type="button" class="secondary" data-f="applied">Changes made</button>
         <button type="button" class="secondary" data-f="search">Supplier lists</button>
       </div>
-      <div id="pl-body"><p class="subtitle">Loading...</p></div>
+    </div>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="pl-body"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
