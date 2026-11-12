@@ -32,7 +32,7 @@
 
   <script src="/js/supabase-client.js?v=132"></script>
   <script src="/js/template-questions.js?v=7"></script>
-  <script src="/js/solar-roi.js?v=19"></script>
+  <script src="/js/solar-roi.js?v=20"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
   <script src="/js/solar-sizing.js?v=3"></script>
   <script src="/js/quote-plan-list.js?v=2"></script>
@@ -1514,7 +1514,7 @@
 
       // ----- the Savings assumptions page: change an assumed value, or show the figures past a hard block -----
       let lastGaps = [];
-      const openAssumptions = () => loadJsOnce('/js/quote-savings-assumptions.js?v=3', () => typeof openSavingsAssumptions === 'function')
+      const openAssumptions = () => loadJsOnce('/js/quote-savings-assumptions.js?v=4', () => typeof openSavingsAssumptions === 'function')
         .then(() => openSavingsAssumptions({ project, gaps: lastGaps, zoneRating: currentZone(), onSaved: (inputs) => { project.roi_inputs = inputs; scheduleRender(0); schedulePdf(); } }))
         .catch(err => showToast(friendlyError(err), { error: true }));
       if (byId('bc-assumptions-btn')) byId('bc-assumptions-btn').addEventListener('click', openAssumptions);
