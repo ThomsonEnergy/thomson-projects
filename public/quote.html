@@ -116,8 +116,6 @@
   .row-x .b { font-size: 13px; line-height: 1.58; color: #2b303a; }
   .row-x .b p + p { margin-top: 6px; }
   .row-x ul { margin: 4px 0 0; padding-left: 18px; }
-  .photo-row { display: grid; gap: 14px; margin: 22px 0 26px; grid-template-columns: repeat(2, 1fr); }
-  .photo-row img { width: 100%; height: 200px; object-fit: cover; display: block; }
   .design-box { margin-top: 26px; padding: 18px 20px; background: #f1f5fd; border-left: 4px solid var(--q-blue); }
   .design-box p { font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
   .q-btn { display: inline-block; background: var(--q-blue); color: #fff !important; text-decoration: none; padding: 10px 18px; font-weight: 600; font-size: 13px; }
@@ -214,8 +212,6 @@
     .band-panel { position: static; background: #000; padding: 26px 22px 120px; margin: 0 -22px -48px; }
     .band-panel .txt { max-width: 100%; }
     .intro-facts { grid-template-columns: 1fr; }
-    .photo-row { grid-template-columns: 1fr; }
-    .photo-row img { height: 200px; }
     .invest-top { margin: 0 -22px 28px; padding: 28px 22px 30px; }
     .terms-cols { column-count: 1; font-size: 11px; }
     .gallery { grid-template-columns: repeat(2, 1fr); }
@@ -642,13 +638,16 @@
       // valid until (YYYY-MM-DD, migration 20261030000000), shown while it is still open
       const validText = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
       const validLine = (d, noun) => d ? `<p class="note-line" style="margin:10px 0 0;"><strong>This ${noun} is valid until ${esc(validText(d))}.</strong></p>` : '';
-      const ownPhotos = (project.cover_photos || []).map(p => p.url || p).filter(Boolean);
       const depositPercent = Number(project.deposit_percent) || 0;
       const depositAmount = baseTotal * (depositPercent / 100);
       const esc = escapeHtml;
-      // Pictures of your system (quote step 4): { url, caption }; an older quote's have no caption
+      // Pictures of your system (quote step 4): { url, caption }; an older quote's have no caption. The
+      // first two lead the Scope of works page and the rest print on Your system (or the Photos page):
+      // only pictures picked for this quote, never stock photos (owner, 12 Nov 2026).
       const pictures = (project.reference_photos || []).map(p => (typeof p === 'string' ? { url: p } : p)).filter(p => p && p.url);
-      const picturesHtml = pictures.length ? `<div class="gallery pics">${pictures.map(p => `<figure><img src="${esc(supaImageVariant(p.url, 800, 72))}" alt="" />${p.caption ? `<figcaption>${esc(p.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : '';
+      const galleryHtml = (list) => list.length ? `<div class="gallery pics">${list.map(p => `<figure><img src="${esc(supaImageVariant(p.url, 800, 72))}" alt="" />${p.caption ? `<figcaption>${esc(p.caption)}</figcaption>` : ''}</figure>`).join('')}</div>` : '';
+      const scopePics = project.sow_text ? pictures.slice(0, 2) : [];
+      const picturesHtml = galleryHtml(pictures.slice(scopePics.length));
       const onSystemPage = (template === 'solar' || template === 'battery') && !vInfo; // else they print on the Photos page
 
       const docLabel = vInfo ? 'Variation' : ({ quick_estimate: 'Estimate', service_work: 'Service quote' }[template] || 'Proposal');
@@ -662,12 +661,8 @@
       const docDate = new Date((vInfo ? thisVariation.sent_at : project.sent_at) || (vInfo ? Date.now() : project.created_at) || Date.now())
         .toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 
-      // Photo mix for this quote: the job's own photos first, then showcase.
-      const showcaseMix = seededShuffle(SHOWCASE_PHOTOS, token);
       // The About picture: the one from Settings > Proposal pictures, else a showcase one.
-      const introPhoto = supaImageVariant(s.about_photo_url || showcaseMix[0], 1300, 72);
-      const scopePool = ownPhotos.concat(showcaseMix.slice(1));
-      const photo = (i, w) => supaImageVariant(scopePool[i % scopePool.length], w || 1100, 72);
+      const introPhoto = supaImageVariant(s.about_photo_url || seededShuffle(SHOWCASE_PHOTOS, token)[0], 1300, 72);
 
       const lightLogo = await makeLightLogo(s.logo_url);
       // company details for the top of every page except the title page
@@ -720,9 +715,9 @@
 
       // 2. Introduction: who it is for, what the system is, who we are.
       const pylonSummary = pylonSystemSummary(project.pylon_data);
-      // What the page says about the project: the quote's own summary line, otherwise the opening
-      // paragraph of its scope of works, so the page is never just facts and a gap.
-      const introText = project.proposal_subtitle || (parseScope(project.sow_text).intro || [])[0] || '';
+      // What the page says about the project: the quote's own summary line when an older quote has one.
+      // Not the scope's opening paragraph: it opens the Scope of works page, and here it was cut off.
+      const introText = project.proposal_subtitle || '';
       const introHtml = `
         <section class="pg fixed intro">
           ${headHtml}
@@ -767,7 +762,7 @@
           <div class="pg-body">
             <h1 class="pg-title">Scope<br>of works</h1>
             ${scope.intro.map(t => `<p class="pg-lead">${esc(t)}</p>`).join('')}
-            <div class="photo-row"><img src="${photo(0, 800)}" alt="" /><img src="${photo(1, 800)}" alt="" /></div>
+            ${galleryHtml(scopePics)}
             <div class="rows">${scopeRowsHtml}</div>
           </div>
         </section>` : '';

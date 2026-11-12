@@ -12,12 +12,17 @@ const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { billMetrics } = require('../../public/js/solar-roi.js');
 const { suggestSizes } = require('../../public/js/solar-sizing.js');
-const { quickJson, claudeText } = require('./_shared/claude-json');
+const { claudeJson, claudeText } = require('./_shared/claude-json');
+const { imageSize } = require('./_shared/image-size');
 
 const BILL_FOLDER = 'Electricity bill';
 // Files past this many are not sent (one request, one reading); their names come back as left_out_files
 // so the page can say which pages were not read (F30 in docs/BUG_REVIEW_2026-10-23.md).
 const MAX_PAGES = 20;
+// A page photo smaller than this on its long side cannot be read: the bill's figures come out a few
+// pixels tall (Q1017's three pages, 564 by 423, read as no usage on 12 Nov 2026). A phone camera photo
+// is 3000 or more, and the upload keeps up to 1920.
+const MIN_LONG_SIDE = 1000;
 
 function mimeFor(path, stored) {
   if (stored && /^(application\/pdf|image\/(png|jpeg|webp|gif))$/.test(stored)) return stored;
@@ -86,17 +91,26 @@ exports.handler = async (event) => {
 
     const blocks = [];
     const skipped = [];
+    const tooSmall = [];
     const leftOut = docs.slice(MAX_PAGES).map((d) => d.file_name);
     const leftOutNote = leftOut.length ? ` Only the first ${MAX_PAGES} files were read; not read: ${leftOut.join(', ')}. Delete retakes or spare pages and read again.` : '';
-    for (const doc of docs.slice(0, MAX_PAGES)) {
+    for (const [n, doc] of docs.slice(0, MAX_PAGES).entries()) {
       const mediaType = mimeFor(doc.file_path, doc.mime_type);
       if (!mediaType) { skipped.push(doc.file_name); continue; }
       const { data, error } = await supabaseAdmin.storage.from('project-documents').download(doc.file_path);
       if (error || !data) { skipped.push(doc.file_name); continue; }
-      const base64 = Buffer.from(await data.arrayBuffer()).toString('base64');
+      const bytes = Buffer.from(await data.arrayBuffer());
+      const size = imageSize(bytes);
+      if (size && Math.max(size.width, size.height) < MIN_LONG_SIDE) { tooSmall.push({ n: n + 1, ...size }); continue; }
+      const base64 = bytes.toString('base64');
       blocks.push(mediaType === 'application/pdf'
         ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64 } }
         : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } });
+    }
+    // pages are named by their place in the list: photos sent on often all arrive as "Attachment.jpeg"
+    if (tooSmall.length) {
+      const which = tooSmall.length === 1 ? `Page ${tooSmall[0].n} is` : `Pages ${tooSmall.slice(0, -1).map((t) => t.n).join(', ')} and ${tooSmall[tooSmall.length - 1].n} are`;
+      return { statusCode: 400, body: JSON.stringify({ ok: false, error: `${which} too small to read (${tooSmall[0].width} by ${tooSmall[0].height} pixels). Delete ${tooSmall.length === 1 ? 'it' : 'them'} and add the retailer's PDF, or new photos taken with the phone camera, one page each.` }) };
     }
     if (!blocks.length) return { statusCode: 400, body: JSON.stringify({ ok: false, error: `None of the bill pages could be read (${skipped.join(', ')}). Use photos (JPG, PNG) or a PDF.` }) };
 
@@ -104,8 +118,12 @@ exports.handler = async (event) => {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: quickJson({
+      // Reading a photo of a bill is the one job here where the AI's thinking helps, so it stays on, kept
+      // short (effort low) so the call finishes in time, with room so it cannot cut the answer off.
+      body: claudeJson({
         model: 'claude-sonnet-5-5',
+        max_tokens: 8000,
+        output_config: { effort: 'low' },
         messages: [{ role: 'user', content: [...blocks, { type: 'text', text: PROMPT }] }],
       }),
     });
