@@ -6057,7 +6057,6 @@ function poPlaceLabel(type) {
 }
 function poLineIsTool(li, po) { return !!(li.is_tool || (po && po.po_kind === 'tools')); }
 
-
 // Shared modal: dark backdrop and a card that scrolls inside itself (at most 88% of the screen
 // tall), so a tall form is never cut off on a phone. innerHtml is the card's content (escape
 // outside text). Returns the overlay; the card is overlay.querySelector('.card').
@@ -6182,7 +6181,6 @@ async function openReceiveLineItemPanel(lineItem, po, defaultDestination, onComp
     } finally { btn.disabled = false; btn.textContent = label; }
   });
 }
-
 
 // Undo received (e.g. ticked by mistake, or it was really back ordered). Needs a note once the PO is
 // closed or a bill on it is approved - the server checks the bills too.
@@ -6433,7 +6431,6 @@ function openPoNotesPanel(po, onComplete) {
   });
 }
 
-
 // Close a PO (the approval step). Every line must be received, back ordered or moved off; back ordered
 // lines are the closer's call: wait, or close now and cancel them off the PO. The server checks the same.
 async function closePurchaseOrder(po, onComplete) {
@@ -6468,7 +6465,6 @@ async function closePurchaseOrder(po, onComplete) {
   if (onComplete) await onComplete();
 }
 
-
 // ---------- Bills on a PO (migration 20261109000000) ----------
 // Every bill linked to a PO with its lines: green = on the PO, red = not on the PO, charged more,
 // freight / delivery (always shown, never on a PO) or denied. Pricing roles decide each red line:
@@ -6480,7 +6476,7 @@ async function loadBillsForPos(poIds) {
   const out = {};
   if (!poIds || !poIds.length) return out;
   const { data, error } = await supabaseClient.from('supplier_bills')
-    .select('id, po_id, bill_number, bill_date, amount, paid, approved_for_payment, pay_on, check_status, query_sent_at, file_path, file_name, supplier_bill_line_items(id, description, quantity, unit_cost, po_line_item_id, flag_reason, resolution, resolution_note)')
+    .select('id, po_id, supplier_id, kind, bill_number, bill_date, amount, paid, approved_for_payment, pay_on, check_status, check_issues, query_sent_at, file_path, file_name, supplier_bill_line_items(id, description, quantity, unit_cost, po_line_item_id, flag_reason, resolution, resolution_note, goods_returned)')
     .in('po_id', poIds).order('bill_date', { ascending: false });
   if (error) { console.error('bills for POs:', error.message); return out; }
   // the packing slips filed with each bill (item 83): shown as Open docket beside the invoice
@@ -6494,78 +6490,12 @@ async function loadBillsForPos(poIds) {
   return out;
 }
 
-function billStatusChip(b) {
-  if (b.paid) return '<span class="badge accepted">Paid</span>';
-  if (b.approved_for_payment) return `<span class="badge sent">Approved${b.pay_on ? ', pay ' + escapeHtml(poShortDay(b.pay_on)) : ''}</span>`;
-  if (b.check_status === 'queried') return '<span class="badge draft" style="color:var(--red);">Queried with supplier</span>';
-  if (b.check_status === 'problems') return '<span class="badge draft" style="color:var(--red);">Needs a decision</span>';
-  if (b.check_status === 'resolved') return '<span class="badge draft">Accepted, approved at close</span>';
-  return '<span class="badge draft">Approved at close</span>';
-}
-
-// A bill line that charges nothing (0 supplied on this invoice, or $0). Same rule as isNoCharge() in bill-check.js.
-function isNoCharge(l) { return !(Number(l.quantity) > 0) || !(Number(l.unit_cost) > 0); }
-
-function billLineState(l) {
-  if (l.resolution === 'denied') return { red: true, label: 'Denied' + (l.resolution_note ? ': ' + l.resolution_note : '') };
-  if (l.resolution === 'added') return { red: false, label: 'Added to PO' };
-  if (l.resolution === 'accepted') return { red: false, label: 'Accepted' + (l.resolution_note ? ': ' + l.resolution_note : '') };
-  if (isNoCharge(l)) return { red: false, label: 'No charge' };
-  if (l.flag_reason) return { red: true, label: l.flag_reason };
-  if (l.po_line_item_id) return { red: false, label: 'On the PO' };
-  return { red: true, label: 'Not on the PO' };
-}
-
-function renderPoBills(bills, po, role) {
-  if (!bills || !bills.length) return '';
-  const canDecide = isPricingRole(role);
-  const needsWord = (b) => (b.supplier_bill_line_items || []).some(l => billLineState(l).red);
-  return `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
-    <div class="subtitle" style="font-size:12px; margin-bottom:4px;">Bills on this PO</div>
-    ${bills.map(b => `
-      <div class="po-bill" data-bill-id="${b.id}" style="margin-bottom:8px;">
-        <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
-          <span><strong>Bill ${escapeHtml(b.bill_number || '(no number)')}</strong>${b.bill_date ? ' &middot; ' + escapeHtml(poShortDay(b.bill_date)) : ''} &middot; ${money(b.amount)}</span>
-          <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${billStatusChip(b)}
-            ${b.file_path ? `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(b.file_path)}" title="${escapeHtml(b.file_name || '')}">Open invoice</button>` : ''}
-            ${(b.dockets || []).map(d => `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(d.file_path)}" title="${escapeHtml(d.file_name || '')}">Open docket</button>`).join('')}
-            ${canDecide && !b.paid && needsWord(b) ? `<button type="button" class="secondary btn-sm po-bill-query-btn" data-bill-id="${b.id}">${b.query_sent_at ? 'Email supplier again' : 'Query supplier'}</button>` : ''}
-          </span>
-        </div>
-        ${(b.supplier_bill_line_items || []).map(l => {
-          const st = billLineState(l);
-          const colour = st.red ? 'var(--red)' : 'var(--green)';
-          return `<div style="display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; align-items:center; font-size:12px; padding:3px 0 3px 8px; border-left:3px solid ${colour}; margin-top:3px;">
-            <span>${escapeHtml(l.description)} &middot; ${poQty(l.quantity)} &times; ${money(l.unit_cost)} <span style="color:${colour};">${escapeHtml(st.label)}</span></span>
-            ${canDecide && !b.paid ? `<span style="display:flex; gap:4px; flex-wrap:wrap;">
-              ${st.red && l.resolution !== 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="accept" data-desc="${escapeHtml(l.description)}" data-on-po="${l.po_line_item_id ? '1' : ''}">Accept</button>
-                <button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="deny" data-desc="${escapeHtml(l.description)}" style="color:var(--red);">Deny charge</button>` : ''}
-              ${l.resolution === 'accepted' || l.resolution === 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="undo" data-desc="${escapeHtml(l.description)}">Undo</button>` : ''}
-            </span>` : ''}
-          </div>`;
-        }).join('')}
-      </div>`).join('')}
-  </div>`;
-}
-
 async function supplierChecksCall(body) {
   const { data: { session } } = await supabaseClient.auth.getSession();
   const res = await fetch('/.netlify/functions/supplier-checks', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
   return data;
-}
-
-// Re-check a bill against its PO after a decision (issues and approval are kept by the server).
-async function recheckBill(billId) {
-  try { await supplierChecksCall({ action: 'check_bill', id: billId }); }
-  catch (err) { console.error('bill check did not run:', err.message); }
-}
-
-// The please-explain email to the supplier: written by the server (denied charges first, then
-// anything else that does not line up), edited here, sent only on Send. Resolves when closed.
-function openSupplierQueryEmail(billId) {
-  return openSupplierEmail({ kind: 'bill_query', id: billId, intro: 'Sent from invoice@thomsonenergy.com.au. The bill stays unapproved until it is sorted; their reply shows on Bill checks.' });
 }
 
 // An email to a supplier drafted by the server (supplier-checks draft_email: a bill query, a price
@@ -6599,36 +6529,6 @@ function openSupplierEmail({ kind, id, intro }) {
   });
 }
 
-function wirePoBillButtons(containerEl, onComplete) {
-  containerEl.querySelectorAll('.po-bill-line-btn').forEach(btn => btn.addEventListener('click', async () => {
-    const { lineId, action, desc, onPo } = btn.dataset;
-    let note = null;
-    if (action === 'accept') {
-      const freight = /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(desc);
-      if (!confirm(onPo ? `Accept the higher price for "${desc}"? The PO line and the job's cost take the billed price.`
-        : `Accept "${desc}"? It is added to the PO${freight ? ' and costed straight away' : ' and received the normal way'}.`)) return;
-    } else if (action === 'deny') {
-      note = prompt(`Deny "${desc}". Why? (goes in the email to the supplier)`, '');
-      if (note === null) return;
-    }
-    btn.disabled = true;
-    const { error } = await supabaseClient.rpc('supplier_bill_line_resolve', { p_line_id: lineId, p_action: action, p_note: note });
-    if (error) { alert(friendlyError(error)); btn.disabled = false; return; }
-    const billId = btn.closest('.po-bill')?.dataset.billId;
-    if (billId) await recheckBill(billId);
-    if (action === 'deny' && billId) await openSupplierQueryEmail(billId);
-    if (onComplete) await onComplete();
-  }));
-  containerEl.querySelectorAll('.po-bill-query-btn').forEach(btn => btn.addEventListener('click', async () => {
-    await openSupplierQueryEmail(btn.dataset.billId);
-    if (onComplete) await onComplete();
-  }));
-  // the supplier's invoice (and any packing slip filed with it), one tap from the bill (item 83)
-  containerEl.querySelectorAll('.po-bill-file-btn').forEach(btn => btn.addEventListener('click', async () => {
-    try { await openSignedDocInNewTab(btn.dataset.path); } catch (err) { alert(friendlyError(err)); }
-  }));
-}
-
 // Create PO panels: lines known now (a fixed PO, the invoice is matched to them) or an open PO whose
 // lines are filled in from the supplier's invoice when the bill is saved.
 function poTypeChoiceHtml(prefix) {
@@ -6641,7 +6541,6 @@ function poTypeChoiceHtml(prefix) {
 function readPoTypeChoice(root, prefix) {
   return root.querySelector(`input[name="${prefix}-po-type"]:checked`)?.value === 'open' ? 'open' : 'fixed';
 }
-
 
 // ---------- Simpler purchase orders (backlog item 31, 23 Oct 2026) ----------
 // One PO is one page (purchase-order.html). Lists show one short row per PO; the page shows the
@@ -6758,26 +6657,6 @@ function renderPoRow(po, { showWhere = true, note = '', progress = '', total = n
       ${decide ? '<span class="badge red">Bill needs a decision</span>' : ''}
     </div>
   </a>`;
-}
-
-// The one thing to do next on a PO, in this order: decide on a bill line in red, close an
-// all-received PO, add lines (or the invoice on an open PO), email it, receive what arrived.
-function poNextStep(po, bills, { emailed, role } = {}) {
-  const c = poLineCounts(po);
-  if (po.closed_at) return { key: 'closed', label: 'Closed and approved for payment', hint: 'Nothing more to do. Admin or Finance can reopen it under More.', done: true };
-  const redLine = isPricingRole(role) && (bills || []).some(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red));
-  if (redLine) return { key: 'bills', label: 'Decide on the bill lines in red', hint: 'A bill does not match this PO. Accept each red line, or deny the charge and the supplier is asked about it.' };
-  if (po.status === 'received' && c.total) return { key: 'close', label: 'All received: close and approve', hint: 'Closing approves its bills for payment.' };
-  if (!c.total) {
-    // Reading the invoice is for pricing roles only (bug F9); anyone else adds the lines by hand.
-    if (po.po_type === 'open' && po.supplier_id && isPricingRole(role)) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
-    if (po.po_type === 'open' && po.supplier_id) return { key: 'add', label: 'Add the lines', hint: "What arrived, how many, and the unit cost. Admin, Finance or Sales can upload the supplier's invoice instead." };
-    return { key: 'add', label: 'Add the lines', hint: 'What is being ordered, how many, and the unit cost.' };
-  }
-  if (po.supplier_id && !po.stock_source && !emailed && !c.received) return { key: 'email', label: 'Email the PO to the supplier', hint: 'Then tick each line below as it arrives.' };
-  if (c.toReceive) return { key: 'receive', label: 'Receive what arrived', hint: 'Tick the lines that came in, then press Receive.' };
-  if (c.backordered) return { key: 'close', label: `Waiting on ${c.backordered} back ordered line${c.backordered === 1 ? '' : 's'}`, hint: 'Wait for it, or close now and it is cancelled off the PO.', secondary: true };
-  return { key: 'close', label: 'Close PO' };
 }
 
 // Lines with a tick box each. Tick what arrived, then one Receive button (wirePoTickLines).
@@ -7005,7 +6884,6 @@ async function loadPurchaseOrderFull(poId) {
   return { po: data, bills: bills[poId] || [], emailed: !!(emailedRows && emailedRows.length) };
 }
 
-
 // ---------- Guided tour: "Show me how" ----------
 // Spotlights the real buttons one at a time with a short card: Back, Next, Done. A step is
 // { target: css selector or () => element, title, text, before: async () => {} }. A step whose
@@ -7194,7 +7072,6 @@ async function maybeAskUsedStock(entry, project) {
   });
   if (yes) { await loadUsedStock(); await openUsedStockPanel({ projectId: entry.project_id, jobLabel: label }); }
 }
-
 
 async function openAddPoItemPanel(po, onComplete) {
   const { data: materials } = await supabaseClient.from('materials').select('id, name, cost_price').order('name');

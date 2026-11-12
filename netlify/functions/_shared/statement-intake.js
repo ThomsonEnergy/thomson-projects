@@ -103,9 +103,11 @@ async function reconcileStatement(admin, statementId) {
     await admin.from('supplier_statements').update({ status: 'issues', issues: [{ kind: 'no_supplier', text: `Supplier "${st.supplier_name_read || 'unknown'}" not recognised: pick the supplier.` }] }).eq('id', st.id);
     return { status: 'issues', issues: 1 };
   }
-  const { data: billsRaw } = await admin.from('supplier_bills').select('id, bill_number, amount, bill_date, paid, po_id, check_status').eq('supplier_id', st.supplier_id);
+  const { data: billsRaw } = await admin.from('supplier_bills').select('id, bill_number, amount, bill_date, paid, po_id, check_status, kind').eq('supplier_id', st.supplier_id);
   const bills = billsRaw || [];
-  const lines = (st.lines || []).filter(l => (l.type || 'invoice') === 'invoice' && l.bill_number);
+  // invoices and credit notes are matched by number (a credit note is a bill with a minus in front, item 82); payments are not
+  const lines = (st.lines || []).filter(l => ['invoice', 'credit'].includes(l.type || 'invoice') && l.bill_number);
+  const word = (l) => (l.type === 'credit' ? 'Credit note' : 'Invoice');
   const issues = [];
 
   // the same number twice on the statement
@@ -113,7 +115,7 @@ async function reconcileStatement(admin, statementId) {
   lines.forEach(l => { const k = normNum(l.bill_number); seen[k] = (seen[k] || 0) + 1; });
   Object.entries(seen).filter(([, n]) => n > 1).forEach(([k]) => {
     const l = lines.find(x => normNum(x.bill_number) === k);
-    issues.push({ kind: 'statement_duplicate', bill_number: l.bill_number, text: `Invoice ${l.bill_number} is listed ${seen[k]} times on the statement: billed twice?` });
+    issues.push({ kind: 'statement_duplicate', bill_number: l.bill_number, text: `${word(l)} ${l.bill_number} is listed ${seen[k]} times on the statement: billed twice?` });
   });
 
   // our bills by number (two of ours with one number = entered twice)
@@ -129,15 +131,15 @@ async function reconcileStatement(admin, statementId) {
     if (done.has(normNum(l.bill_number))) return; // listed twice: reported once above
     done.add(normNum(l.bill_number));
     const list = ours[normNum(l.bill_number)];
-    if (!list) { issues.push({ kind: 'missing_bill', bill_number: l.bill_number, amount: l.amount, date: l.date, text: `Invoice ${l.bill_number} (${money(l.amount)}${l.date ? ', ' + l.date : ''}) is on the statement but not in TEops` }); return; }
-    const b = list[0];
+    if (!list) { issues.push({ kind: 'missing_bill', bill_number: l.bill_number, amount: l.amount, date: l.date, type: l.type || 'invoice', text: `${word(l)} ${l.bill_number} (${money(l.amount)}${l.date ? ', ' + l.date : ''}) is on the statement but not in TEops` }); return; }
+    const b = list.find(x => (x.kind === 'credit_note') === (l.type === 'credit')) || list[0];
     matchedIds.add(b.id);
-    if (Math.abs((Number(b.amount) || 0) - (Number(l.amount) || 0)) > 0.5) {
-      issues.push({ kind: 'amount_differs', bill_id: b.id, bill_number: l.bill_number, text: `Invoice ${l.bill_number}: statement says ${money(l.amount)}, our bill is ${money(b.amount)}` });
+    if (Math.abs(Math.abs(Number(b.amount) || 0) - Math.abs(Number(l.amount) || 0)) > 0.5) {
+      issues.push({ kind: 'amount_differs', bill_id: b.id, bill_number: l.bill_number, text: `${word(l)} ${l.bill_number}: statement says ${money(Math.abs(l.amount))}, ours is ${money(Math.abs(b.amount))}` });
     }
     if (['problems', 'queried'].includes(b.check_status)) {
-      issues.push({ kind: 'bill_problems', bill_id: b.id, bill_number: l.bill_number, text: `Invoice ${l.bill_number} ${b.check_status === 'queried' ? 'is queried with the supplier' : 'does not match its PO'}` });
-    } else if (!b.po_id) {
+      issues.push({ kind: 'bill_problems', bill_id: b.id, bill_number: l.bill_number, text: `${word(l)} ${l.bill_number} ${b.check_status === 'queried' ? 'is queried with the supplier' : 'does not match its PO'}` });
+    } else if (!b.po_id && b.kind !== 'credit_note') {
       issues.push({ kind: 'no_po', bill_id: b.id, bill_number: l.bill_number, text: `Invoice ${l.bill_number} has no PO in TEops` });
     }
   });
@@ -147,7 +149,7 @@ async function reconcileStatement(admin, statementId) {
   const dates = lines.map(l => l.date).filter(Boolean).sort();
   const from = dates[0] || new Date(new Date(stDate).getTime() - 62 * 86400000).toISOString().slice(0, 10);
   bills.filter(b => !b.paid && !matchedIds.has(b.id) && b.bill_date && b.bill_date >= from && b.bill_date <= stDate).forEach(b => {
-    issues.push({ kind: 'not_on_statement', bill_id: b.id, bill_number: b.bill_number, text: `Our bill ${b.bill_number || '(no number)'} (${money(b.amount)}, ${b.bill_date}) is not on the statement: paid already, or entered against the wrong supplier?` });
+    issues.push({ kind: 'not_on_statement', bill_id: b.id, bill_number: b.bill_number, text: `Our ${b.kind === 'credit_note' ? 'credit note' : 'bill'} ${b.bill_number || '(no number)'} (${money(Math.abs(b.amount))}, ${b.bill_date}) is not on the statement: paid already, or entered against the wrong supplier?` });
   });
 
   // balance

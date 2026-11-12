@@ -6,9 +6,12 @@
 // POST { action: 'mark_paid', bill_ids, paid_on, reference }
 //      Records those bills as paid: one supplier_payments row per supplier (the batch), each bill
 //      gets paid, paid_at, paid_by, payment_id and the reference. Refuses a bill that is not approved.
+//      A credit note (kind credit_note, a negative amount, item 82) nets against the supplier's bills in the
+//      batch; a supplier whose net is below zero is refused by the database ("credit bigger than the bills").
 //      One database step (supplier_bills_mark_paid): the bills are locked, checked and marked with
 //      their batch rows all or nothing, so two presses within seconds cannot record them twice.
 // POST { action: 'mark_paid_any', bill_id, paid_on, method, reference }
+//      Also "Refunded" on a credit note (method 'refund'): the money came back instead of netting off a bill.
 //      A bill paid before approval (card at the counter, paid upfront; item 51): approved by the
 //      person pressing the button and marked paid in one database step
 //      (supplier_bills_approve_and_mark_paid), method card / cash / bank_transfer / airwallex.
@@ -24,7 +27,7 @@ const { requireFinanceRole } = require('./_shared/require-finance-role');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const sydneyToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
-const PAID_METHODS = ['card', 'cash', 'bank_transfer', 'airwallex', 'other'];
+const PAID_METHODS = ['card', 'cash', 'bank_transfer', 'airwallex', 'refund', 'other']; // refund: a credit note's money came back (item 82)
 const money = (n) => '$' + (Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 exports.handler = async (event) => {
@@ -38,7 +41,7 @@ exports.handler = async (event) => {
       const today = sydneyToday();
       const { data: bills, error } = await admin
         .from('supplier_bills')
-        .select('id, bill_number, amount, supplier_id, pay_on, due_date, suppliers(name, bank_account_number, bsb, bpay_biller_code)')
+        .select('id, bill_number, amount, kind, supplier_id, pay_on, due_date, suppliers(name, bank_account_number, bsb, bpay_biller_code)')
         .eq('paid', false)
         .eq('approved_for_payment', true)
         .not('supplier_id', 'is', null)
@@ -57,9 +60,11 @@ exports.handler = async (event) => {
         }
         bySupplier[sid].billCount += 1;
         bySupplier[sid].total += Number(b.amount) || 0;
-        bySupplier[sid].bills.push({ id: b.id, billNumber: b.bill_number, amount: Number(b.amount) || 0, payOn: b.pay_on || b.due_date });
+        bySupplier[sid].bills.push({ id: b.id, billNumber: b.bill_number, amount: Number(b.amount) || 0, kind: b.kind || 'bill', payOn: b.pay_on || b.due_date });
       });
-      return json(200, { ok: true, today, preview: Object.values(bySupplier) });
+      // credit notes are minus rows (item 82): the supplier's total is the net; below zero there is nothing to pay yet
+      const preview = Object.values(bySupplier).map(p => ({ ...p, total: Math.round(p.total * 100) / 100, creditInHand: p.total < -0.005 }));
+      return json(200, { ok: true, today, preview });
     }
 
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
