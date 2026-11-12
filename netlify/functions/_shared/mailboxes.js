@@ -65,6 +65,7 @@ async function modifyThread(mailbox, gmailThreadId, { add = [], remove = [] }) {
 
 const archiveInGmail = (mailbox, thread, done) => modifyThread(mailbox, thread.gmail_thread_id, done ? { remove: ['INBOX'] } : { add: ['INBOX'] });
 const markReadInGmail = (mailbox, thread) => modifyThread(mailbox, thread.gmail_thread_id, { remove: ['UNREAD'] });
+const markUnreadInGmail = (mailbox, thread) => modifyThread(mailbox, thread.gmail_thread_id, { add: ['UNREAD'] });
 
 // The Gmail label for a TEops label ("TEops/Supplier dispute"), made the first time it is needed.
 async function ensureGmailLabel(admin, mailbox, label) {
@@ -142,6 +143,6 @@ async function deleteGmailDraft(mailbox, draft) {
 
 module.exports = {
   MODIFY_SCOPE, FORBIDDEN_PERSONAL, sharedMailbox, sharedMailboxId, connectedPersonalMailboxes, mailboxById, canUseMailbox, threadForUser,
-  canMirror, archiveInGmail, markReadInGmail, ensureGmailLabel, labelInGmail, renameGmailLabel, deleteGmailLabel,
+  canMirror, archiveInGmail, markReadInGmail, markUnreadInGmail, ensureGmailLabel, labelInGmail, renameGmailLabel, deleteGmailLabel,
   saveGmailDraft, deleteGmailDraft,
 };
