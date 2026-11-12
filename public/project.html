@@ -5696,6 +5696,8 @@
         const by = last.created_by ? `${name(last.created_by)} replied` : 'Replied from Gmail';
         return { colour: 'var(--green)', text: `${by} ${jobEmailAgo(last.sent_at)}${t.section === 'priority' ? ', waiting on them' : ''}${t.assigned_to && t.assigned_to !== last.created_by ? ', ' + claimed.replace('You are', 'you are') : ''}` };
       }
+      // we emailed them another way (a booking, a quote), item 80
+      if (t.answered_at) return { colour: 'var(--green)', text: `${name(t.answered_by)} emailed them ${jobEmailAgo(t.answered_at)} (a new email)${t.section === 'priority' ? ', waiting on them' : ''}${t.assigned_to && t.assigned_to !== t.answered_by ? ', ' + claimed.replace('You are', 'you are') : ''}` };
       if (t.assigned_to) return { colour: '#e0a526', text: `${claimed.replace('You are', "You're")}${t.assigned_at ? ' (claimed ' + jobEmailAgo(t.assigned_at) + ')' : ''}` };
       if (t.section === 'priority' && t.last_direction === 'inbound') return { colour: 'var(--red)', text: 'Nobody has replied yet' };
       return null;
@@ -5712,7 +5714,7 @@
       if (!el) return;
       const filesReady = emailJobFilesReady().catch(() => null); // Save to job on the attachment chips
       const { data: links, error } = await supabaseClient.from('email_job_links')
-        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at)').eq('project_id', project.id);
+        .select('id, kind, note, thread_id, email_threads(id, subject, last_message_at, last_direction, section, is_done, assigned_to, assigned_at, answered_at, answered_by)').eq('project_id', project.id);
       if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
       if (!jobEmailStaff) {
         const [{ data: staff }, { data: { user } }] = await Promise.all([supabaseClient.from('profiles').select('id, full_name, active').order('full_name'), supabaseClient.auth.getUser()]);
