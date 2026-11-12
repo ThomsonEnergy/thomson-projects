@@ -60,7 +60,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=134"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allSuppliers = [];
@@ -285,19 +285,21 @@
           return;
         }
 
-        const totalDue = data.preview.reduce((s, p) => s + p.total, 0);
-        const billCount = data.preview.reduce((s, p) => s + p.billCount, 0);
+        // a supplier whose credits outweigh their bills is listed (so the credit is seen) but not ticked: nothing to pay yet
+        const payable = data.preview.filter(p => !p.creditInHand);
+        const totalDue = payable.reduce((s, p) => s + p.total, 0);
+        const billCount = payable.reduce((s, p) => s + p.billCount, 0);
         overlay.querySelector('.card').innerHTML = `
           <h2>Bills due for payment</h2>
-          <p class="subtitle" style="margin-bottom:12px;">Approved bills with a pay-on date of today or earlier. Pay them in Airwallex or by bank transfer, then record them here so they show as paid.</p>
+          <p class="subtitle" style="margin-bottom:12px;">Approved bills with a pay-on date of today or earlier. A credit note is a minus in its supplier's batch, so the amount to transfer is the net. Pay them in Airwallex or by bank transfer, then record them here so they show as paid.</p>
           <table>
             <thead><tr><th></th><th>Supplier</th><th>Bills</th><th class="num">Amount</th></tr></thead>
             <tbody>
               ${data.preview.map(p => `
                 <tr>
-                  <td><input type="checkbox" class="rp-pick" data-supplier-id="${escapeHtml(p.supplierId)}" checked style="width:auto;" /></td>
-                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge red">No bank details</span>' : ''}</td>
-                  <td style="font-size:12px;">${p.bills.map(b => `${escapeHtml(b.billNumber || '(no number)')} ${money(b.amount)}${b.payOn && b.payOn < data.today ? ` <span style="color:var(--red);">due ${escapeHtml(dayText(b.payOn))}</span>` : ''}`).join('<br />')}</td>
+                  <td>${p.creditInHand ? '' : `<input type="checkbox" class="rp-pick" data-supplier-id="${escapeHtml(p.supplierId)}" checked style="width:auto;" />`}</td>
+                  <td>${escapeHtml(p.supplierName)}${!p.hasBankDetails ? ' <span class="badge red">No bank details</span>' : ''}${p.creditInHand ? ' <span class="badge sent">Credit in hand, nothing to pay</span>' : ''}</td>
+                  <td style="font-size:12px;">${p.bills.map(b => `${b.kind === 'credit_note' ? 'Credit ' : ''}${escapeHtml(b.billNumber || '(no number)')} ${b.kind === 'credit_note' ? '<span style="color:var(--green);">' + money(b.amount) + '</span>' : money(b.amount)}${b.payOn && b.payOn < data.today && b.kind !== 'credit_note' ? ` <span style="color:var(--red);">due ${escapeHtml(dayText(b.payOn))}</span>` : ''}`).join('<br />')}</td>
                   <td class="num">${money(p.total)}</td>
                 </tr>`).join('')}
             </tbody>

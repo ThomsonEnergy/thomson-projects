@@ -12,6 +12,9 @@
 //   possible_duplicate another bill from the same supplier, same amount, within 3 days
 //   no_lines           no line items were read off the bill: the total has not been checked by anyone
 //   total_differs      the bill's total is not what its lines add up to (ex GST or inc GST)
+//   credit_exceeds     a credit note (supplier_bills.kind credit_note, item 82) bigger than what the PO's bills come to
+// A credit note gets only the duplicate, total and credit_exceeds checks (it is approved on save); its lines
+// (negative quantities) count in the PO total but never in the quantity-per-line check, which sums bills only.
 // check_status: matches (nothing wrong), no_po (only that), problems, or it stays queried /
 // resolved once a person has dealt with it (the issues are still refreshed).
 // Line amounts are ex-GST on both sides (bill lines and PO lines), so totals compare like for like.
@@ -40,7 +43,7 @@ async function checkBill(admin, billId) {
 
   // duplicates among our own bills from this supplier
   if (bill.supplier_id) {
-    const { data: others } = await admin.from('supplier_bills').select('id, bill_number, amount, bill_date').eq('supplier_id', bill.supplier_id).neq('id', bill.id);
+    const { data: others } = await admin.from('supplier_bills').select('id, bill_number, amount, bill_date').eq('supplier_id', bill.supplier_id).eq('kind', bill.kind || 'bill').neq('id', bill.id);
     const num = normNum(bill.bill_number);
     (others || []).forEach(o => {
       if (num && normNum(o.bill_number) === num) {
@@ -60,11 +63,12 @@ async function checkBill(admin, billId) {
     if (po) po.purchase_order_line_items = poLineRows || [];
     poClosed = !!po?.closed_at;
     const poLines = po?.purchase_order_line_items || [];
-    const { data: poBills } = await admin.from('supplier_bills').select('id').eq('po_id', bill.po_id);
+    const { data: poBills } = await admin.from('supplier_bills').select('id, kind').eq('po_id', bill.po_id);
     const billIds = (poBills || []).map(b => b.id);
+    const creditIds = new Set((poBills || []).filter(b => b.kind === 'credit_note').map(b => b.id));
     const { data: allLines } = billIds.length ? await admin.from('supplier_bill_line_items').select('bill_id, po_line_item_id, quantity, unit_cost').in('bill_id', billIds) : { data: [] };
 
-    (lines || []).forEach(l => {
+    (bill.kind === 'credit_note' ? [] : (lines || [])).forEach(l => {
       if (l.resolution === 'denied') { issues.push({ kind: 'denied', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) denied${l.resolution_note ? ': ' + l.resolution_note : ''}, waiting on the supplier` }); return; }
       if (l.resolution === 'accepted' || l.resolution === 'added' || isNoCharge(l)) return;
       if (!l.po_line_item_id) {
@@ -81,8 +85,8 @@ async function checkBill(admin, billId) {
 
     // quantities across every bill on this PO
     const billedByPoLine = {};
-    (allLines || []).forEach(l => { if (l.po_line_item_id) billedByPoLine[l.po_line_item_id] = (billedByPoLine[l.po_line_item_id] || 0) + (Number(l.quantity) || 0); });
-    const mine = new Set((lines || []).map(l => l.po_line_item_id).filter(Boolean));
+    (allLines || []).filter(l => !creditIds.has(l.bill_id)).forEach(l => { if (l.po_line_item_id) billedByPoLine[l.po_line_item_id] = (billedByPoLine[l.po_line_item_id] || 0) + (Number(l.quantity) || 0); });
+    const mine = new Set(bill.kind === 'credit_note' ? [] : (lines || []).map(l => l.po_line_item_id).filter(Boolean));
     poLines.filter(pl => mine.has(pl.id)).forEach(pl => {
       const billed = billedByPoLine[pl.id] || 0;
       if (billed > (Number(pl.quantity) || 0) + 0.001) {
@@ -92,20 +96,29 @@ async function checkBill(admin, billId) {
 
     const poTotal = po?.po_type === 'open' && po.budget_cap ? Number(po.budget_cap) : poLines.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.unit_cost) || 0), 0);
     const billedTotal = (allLines || []).reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
-    if (poTotal > 0 && billedTotal > poTotal * 1.02 + 0.01) {
+    if (bill.kind !== 'credit_note' && poTotal > 0 && billedTotal > poTotal * 1.02 + 0.01) {
       issues.push({ kind: 'po_total_exceeded', text: `Bills on ${po.po_number} come to ${money(billedTotal)} ex GST, the PO is ${money(poTotal)}` });
+    }
+    // a credit note bigger than what the PO's bills (less earlier credits) come to
+    if (bill.kind === 'credit_note') {
+      const billsOnly = (allLines || []).filter(l => !creditIds.has(l.bill_id)).reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
+      const otherCredits = (allLines || []).filter(l => creditIds.has(l.bill_id) && l.bill_id !== bill.id).reduce((s, l) => s + Math.abs((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0)), 0);
+      const thisCredit = (lines || []).reduce((s, l) => s + Math.abs((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0)), 0);
+      if (thisCredit > 0 && thisCredit > billsOnly - otherCredits + 0.01) {
+        issues.push({ kind: 'credit_exceeds', text: `Credit ${money(thisCredit)} ex GST on ${po.po_number}, the bills on it come to ${money(Math.max(0, billsOnly - otherCredits))}` });
+      }
     }
   }
 
   // the bill's total against its own lines: a bill read as the "balance owing" figure, or a poor scan
   // with no lines, must not count as matching (nobody has confirmed the total)
-  const amount = Number(bill.amount) || 0;
+  const amount = Math.abs(Number(bill.amount) || 0);
   if (!(lines || []).length) {
     issues.push({ kind: 'no_lines', text: `No line items on this bill: check the total ${money(amount)} against the bill itself` });
   } else {
-    const linesTotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
+    const linesTotal = Math.abs(lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0));
     const incGst = Math.round(linesTotal * 1.1 * 100) / 100;
-    const tolerance = Math.max(1, amount * 0.001); // rounding on GST per line
+    const tolerance = Math.max(1, Math.abs(amount) * 0.001); // rounding on GST per line
     if (Math.abs(linesTotal - amount) > tolerance && Math.abs(incGst - amount) > tolerance) {
       issues.push({ kind: 'total_differs', text: `The lines add up to ${money(linesTotal)} ex GST (${money(incGst)} inc), the bill total is ${money(amount)}` });
     }
@@ -118,7 +131,7 @@ async function checkBill(admin, billId) {
   // matches a PO that is already closed (the approval step): approved for payment, pay on the later of the
   // supplier's terms date and today (same rule as closing the PO)
   const { data: sup } = bill.supplier_id ? await admin.from('suppliers').select('needs_review').eq('id', bill.supplier_id).maybeSingle() : { data: null };
-  if (status === 'matches' && poClosed && !bill.paid && !bill.approved_for_payment && !sup?.needs_review) {
+  if (status === 'matches' && poClosed && !bill.paid && !bill.approved_for_payment && !sup?.needs_review && bill.kind !== 'credit_note') {
     const today = sydneyToday();
     Object.assign(update, { approved_for_payment: true, approved_at: update.checked_at, pay_on: bill.due_date && bill.due_date > today ? bill.due_date : today });
   }
