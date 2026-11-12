@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/style.css?v=25" />
-<link rel="stylesheet" href="/css/job.css?v=1" />
+<link rel="stylesheet" href="/css/job.css?v=2" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -4022,6 +4022,18 @@
           <div id="job-search-results"></div>
         </div>` : ''}
         </div></div>
+        ${pricingVisible ? `<div class="job-money">${isQuoteFree ? `
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
+        ` : `
+                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
+          ${project.job_number ? `
+                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
+                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>` : ''}
+        `}</div>` : ''}
         <div class="settings-tabs" id="job-tabs" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:10px; overflow-x:auto;">
           ${tabsInOrder.filter(d => d.show).map(d => `<button class="settings-tab${d.panel === (isStepQuote ? 'quote' : 'summary') ? ' active' : ''}" data-panel="${d.panel}">${d.label}</button>`).join('')}
         </div>
@@ -4073,26 +4085,7 @@
               </div>
               ` : ''}
               ${!editMode ? '<div id="related-jobs-card"></div><div id="plan-schedule-card"></div>' : ''}
-              ${pricingVisible ? (isQuoteFree ? `
-                <div class="grid cols-2">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
-                </div>
-              ` : `
-                <div class="grid cols-${project.job_number ? '4' : '3'}">
-                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
-                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
-                </div>
-
-                ${project.job_number ? `
-                <div class="grid cols-2" style="margin-top:10px;">
-                  <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
-                  <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>
-                </div>
-                ` : ''}
-
+              ${pricingVisible && !isQuoteFree ? `
                 ${project.job_number ? `
                 <div class="card" style="margin-top:20px;">
                   <h2>Progress</h2>
@@ -4119,7 +4112,7 @@
                   <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items. Click the accrued figure to see the timesheets behind it.</p>
                 </div>
                 ` : ''}
-              `) : ''}
+              ` : ''}
 
               ${project.warranty_of_project_id && !editMode ? `
               <div class="card" style="border-color:#eab308;">

@@ -52,3 +52,11 @@
 .job-card-grid > :empty { display: none; }
 .job-card-grid > .card, .job-card-grid > div > .card { margin: 0 !important; }
 .job-card-grid > .grid { grid-column: 1 / -1; }
+
+/* The job's money (quote total, cost, profit, invoiced, actual cost and profit) on one line
+   above the tabs, so it shows on every tab (owner, 13 Nov 2026) */
+.job-money { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; flex-shrink: 0; }
+.job-money .stat { flex: 0 1 auto; min-width: 118px; padding: 4px 10px; }
+.job-money .stat .label { font-size: 10px; }
+.job-money .stat .value { font-size: 16px; margin-top: 0; }
+@media (max-width: 900px) { .job-money .stat { flex: 1 1 140px; } }
