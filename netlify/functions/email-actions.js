@@ -6,6 +6,7 @@
 //   set_section      { thread_id, section, always }   move to Priority / Other / Updates (always: rule for the sender)
 //   done             { thread_id, done }               archive (or back to the inbox), also in Gmail
 //   mark_read        { thread_id }                     read in Gmail too (personal mailboxes)
+//   mark_unread      { thread_id }                     unread again, in Gmail too (personal mailboxes)
 //   add_label        { thread_id, label_id }  remove_label { thread_id, label_id }
 //   create_label     { mailbox_id, name, description, thread_id? }
 //   update_label     { label_id, name?, description?, status? }   delete_label { label_id }
@@ -30,7 +31,7 @@ const { selfBaseUrl } = require('./_shared/site-url');
 const { getIntegrationKey } = require('./_shared/get-integration-key');
 const { internalHeaders } = require('./_shared/require-internal');
 const {
-  mailboxById, canUseMailbox, canMirror, threadForUser, archiveInGmail, markReadInGmail, labelInGmail,
+  mailboxById, canUseMailbox, canMirror, threadForUser, archiveInGmail, markReadInGmail, markUnreadInGmail, labelInGmail,
   renameGmailLabel, deleteGmailLabel, saveGmailDraft, deleteGmailDraft,
 } = require('./_shared/mailboxes');
 
@@ -132,10 +133,12 @@ exports.handler = async (event) => {
         await archiveInGmail(t.mailbox, t.thread, !!body.done);
         return json(200, { ok: true });
       }
-      case 'mark_read': {
+      case 'mark_read':
+      case 'mark_unread': {
         const t = await ownThread(body.thread_id);
-        await admin.from('email_threads').update({ is_read: true }).eq('id', t.thread.id);
-        if (t.mailbox.kind === 'personal') await markReadInGmail(t.mailbox, t.thread);
+        const read = body.action === 'mark_read';
+        await admin.from('email_threads').update({ is_read: read }).eq('id', t.thread.id);
+        if (t.mailbox.kind === 'personal') await (read ? markReadInGmail : markUnreadInGmail)(t.mailbox, t.thread);
         return json(200, { ok: true });
       }
       case 'add_label':
