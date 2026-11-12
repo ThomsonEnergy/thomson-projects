@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=132"></script>
+  <script src="/js/supabase-client.js?v=133"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -47,7 +47,7 @@
   <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
-  <script src="/js/email-compose.js?v=11"></script>
+  <script src="/js/email-compose.js?v=12"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=3"></script>
   <script src="/js/share-with-client.js?v=1"></script>
@@ -5674,10 +5674,13 @@
         reviewRequest: (!isQuote && !reply) ? { projectId: project.id, clientName: project.client_name, clientEmail: project.client_email } : undefined,
         quoteLink: (isQuote && project.quote_token) ? { url: `${shareOrigin()}/quote.html?token=${project.quote_token}`, label: 'Include a button to view and accept the quote online' } : undefined,
         attachOptions: jobEmailAttachOptions(project, withQuote),
-        onSent: async () => {
+        onSent: async (threadId, sent) => {
+          // The quote is sent only when its PDF actually went in this email (the Send step's button, or the
+          // Quote PDF box ticked): an email to a supplier or anyone else from a quote leaves it a draft.
           // Only moves a quote still at draft_quote, so re-sending can't push it backwards.
-          if (isQuote && !reply && !project.job_number) {
-            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent' }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
+          const quoteWent = !!project.quote_pdf_path && (sent?.attachments || []).some(a => a.path === project.quote_pdf_path);
+          if (quoteWent && !reply && !project.job_number) {
+            await supabaseClient.from('projects').update({ pipeline_stage: 'quote_sent', sent_at: new Date().toISOString() }).eq('id', project.id).eq('pipeline_stage', 'draft_quote');
             await logActivity('project', project.id, 'quote_emailed', `Quote${project.quote_number ? ' Q' + project.quote_number : ''} emailed to the client`);
           }
           await loadJobEmails(project);
