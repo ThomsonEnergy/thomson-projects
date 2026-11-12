@@ -80,6 +80,10 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
       <label>Name it</label>
       <input id="sj-label" value="${escapeHtml(baseName.replace(/\.[^.]+$/, ''))}" />
       <p class="subtitle" style="margin:2px 0 0; font-size:12px;">The caption on Site Photos, or the file name in Documents (the file type is kept).</p>` : ''}
+    <div id="sj-sq-wrap" style="display:none; margin-top:10px;">
+      <label style="display:inline-flex; gap:6px; align-items:center; margin:0; font-weight:400;"><input type="checkbox" id="sj-sq" style="width:auto;" /> <span id="sj-sq-text">This is a supplier's quote for our price request</span></label>
+      <select id="sj-sq-req" style="display:none; margin-top:6px;"></select>
+    </div>
     <div id="sj-folder-wrap"><label>Folder</label><select id="sj-folder"><option>Emails</option></select>
       <input id="sj-new-folder" placeholder="New folder name" style="display:none; margin-top:6px;" /></div>
     <div style="margin-top:14px; display:flex; gap:8px;"><button type="button" id="sj-save">Save</button><button type="button" class="secondary" id="sj-cancel">Cancel</button></div>
@@ -95,7 +99,25 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
       .filter(f => f !== 'Electricity bill' || isPricingRole(role)).sort((a, b) => (a === 'Emails' ? -1 : b === 'Emails' ? 1 : a.localeCompare(b)));
     folderSel.innerHTML = names.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('') + '<option value="__new">+ New folder</option>';
   };
-  const showFolder = () => { q('#sj-folder-wrap').style.display = to() === 'photos' ? 'none' : ''; };
+  // A supplier's quote for a price request on the job (item 81, pricing roles, one file): filed
+  // under Supplier quotes with a supplier_quotes row, read by Tally.
+  let sqRequests = [];
+  const sqOn = () => !!(one && q('#sj-sq') && q('#sj-sq').checked && sqRequests.length);
+  const loadRequests = async () => {
+    sqRequests = [];
+    const wrap = q('#sj-sq-wrap');
+    if (!one || to() === 'photos') { wrap.style.display = 'none'; return; }
+    const role = await getMyRole();
+    if (!isPricingRole(role)) { wrap.style.display = 'none'; return; }
+    const { data } = await supabaseClient.from('supplier_quote_requests').select('id, supplier_name, suppliers(name)').eq('project_id', jobId()).eq('status', 'sent').order('created_at');
+    sqRequests = data || [];
+    wrap.style.display = sqRequests.length ? '' : 'none';
+    const sel = q('#sj-sq-req');
+    sel.innerHTML = sqRequests.map(r => `<option value="${r.id}">From ${escapeHtml(r.suppliers?.name || r.supplier_name || 'the supplier')}</option>`).join('');
+    sel.style.display = q('#sj-sq').checked && sqRequests.length > 1 ? '' : 'none';
+  };
+  const showFolder = () => { q('#sj-folder-wrap').style.display = to() === 'photos' || sqOn() ? 'none' : ''; };
+  q('#sj-sq').addEventListener('change', () => { q('#sj-sq-req').style.display = q('#sj-sq').checked && sqRequests.length > 1 ? '' : 'none'; showFolder(); });
   const notYet = () => items.filter(x => !emailAttSaved(x.att, [jobId()]));
   const showAlready = () => {
     const already = items.length - notYet().length, box = q('#sj-already');
@@ -103,17 +125,19 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
     box.textContent = one ? 'This is already on the job. Saving again makes a second copy.' : `${already} of these ${already === 1 ? 'is' : 'are'} already on the job and will be skipped.`;
   };
   folderSel.addEventListener('change', () => { q('#sj-new-folder').style.display = folderSel.value === '__new' ? '' : 'none'; });
-  overlay.querySelectorAll('input[name="sj-to"]').forEach(r => r.addEventListener('change', showFolder));
-  if (q('#sj-job')) q('#sj-job').addEventListener('change', () => { loadFolders(); showAlready(); });
+  overlay.querySelectorAll('input[name="sj-to"]').forEach(r => r.addEventListener('change', () => { loadRequests(); showFolder(); }));
+  if (q('#sj-job')) q('#sj-job').addEventListener('change', () => { loadFolders(); loadRequests(); showAlready(); });
   q('#sj-cancel').addEventListener('click', () => overlay.remove());
   showFolder();
   showAlready();
   loadFolders();
+  loadRequests();
 
   q('#sj-save').addEventListener('click', async () => {
     const btn = q('#sj-save'), msg = q('#sj-msg');
     const folder = folderSel.value === '__new' ? q('#sj-new-folder').value.trim() : folderSel.value;
-    if (to() !== 'photos' && !folder) { msg.innerHTML = '<div class="error-box">Name the new folder.</div>'; return; }
+    const requestId = sqOn() ? (sqRequests.length > 1 ? q('#sj-sq-req').value : sqRequests[0].id) : undefined;
+    if (to() !== 'photos' && !folder && !requestId) { msg.innerHTML = '<div class="error-box">Name the new folder.</div>'; return; }
     const todo = one ? items : notYet();
     if (!todo.length) { overlay.remove(); return; }
     btn.disabled = true;
@@ -123,12 +147,12 @@ async function openSaveToJobPanel(items, jobs, onSaved) {
       for (const x of todo) {
         btn.textContent = todo.length > 1 ? `Saving ${done + 1} of ${todo.length}...` : 'Saving...';
         const dest = one ? to() : (isPic(x.att) ? 'photos' : 'documents');
-        const r = await emailPostFn('save-email-attachment', { email_id: x.emailId, part_id: x.att.part_id, project_id: jobId(), to: dest, label: one ? q('#sj-label').value.trim() : '', folder }, 'Could not save it');
+        const r = await emailPostFn('save-email-attachment', { email_id: x.emailId, part_id: x.att.part_id, project_id: jobId(), to: dest, label: one ? q('#sj-label').value.trim() : '', folder, supplier_quote_request_id: requestId }, 'Could not save it');
         x.att.saved_to = [...(x.att.saved_to || []), { project_id: jobId(), kind: r.kind, id: r.id }];
         kinds.add(r.kind); done += 1;
       }
       overlay.remove();
-      showToast(done === 1 ? (kinds.has('photo') ? 'Saved to Site Photos' : 'Saved to Documents') : `${done} saved to the job`);
+      showToast(requestId ? 'Filed as the supplier\'s quote: Tally is reading it' : done === 1 ? (kinds.has('photo') ? 'Saved to Site Photos' : 'Saved to Documents') : `${done} saved to the job`);
     } catch (err) {
       msg.innerHTML = `<div class="error-box">${done ? `${done} saved, then: ` : ''}${escapeHtml(err.message)}</div>`;
       btn.disabled = false; btn.textContent = 'Save';
