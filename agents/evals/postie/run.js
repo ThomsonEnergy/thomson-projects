@@ -7,13 +7,13 @@
 // environment for the run, never into the repo. Also checks the code's own evidence
 // check (evidenceFound) with no API call, so that part runs anywhere.
 const path = require('path');
-const { chooseLabels, evidenceFound, mentionsLabel } = require(path.join(__dirname, '..', '..', '..', 'netlify', 'functions', '_shared', 'email-agent.js'));
+const { chooseLabels, evidenceFound, mentionsLabel, labelRuleFor } = require(path.join(__dirname, '..', '..', '..', 'netlify', 'functions', '_shared', 'email-agent.js'));
 const { withoutSignOff } = require(path.join(__dirname, '..', '..', '..', 'netlify', 'functions', '_shared', 'build-email-signature.js'));
 
 const cases = require('./cases.json');
 let failed = 0;
 const say = (ok, id, detail) => { if (!ok) failed++; console.log(`${ok ? 'pass' : 'FAIL'}  ${id}${detail ? `  ${detail}` : ''}`); };
-const CODE_CHECKS = 15;
+const CODE_CHECKS = 18;
 
 // 1. Code-only checks: the evidence rule and the pre-filter.
 say(evidenceFound('GC Wind Services', 'Subject: ... ats GC Wind Services Pty Ltd ...'), 'evidence: exact words found');
@@ -33,6 +33,12 @@ say(withoutSignOff('Hi Bob,\n\nThanks', 'Jasper Thomson') === 'Hi Bob,\n\nThanks
 say(withoutSignOff('All sorted.\n\nThanks\nJasper', 'Jasper Thomson') === 'All sorted.', 'sign off: "Thanks" with the name under it is dropped');
 say(withoutSignOff('All sorted.\n\nKind regards, Jasper', 'Jasper Thomson') === 'All sorted.', 'sign off: name on the same line is dropped');
 say(withoutSignOff('All sorted.\r\n\r\n*Kind regards,*\r\nJasper Thomson\r\nThomson Energy', 'Jasper Thomson') === 'All sorted.', 'sign off: bold, with the name and company under it, is dropped');
+
+// Label rules a person taught (item 81): by address first, then domain; null label means no label.
+const RULES = [{ sender: 'eden@oceanbluepr.com.au', label_id: 'L1' }, { sender: 'simpro.com', label_id: null }];
+say(labelRuleFor(RULES, 'Eden <Eden@OceanBluePR.com.au>')?.label_id === 'L1', 'label rule: the address matches, any case');
+say(labelRuleFor(RULES, 'Support <help@simpro.com>')?.label_id === null, 'label rule: the domain matches with no label');
+say(labelRuleFor(RULES, 'Someone <a@b.com>') === null, 'label rule: no rule, Postie decides');
 
 // 2. The model, over the cases.
 (async () => {

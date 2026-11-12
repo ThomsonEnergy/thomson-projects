@@ -129,6 +129,22 @@
   .cleanup-table button { font-size:12px; padding:3px 8px; margin:0 4px 4px 0; }
   .progress { height:8px; border-radius:4px; background:var(--surface-2); overflow:hidden; }
   .progress > div { height:100%; background:var(--accent); }
+  /* right-click or hold menus, and the phone swipe on a row (item 81) */
+  .ctx-menu { position:fixed; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:4px; min-width:210px; max-width:320px; max-height:70vh; overflow-y:auto; box-shadow:0 6px 24px rgba(0,0,0,.35); }
+  .ctx-menu button { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--text); font-size:13px; padding:8px 10px; border-radius:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctx-menu button:hover { background:var(--surface-2); }
+  .ctx-menu button.danger { color:var(--red); }
+  .ctx-menu .sep { border-top:1px solid var(--border); margin:4px 0; }
+  .ctx-menu .head { font-size:11px; color:var(--muted); padding:6px 10px 2px; text-transform:uppercase; letter-spacing:.05em; }
+  .ib-row, .side-item { -webkit-touch-callout:none; user-select:none; -webkit-user-select:none; }
+  .ib-row { touch-action:pan-y; }
+  .ib-row.swiping { transition:none; }
+  .ib-row.swipe-done { background:var(--green-dim); }
+  .ib-row.swipe-read { background:var(--accent-dim); }
+  .ib-row[data-swipe]:not([data-swipe=""])::after { content:attr(data-swipe); position:absolute; top:0; bottom:0; display:flex; align-items:center; font-weight:700; font-size:13px; padding:0 12px; }
+  .ib-row.swipe-done::after { left:100%; color:var(--green); }
+  .ib-row.swipe-read::after { right:100%; color:var(--accent); }
+  .ib-row.gone { transition:transform .2s, opacity .2s; opacity:0; }
   .back-btn { display:none; }
   @media (max-width: 1000px) {
     .inbox-app, .inbox-app.one-pane { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
@@ -149,6 +165,7 @@
     .ib-row { padding:7px 12px; row-gap:2px; }
     .ib-row .chip { max-width:110px; }
     .ib-row .acts { display:none !important; }
+    .ib-list-body { overflow-x:hidden; }
     .msg-head .to { display:none; }
   }
   @media (max-width: 700px) { .inbox-app { --ib-top:64px; } }
@@ -203,11 +220,11 @@
     // handling it (assigned_to, "I've got this"), and "Tagged to jobs" groups the last 30
     // days by job. See docs/PROJECT_SPEC.md A18.
 
-    const NOTICE_VERSION = 1;
     const SECTION_NAMES = { priority: 'Priority', other: 'Other', updates: 'Subscriptions and updates' };
     const S = {
       me: null, role: 'staff', assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false, mineOnly: false, search: '', staff: [],
       shared: null, mine: null, labels: [], drafts: [], activeThreadId: null, cleanupFilter: 'archive', cleanupTimer: null,
+      rowThreads: {}, rowLabels: {}, showFinished: false,
       listSeq: 0, listKey: '',
     };
     const staffName = (id) => (S.staff.find(s => s.id === id) || {}).full_name || 'A team member';
@@ -338,10 +355,15 @@
       const { data: labels } = await supabaseClient.from('email_labels').select('*').eq('mailbox_id', m.id).order('name');
       S.labels = labels || [];
       if (!S.labels.length) return;
-      const { data: links } = await supabaseClient.from('email_thread_labels').select('label_id, email_threads!inner(is_done)').in('label_id', S.labels.map(l => l.id)).limit(5000);
-      const open = {}, all = {};
-      (links || []).forEach(l => { all[l.label_id] = (all[l.label_id] || 0) + 1; if (!l.email_threads.is_done) open[l.label_id] = (open[l.label_id] || 0) + 1; });
-      S.labels.forEach(l => { l.count = all[l.id] || 0; l.openCount = open[l.id] || 0; });
+      const { data: links } = await supabaseClient.from('email_thread_labels').select('label_id, email_threads!inner(is_done, last_message_at)').in('label_id', S.labels.map(l => l.id)).limit(5000);
+      const open = {}, all = {}, last = {};
+      (links || []).forEach(l => {
+        all[l.label_id] = (all[l.label_id] || 0) + 1;
+        if (!l.email_threads.is_done) open[l.label_id] = (open[l.label_id] || 0) + 1;
+        const at = l.email_threads.last_message_at || '';
+        if (at > (last[l.label_id] || '')) last[l.label_id] = at;
+      });
+      S.labels.forEach(l => { l.count = all[l.id] || 0; l.openCount = open[l.id] || 0; l.lastMail = last[l.id] || ''; });
     }
 
     async function loadDrafts() {
@@ -423,7 +445,10 @@
       const side = document.getElementById('inbox-side');
       const counts = await (countsP || loadCounts());
       const item = (view, label, n, hot) => `<a class="side-item ${S.view === view ? 'on' : ''}" data-view="${view}"><span>${label}</span>${n ? `<span class="n ${hot ? 'hot' : ''}">${n}</span>` : ''}</a>`;
-      const open = S.labels.filter(l => l.status === 'open'), finished = S.labels.filter(l => l.status === 'done');
+      const byMail = (a, b) => String(b.lastMail || '').localeCompare(String(a.lastMail || '')) || a.name.localeCompare(b.name);
+      const open = S.labels.filter(l => l.status === 'open').sort(byMail), finished = S.labels.filter(l => l.status === 'done').sort(byMail);
+      // Finished stays folded unless asked for, or the open label is in it
+      const showFinished = S.showFinished || finished.some(l => S.view === 'label:' + l.id);
       side.innerHTML = item('priority', 'Priority', counts.priority, true)
         + item('other', 'Other', counts.other)
         + item('updates', 'Subscriptions and updates', counts.updates)
@@ -432,7 +457,7 @@
         + `<div class="side-head"><span>Labels</span><a href="#" id="new-label-link">+ New</a></div>`
         + open.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}" title="${escapeHtml(l.description || '')}${l.by_ai ? ' (label made by ' + escapeHtml(S.assistant) + ')' : ''}"><span><span class="label-dot"></span>${escapeHtml(l.name)}${l.by_ai ? ' <span class="chip ai">AI</span>' : ''}</span>${l.openCount ? `<span class="n">${l.openCount}</span>` : ''}</a>`).join('')
         + (open.length ? '' : '<p class="subtitle" style="font-size:11px; margin:2px 10px;">For matters that are not a job, like a supplier dispute or a licence application.</p>')
-        + (finished.length ? `<div class="side-head"><span>Finished</span></div>` + finished.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}"><span style="color:var(--muted);">${escapeHtml(l.name)}</span></a>`).join('') : '')
+        + (finished.length ? `<div class="side-head"><span>Finished (${finished.length})</span><a href="#" id="finished-toggle">${showFinished ? 'hide' : 'show'}</a></div>` + (showFinished ? finished.map(l => `<a class="side-item ${S.view === 'label:' + l.id ? 'on' : ''}" data-view="label:${l.id}"><span style="color:var(--muted);">${escapeHtml(l.name)}</span></a>`).join('') : '') : '')
         + `<div class="side-head"><span>Jobs</span></div>` + item('jobs', 'Tagged to jobs')
         + `<div class="side-head"><span>Tools</span></div>` + item('cleanup', 'Clean up')
         + (S.box === 'mine' ? `<a class="side-item" id="disconnect-link"><span style="color:var(--muted); font-size:12px;">Disconnect my Gmail</span></a>` : '');
@@ -441,8 +466,155 @@
         clearInterval(S.cleanupTimer); renderSide(); S.view === 'cleanup' ? renderCleanup() : loadList();
       }));
       document.getElementById('new-label-link').addEventListener('click', (e) => { e.preventDefault(); openLabelEditor(null); });
+      const ft = document.getElementById('finished-toggle');
+      if (ft) ft.addEventListener('click', (e) => { e.preventDefault(); S.showFinished = !S.showFinished; renderSide(); });
       const dl = document.getElementById('disconnect-link');
       if (dl) dl.addEventListener('click', disconnectMine);
+      // right-click (hold on the phone) on a label: its menu
+      side.querySelectorAll('[data-view^="label:"]').forEach(a => {
+        a.addEventListener('contextmenu', (e) => { e.preventDefault(); const l = S.labels.find(x => x.id === a.dataset.view.slice(6)); if (l) labelMenu(l, e.clientX, e.clientY, a); });
+        holdToOpen(a, (x, y) => { const l = S.labels.find(x2 => x2.id === a.dataset.view.slice(6)); if (l) labelMenu(l, x, y, a); });
+      });
+    }
+
+    // ---------- menus: right-click on a laptop, hold on the phone (item 81) ----------
+
+    let menuOff = null; // the open menu's document listeners, removed with it
+    function closeMenu() { document.querySelectorAll('.ctx-menu').forEach(m => m.remove()); if (menuOff) { menuOff(); menuOff = null; } }
+    // items: { label, run, danger } or { head } or '-' for a line. src: the element asked, so a
+    // hold and a contextmenu on the same spot (Android fires both) open one menu, not two
+    function showMenu(x, y, items, src) {
+      if (src && src.dataset.menuAt && Date.now() - +src.dataset.menuAt < 700) return;
+      if (src) src.dataset.menuAt = String(Date.now());
+      closeMenu();
+      const m = document.createElement('div');
+      m.className = 'ctx-menu';
+      m.innerHTML = items.map((it, i) => it === '-' ? '<div class="sep"></div>' : it.head ? `<div class="head">${escapeHtml(it.head)}</div>` : `<button type="button" data-i="${i}" class="${it.danger ? 'danger' : ''}">${escapeHtml(it.label)}</button>`).join('');
+      document.body.appendChild(m);
+      const r = m.getBoundingClientRect();
+      m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
+      m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
+      m.addEventListener('click', (e) => e.stopPropagation());
+      m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const it = items[+b.dataset.i]; closeMenu(); it.run(); }));
+      setTimeout(() => {
+        if (!m.isConnected) return;
+        const esc = (e) => { if (e.key === 'Escape') closeMenu(); };
+        const away = () => closeMenu();
+        document.addEventListener('click', away);
+        document.addEventListener('contextmenu', away);
+        document.addEventListener('keydown', esc);
+        menuOff = () => { document.removeEventListener('click', away); document.removeEventListener('contextmenu', away); document.removeEventListener('keydown', esc); };
+      }, 0);
+    }
+    // hold (500 ms, no movement) opens a menu on a touch screen
+    function holdToOpen(el, open) {
+      let timer = null, sx = 0, sy = 0;
+      el.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+        timer = setTimeout(() => { timer = null; el.dataset.held = '1'; open(sx, sy); }, 500);
+      }, { passive: true });
+      el.addEventListener('touchmove', (e) => { if (timer && (Math.abs(e.touches[0].clientX - sx) > 10 || Math.abs(e.touches[0].clientY - sy) > 10)) { clearTimeout(timer); timer = null; } }, { passive: true });
+      const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+      el.addEventListener('touchend', (e) => { stop(); if (el.dataset.held) { delete el.dataset.held; e.preventDefault(); } });
+      el.addEventListener('touchcancel', stop);
+    }
+    // a menu of labels to pick one (move, merge)
+    function pickLabel(x, y, { head, exclude, onPick, allowNew }) {
+      const items = [{ head }];
+      S.labels.filter(l => l.status === 'open' && l.id !== exclude).sort((a, b) => a.name.localeCompare(b.name)).forEach(l => items.push({ label: l.name, run: () => onPick(l) }));
+      if (allowNew) items.push('-', { label: 'New label...', run: async () => {
+        const name = prompt('Name for the new label (who: what, e.g. Supplier dispute: Middys)');
+        if (!name || !name.trim()) return;
+        try { const r = await act('create_label', { mailbox_id: mb().id, name: name.trim() }); await loadLabels(); onPick(r.label); } catch (err) { alert(err.message); }
+      } });
+      if (items.length === 1) items.push({ label: 'No other label yet', run: () => {} });
+      showMenu(x, y, items);
+    }
+    const afterChange = async (threadId) => { await Promise.all([loadLabels(), loadDrafts()]); await renderSide(); await loadList(); if (threadId && S.activeThreadId === threadId) openThread(threadId, { keepUrl: true }); };
+    function labelMenu(label, x, y, src) {
+      const done = label.status === 'done';
+      showMenu(x, y, [
+        { head: label.name },
+        { label: 'Open', run: () => { S.view = 'label:' + label.id; S.activeThreadId = null; S.search = ''; document.getElementById('inbox-search').value = ''; renderSide(); loadList(); } },
+        { label: 'Rename', run: async () => { const name = prompt('New name', label.name); if (!name || !name.trim() || name.trim() === label.name) return; try { await act('update_label', { label_id: label.id, name: name.trim() }); } catch (err) { alert(err.message); } afterChange(); } },
+        { label: 'What belongs here', run: () => openLabelEditor(label) },
+        { label: 'Merge into...', run: () => pickLabel(x, y, { head: `Merge "${label.name}" into`, exclude: label.id, onPick: async (into) => {
+          if (!confirm(`Move every conversation from "${label.name}" into "${into.name}" and remove "${label.name}"?`)) return;
+          try { await act('merge_label', { label_id: label.id, into_label_id: into.id }); } catch (err) { alert(err.message); return; }
+          if (S.view === 'label:' + label.id) S.view = 'label:' + into.id;
+          afterChange();
+        } }) },
+        { label: done ? 'Reopen' : 'Finished', run: async () => { try { await act('update_label', { label_id: label.id, status: done ? 'open' : 'done' }); } catch (err) { alert(err.message); } afterChange(); } },
+        '-',
+        { label: 'Delete', danger: true, run: async () => {
+          if (!confirm(`Delete "${label.name}"? The emails stay, only the label goes.${label.by_ai ? ' Postie will not label these senders again.' : ''}`)) return;
+          try { await act('delete_label', { label_id: label.id }); } catch (err) { alert(err.message); return; }
+          if (S.view === 'label:' + label.id) S.view = 'priority';
+          afterChange();
+        } },
+      ], src);
+    }
+    function rowMenu(t, x, y, src) {
+      const inLabel = !S.search && S.view.startsWith('label:') ? S.view.slice(6) : null;
+      const onThread = (S.rowLabels[t.id] || []).map(x2 => S.labels.find(l => l.id === x2.label_id)).filter(Boolean);
+      const items = [
+        { label: 'Open', run: () => openThread(t.id) },
+        !t.assigned_to || t.assigned_to !== S.me.id ? { label: !t.assigned_to ? "I've got this" : 'Take over', run: async () => { try { await act('assign', { thread_id: t.id, user_id: S.me.id }); } catch (err) { alert(err.message); } afterChange(t.id); } }
+          : { label: 'Not mine any more', run: async () => { try { await act('assign', { thread_id: t.id, user_id: null }); } catch (err) { alert(err.message); } afterChange(t.id); } },
+        { label: t.is_done ? 'Move back to inbox' : 'Done', run: async () => { try { await act('done', { thread_id: t.id, done: !t.is_done }); } catch (err) { alert(err.message); } if (S.activeThreadId === t.id) { closeReading(); setUrl(); } afterChange(); } },
+        { label: t.is_read ? 'Mark unread' : 'Mark read', run: async () => { try { await setRead(t.id, !t.is_read); } catch (err) { alert(err.message); } afterChange(); } },
+        { label: 'Tag to a job...', run: () => openTagEmailModal({ threadId: t.id, onSaved: () => afterChange(t.id) }) },
+        '-',
+        { label: inLabel ? 'Move to label...' : 'Add a label...', run: () => pickLabel(x, y, { head: inLabel ? 'Move to' : 'Add label', exclude: inLabel, allowNew: true, onPick: async (l) => {
+          try { await act(inLabel ? 'move_label' : 'add_label', inLabel ? { thread_id: t.id, from_label_id: inLabel, to_label_id: l.id } : { thread_id: t.id, label_id: l.id }); } catch (err) { alert(err.message); }
+          afterChange(t.id);
+        } }) },
+        ...onThread.map(l => ({ label: `Remove label: ${l.name}`, run: async () => { try { await act('remove_label', { thread_id: t.id, label_id: l.id }); } catch (err) { alert(err.message); } afterChange(t.id); } })),
+      ];
+      showMenu(x, y, items, src);
+    }
+    // the phone: swipe left on a row for Done, right for Read or Unread; a hold opens the menu
+    function bindRowTouch(listBody) {
+      let sw = null, holdTimer = null;
+      const reset = (row) => { row.classList.remove('swiping', 'swipe-done', 'swipe-read'); row.style.transform = ''; row.dataset.swipe = ''; };
+      listBody.addEventListener('touchstart', (e) => {
+        const row = e.target.closest('.ib-row');
+        if (!row || e.touches.length !== 1 || row.dataset.id.startsWith('draft:')) { sw = null; return; }
+        sw = { row, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, lock: null, held: false };
+        holdTimer = setTimeout(() => { holdTimer = null; if (sw && !sw.lock) { sw.held = true; const t = S.rowThreads[row.dataset.id]; if (t) rowMenu(t, sw.x, sw.y, row); } }, 500);
+      }, { passive: true });
+      listBody.addEventListener('touchmove', (e) => {
+        if (!sw) return;
+        const dx = e.touches[0].clientX - sw.x, dy = e.touches[0].clientY - sw.y;
+        if (!sw.lock) { if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return; sw.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'; if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } }
+        if (sw.lock !== 'x' || sw.held) return;
+        const t = S.rowThreads[sw.row.dataset.id] || {};
+        sw.dx = Math.max(-140, Math.min(140, dx));
+        sw.row.classList.add('swiping');
+        sw.row.style.transform = `translateX(${sw.dx}px)`;
+        const armed = Math.abs(sw.dx) >= 70;
+        sw.row.classList.toggle('swipe-done', sw.dx < 0 && armed);
+        sw.row.classList.toggle('swipe-read', sw.dx > 0 && armed);
+        sw.row.dataset.swipe = !armed ? '' : sw.dx < 0 ? 'Done' : (t.is_read ? 'Unread' : 'Read');
+      }, { passive: true });
+      const end = async (e) => {
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        if (!sw) return;
+        const { row, dx, held, lock } = sw; sw = null;
+        if (held) { e.preventDefault(); return; }
+        if (lock !== 'x') return;
+        const t = S.rowThreads[row.dataset.id];
+        if (!t || Math.abs(dx) < 70) { reset(row); return; }
+        e.preventDefault();
+        try {
+          if (dx < 0) { row.classList.add('gone'); row.style.transform = 'translateX(-110%)'; await act('done', { thread_id: t.id, done: true }); if (S.activeThreadId === t.id) { closeReading(); setUrl(); } }
+          else { reset(row); await setRead(t.id, !t.is_read); }
+        } catch (err) { alert(err.message); }
+        afterChange();
+      };
+      listBody.addEventListener('touchend', end);
+      listBody.addEventListener('touchcancel', () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } if (sw) reset(sw.row); sw = null; });
     }
 
     // ---------- the list ----------
@@ -547,6 +719,8 @@
       paint(false);
 
       function paint(partial) {
+        S.rowThreads = Object.fromEntries(threads.map(t => [t.id, t]));
+        S.rowLabels = labelsBy;
         const draftBy = Object.fromEntries(S.drafts.filter(d => d.thread_id).map(d => [d.thread_id, d]));
         const chips = (id) => (labelsBy[id] || []).map(x => { const l = S.labels.find(y => y.id === x.label_id); return l ? `<span class="chip ${x.by_ai ? 'ai' : ''}"><span class="label-dot"></span>${escapeHtml(l.name)}</span>` : ''; }).join('')
           + (draftBy[id] ? `<span class="chip draft">${draftBy[id].by_ai ? escapeHtml(S.assistant) + ' drafted a reply' : 'Draft'}</span>` : '');
@@ -630,6 +804,12 @@
           if (!d) return;
           if (d.thread_id) openThread(d.thread_id);
           else openEmailComposer({ title: 'Draft', to: d.to_addresses, cc: d.cc_addresses, subject: d.subject, body: d.body_text, mailbox: mb(), draftId: d.id, onDraftSaved: draftsChanged, onSent: async (tid) => { await loadDrafts(); await loadList(); openThread(tid); } });
+        }));
+        // right-click on a row: the menu (hold on the phone is bound once on the list, bindRowTouch)
+        listEl.querySelectorAll('.ib-row').forEach(a => a.addEventListener('contextmenu', (e) => {
+          const t = S.rowThreads[a.dataset.id];
+          if (!t) return;
+          e.preventDefault(); rowMenu(t, e.clientX, e.clientY, a);
         }));
         // Done and Read or Unread on hover (the row itself opens the conversation)
         listEl.querySelectorAll('.ib-row [data-act]').forEach(b => b.addEventListener('click', async (e) => {
@@ -980,98 +1160,20 @@
       }
     }
 
-    // ---------- My inbox: connect (Workplace Surveillance Act notice) ----------
+    // ---------- My inbox: connect and disconnect (js/inbox-connect.js, loaded when needed) ----------
 
-    const NOTICE_TEXT = `Connecting your work Gmail to TEops
-
-What happens if you connect
-- TEops copies your work email (your @thomsonenergy.com.au inbox): the last 60 days, then new email as it arrives, so you can read, sort and reply from TEops.
-- ${'{assistant}'} (the AI in TEops) reads your work email to sort it (needs a reply, other, subscriptions and updates), file it under labels, match it to jobs and draft replies for you to check. Nothing is ever sent without you pressing Send.
-- Emails tagged to a job show on that job for the team. Everything else in your inbox stays private to you: other staff, directors included, do not see it in TEops.
-- You can disconnect any time in Inbox > My inbox. Your private emails are then removed from TEops straight away; emails tagged to a job stay on the job as business records.
-
-Your rights under the Workplace Surveillance Act 2005 (NSW)
-- TEops reading your work email this way is computer surveillance under the Act. The law says you must get written notice at least 14 days before it starts. This is that notice.
-- You can agree to it starting now. Agreeing waives the 14 days notice for this. It is your choice.
-- If you do not agree, nothing is connected now and nothing changes for your job or pay. Connect becomes available 14 days from today, and only if you choose to press it then.
-
-Please also read the Notice of Workplace Surveillance and Computer Surveillance Policy in your signed documents.`;
-
-    async function renderConnect() {
-      S.listSeq++; // a list still loading must not paint over this screen
-      document.getElementById('inbox-side').innerHTML = '';
-      onePane(true);
-      const listEl = document.getElementById('thread-list');
-      const { data: notices } = await supabaseClient.from('gmail_connect_notices').select('*').eq('profile_id', S.me.id).order('created_at');
-      const agreed = (notices || []).some(n => n.response === 'agree');
-      const first = (notices || [])[0];
-      const allowedFrom = agreed ? new Date() : first ? new Date(new Date(first.created_at).getTime() + 14 * 86400000) : null;
-      const locked = allowedFrom && allowedFrom > new Date();
-      let html = `<div style="max-width:620px; padding:12px 14px;">
-        <h2 style="margin-top:0;">Bring your own work email into TEops</h2>
-        <p>See your work Gmail next to the Sales inbox, with ${escapeHtml(S.assistant)} sorting it into what needs a reply, what can wait and subscriptions, filing it under labels and jobs, and drafting replies for you. Private to you.</p>`;
-      if (S.mine && S.mine.disconnected_at && !S.mine.connected_at) html += `<p class="subtitle">You disconnected ${escapeHtml(S.mine.address)} on ${new Date(S.mine.disconnected_at).toLocaleDateString('en-AU')}.</p>`;
-      if (locked) {
-        html += `<div class="card" style="padding:12px 14px;">You chose not to agree on ${new Date(first.created_at).toLocaleDateString('en-AU')}. Connect is available from <strong>${allowedFrom.toLocaleDateString('en-AU')}</strong> (14 days after the notice).</div>
-          <p style="margin-top:12px;"><button type="button" class="secondary" id="read-notice-btn">Read the notice again (and agree now if you have changed your mind)</button></p>`;
-      } else {
-        html += `<p><button type="button" id="connect-btn">Connect my Gmail</button></p>`;
+    async function withConnectScript() {
+      if (!window.renderInboxConnect) {
+        S.connectLoad = S.connectLoad || new Promise((ok, fail) => { const sc = document.createElement('script'); sc.src = '/js/inbox-connect.js?v=1'; sc.onload = ok; sc.onerror = () => { S.connectLoad = null; fail(new Error('That part did not load. Refresh and try again.')); }; document.head.appendChild(sc); });
+        await S.connectLoad;
       }
-      listEl.innerHTML = html + '</div>';
-      const btn = document.getElementById('connect-btn') || document.getElementById('read-notice-btn');
-      btn.addEventListener('click', () => (allowedFrom && !locked ? startConnect() : openNotice()));
     }
-
-    function openNotice() {
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
-      overlay.innerHTML = `
-        <div class="card" style="max-width:640px; width:100%; max-height:92vh; overflow-y:auto;">
-          <h2 style="margin-top:0;">Before you connect: workplace surveillance notice</h2>
-          <div class="notice">${escapeHtml(NOTICE_TEXT.replace('{assistant}', S.assistant))}</div>
-          <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
-            <button type="button" id="nt-agree">I agree and waive the 14 days notice: connect now</button>
-            <button type="button" class="secondary" id="nt-disagree">I don't agree</button>
-            <button type="button" class="secondary" id="nt-cancel">Not now</button>
-          </div>
-          <div id="nt-msg" style="margin-top:8px;"></div>
-        </div>`;
-      document.body.appendChild(overlay);
-      const record = async (response) => {
-        const { error } = await supabaseClient.from('gmail_connect_notices').insert({ profile_id: S.me.id, response, notice_version: NOTICE_VERSION });
-        if (error) throw error;
-      };
-      overlay.querySelector('#nt-cancel').addEventListener('click', () => overlay.remove());
-      overlay.querySelector('#nt-disagree').addEventListener('click', async () => {
-        try { await record('disagree'); } catch (err) { overlay.querySelector('#nt-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return; }
-        overlay.remove(); renderConnect();
-      });
-      overlay.querySelector('#nt-agree').addEventListener('click', async (e) => {
-        e.target.disabled = true; e.target.textContent = 'Opening Google...';
-        try { await record('agree'); await startConnect(); } catch (err) {
-          overlay.querySelector('#nt-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-          e.target.disabled = false; e.target.textContent = 'I agree and waive the 14 days notice: connect now';
-        }
-      });
+    async function renderConnect() {
+      try { await withConnectScript(); await renderInboxConnect({ S, onePane, act, loadMailboxes, showBox }); }
+      catch (err) { document.getElementById('thread-list').innerHTML = `<div class="error-box" style="margin:10px;">${escapeHtml(err.message)}</div>`; }
     }
-
-    async function startConnect() {
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      const res = await fetch('/.netlify/functions/google-oauth-start?mailbox=mine', { headers: { Authorization: `Bearer ${session.access_token}` } });
-      const data = await res.json().catch(() => ({}));
-      if (!data.ok) { alert(data.error || 'Could not start the Google sign in.'); return; }
-      window.location.href = data.url;
-    }
-
     async function disconnectMine() {
-      if (!confirm('Disconnect your Gmail from TEops? Your private emails are removed from TEops straight away. Emails tagged to a job stay on the job. Your Gmail itself is not changed.')) return;
-      try {
-        const r = await act('disconnect', { mailbox_id: S.mine.id });
-        alert(`Disconnected. ${r.removed} conversations removed from TEops, ${r.kept} kept on their jobs.`);
-      } catch (err) { alert(err.message); return; }
-      await loadMailboxes();
-      S.view = 'priority';
-      showBox('mine');
+      try { await withConnectScript(); await disconnectMyInbox({ S, act, loadMailboxes, showBox }); } catch (err) { alert(err.message); }
     }
 
     // ---------- clean up (js/inbox-cleanup.js, loaded when it is opened) ----------
@@ -1145,6 +1247,7 @@ Please also read the Notice of Workplace Surveillance and Computer Surveillance 
         window.location.href = '/login.html';
       });
       S.me = session.user;
+      bindRowTouch(document.getElementById('thread-list'));
       fitHeight();
       if (window.visualViewport) window.visualViewport.addEventListener('resize', fitHeight);
       window.addEventListener('resize', fitHeight);
