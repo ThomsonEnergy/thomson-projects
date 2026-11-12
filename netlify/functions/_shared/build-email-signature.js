@@ -202,4 +202,23 @@ async function signatureForAgent(supabaseAdmin, { name, jobTitle, email }) {
   }, { ...(company || {}), logo_url });
 }
 
-module.exports = { buildSignature, signatureForAgent, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };
+// A sign off typed at the end of a reply ("Kind regards," on its own, or with the sender's name
+// under it) is dropped before the signature goes on: the signature adds "Kind regards," and the
+// name itself, so keeping it would say it twice. Only a last line that is nothing but a sign off
+// counts; "Thanks for your patience" stays. A body that is only a sign off is left alone.
+const SIGN_OFF = /^\s*\*?(kind regards|warm regards|best regards|regards|cheers|thanks|thank you|many thanks|best)\*?[,.]?\s*$/i;
+function withoutSignOff(bodyText, senderName) {
+  const text = String(bodyText || '');
+  const lines = text.replace(/\r/g, '').split('\n');
+  const names = new Set([senderName, String(senderName || '').split(/\s+/)[0]].map((n) => String(n || '').trim().toLowerCase()).filter(Boolean));
+  let i = lines.length;
+  while (i && !lines[i - 1].trim()) i--;
+  if (i && names.has(lines[i - 1].trim().toLowerCase())) i--;
+  while (i && !lines[i - 1].trim()) i--;
+  if (!i || !SIGN_OFF.test(lines[i - 1])) return text;
+  i--;
+  while (i && !lines[i - 1].trim()) i--;
+  return i ? lines.slice(0, i).join('\n') : text;
+}
+
+module.exports = { withoutSignOff, buildSignature, signatureForAgent, plainTextToHtml, plainTextWithoutButtons, signatureForUser, emailSafeLogoUrl, SIGNATURE_EMAIL, SIGNATURE_PHONE };
