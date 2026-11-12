@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=132"></script>
+  <script src="/js/supabase-client.js?v=133"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -3990,7 +3990,7 @@
       const FIELD_TABS_FIRST = ['summary', 'contacts', 'photos', 'documents', 'feed'];
       const tabsInOrder = pricingVisible ? tabDefs : [...FIELD_TABS_FIRST.map(p => tabDefs.find(d => d.panel === p)), ...tabDefs.filter(d => !FIELD_TABS_FIRST.includes(d.panel))];
 
-      content.innerHTML = `
+      keepColumnScroll(content, () => { content.innerHTML = `
         <div class="job-head"><div class="job-head-main">
         <h1>${escapeHtml(project.name)}</h1>
         <p class="subtitle">${pricingVisible && project.client_id ? `<a class="link-quiet" href="/clients.html?id=${encodeURIComponent(project.client_id)}" target="_blank" title="Open the client card: details, contacts, sites, payment terms">${escapeHtml(project.client_name || '')}</a>` : escapeHtml(project.client_name)} &middot; <span class="badge ${project.status}">${project.status.replace('_',' ')}</span>${project.job_number && project.pipeline_stage ? ` <span class="badge draft" id="pipeline-stage-badge" title="Pipeline stage">${escapeHtml(pipelineStageLabel(project.pipeline_stage))}</span>` : ''}${numberLine ? ' &middot; ' + numberLine : ''}${contactLine ? '<br>' + contactLine : ''}</p>
@@ -4700,7 +4700,7 @@
             </div>
           </div>
         </div>
-      `;
+      `; });
 
       // Item 32: each tab has its own address (?tab=photos and so on), so a refresh,
       // a shared link or a notification lands on it. replaceState, so Back still leaves the job.

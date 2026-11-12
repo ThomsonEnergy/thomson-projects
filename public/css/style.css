@@ -54,9 +54,7 @@ html[data-theme="navy"] {
 
 * { box-sizing: border-box; }
 
-/* Top bar height, one number for every page: the bar itself, the page menu under it,
-   and the whole-screen pages (Chat, Inbox, .wrap.fill) that size themselves to the
-   window minus the bar. Phones keep the taller bar for the 44px icons. */
+/* Top bar height for every page, the menu under it and the whole-screen pages */
 :root { --top-h: 60px; }
 @media (max-width: 700px) { :root { --top-h: 64px; } }
 
@@ -92,11 +90,7 @@ body {
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* ===================================================================
-   Topbar / navigation
-   Logo sits top right; module tabs run left of it, each with a
-   placeholder total. Wraps to a scrollable row on narrow screens.
-   =================================================================== */
+/* Top bar: module tabs left, logo right; fitTopbar() folds tabs into the menu */
 .topbar {
   display: flex;
   align-items: center;
@@ -591,9 +585,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Compact buttons for dense rows (PO lines, list rows). Laptops stay compact;
    touch screens still get the 40px height from the rule below. */
 button.btn-sm, .btn.btn-sm { font-size: 13px; padding: 4px 10px; }
-/* Touch screens: every button is at least finger height. Task row buttons
-   (Tasks page) get the full 44px. The small round controls (photo thumbnail
-   x, markup colour dots, photo viewer close) keep their fixed size. */
+/* Touch screens: buttons at least 40px (task rows 44px); small round controls keep their size */
 @media (pointer: coarse) {
   button, .btn { min-height: 40px; }
   .task-actions button { min-height: 44px; }

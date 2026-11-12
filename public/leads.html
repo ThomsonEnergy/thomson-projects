@@ -54,11 +54,6 @@
       <p class="subtitle" style="margin-bottom:14px;">"Book a call" requests from the website, with the time they asked for. Unclaimed ones also show as up-for-grabs on the Home page.</p>
       <div id="callback-requests-list"><p class="subtitle">Loading...</p></div>
     </div>
-    <details class="card">
-      <summary><h2 style="display:inline;">Site interest</h2></summary>
-      <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left - not actionable individually, but useful for spotting what's getting attention.</p>
-      <div id="anon-leads-list"><p class="subtitle">Loading...</p></div>
-    </details>
     </div>
     <div class="page-col" style="flex-grow:1.2;">
     <div class="card">
@@ -66,12 +61,17 @@
       <p class="subtitle" style="margin-bottom:14px;">People who left contact details.</p>
       <div id="contact-leads-list"><p class="subtitle">Loading...</p></div>
     </div>
+    <details class="card">
+      <summary><h2 style="display:inline;">Site interest</h2></summary>
+      <p class="subtitle" style="margin-bottom:14px;">Package, brand, or calculator interactions with no contact details left - not actionable individually, but useful for spotting what's getting attention.</p>
+      <div id="anon-leads-list"><p class="subtitle">Loading...</p></div>
+    </details>
     </div>
     <div class="page-col lead-detail-col" style="flex-grow:1.2;"><div id="lead-detail"></div></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=132"></script>
+  <script src="/js/supabase-client.js?v=133"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     function timeAgo(dateStr) {

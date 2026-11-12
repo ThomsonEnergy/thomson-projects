@@ -55,6 +55,27 @@
         <p class="subtitle" style="margin:0 0 10px;">Click any day to edit it - you can be logged against more than one job in a day, each with its own stage split, all in the one place.</p>
         <div id="my-week-days"><p class="subtitle">Loading...</p></div>
       </div>
+      </div>
+      <div class="page-col" style="flex-grow:1.4;">
+      <div class="card" id="team-week-card" style="display:none;">
+        <h2>Team timesheets</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above - click any day's hours to view or edit that person's timesheet.</p>
+        <div id="team-week-table"><p class="subtitle">Loading...</p></div>
+        <h3 style="margin:20px 0 6px;">Lunch breaks this week</h3>
+        <div id="team-week-breaks"><p class="subtitle">Loading...</p></div>
+      </div>
+      <div class="card" id="dev-mode-entries-card" style="display:none;">
+        <h2>All entries this week</h2>
+        <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
+          <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
+        </div>
+        <div id="bulk-delete-entries-msg"></div>
+        <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
+      </div>
+      </div>
+      <div class="page-col">
       <div class="card">
         <h2>Request leave</h2>
         <div class="grid cols-2">
@@ -87,27 +108,6 @@
         <h2>My leave requests</h2>
         <div id="my-leave-list"><p class="subtitle">Loading...</p></div>
       </div>
-      </div>
-      <div class="page-col" style="flex-grow:1.4;">
-      <div class="card" id="team-week-card" style="display:none;">
-        <h2>Team timesheets</h2>
-        <p class="subtitle" style="margin-bottom:10px;">Hours logged per day for the pay week above - click any day's hours to view or edit that person's timesheet.</p>
-        <div id="team-week-table"><p class="subtitle">Loading...</p></div>
-        <h3 style="margin:20px 0 6px;">Lunch breaks this week</h3>
-        <div id="team-week-breaks"><p class="subtitle">Loading...</p></div>
-      </div>
-      <div class="card" id="dev-mode-entries-card" style="display:none;">
-        <h2>All entries this week</h2>
-        <p class="subtitle" style="margin-bottom:10px;">Only visible with Dev Mode active (Settings). Bulk-select and delete individual clock in/out entries.</p>
-        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-          <label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="select-all-entries" style="width:auto;" /> Select all</label>
-          <button type="button" id="bulk-delete-entries-btn" class="secondary" style="display:none;">Delete selected</button>
-        </div>
-        <div id="bulk-delete-entries-msg"></div>
-        <div id="dev-mode-entries-list"><p class="subtitle">Loading...</p></div>
-      </div>
-      </div>
-      <div class="page-col">
       <div class="card" id="approvals-card" style="display:none;">
         <h2>Leave</h2>
         <p class="subtitle" style="margin-bottom:10px;">Everyone's leave: who, when, what kind, and whether it is approved. Approved leave goes to Xero with the timesheet push below.</p>
@@ -186,7 +186,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=132"></script>
+  <script src="/js/supabase-client.js?v=133"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
