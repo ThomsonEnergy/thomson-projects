@@ -21,7 +21,7 @@
      Phone: the folders as a strip above the list, then the conversation on its own screen.
      --ib-vh follows the visible screen (iPhone keyboard), set by fitHeight(). */
   body.inbox-page { overflow:hidden; height:100%; }
-  .inbox-app { --ib-top:76px; display:grid; grid-template-columns:212px 400px minmax(0,1fr); height:calc(var(--ib-vh, 100dvh) - var(--ib-top)); background:var(--bg); }
+  .inbox-app { --ib-top:76px; display:grid; grid-template-columns:212px minmax(380px, 30%) minmax(0,1fr); height:calc(var(--ib-vh, 100dvh) - var(--ib-top)); background:var(--bg); }
   .inbox-app.one-pane { grid-template-columns:212px minmax(0,1fr); }
   .inbox-app.one-pane .ib-read { display:none; }
   .ib-side, .ib-list, .ib-read { min-height:0; min-width:0; display:flex; flex-direction:column; }
@@ -51,22 +51,25 @@
   .list-filters h3 { margin:0; font-size:14px; }
   .list-filters label { margin:0; font-size:12px; font-weight:400; display:flex; align-items:center; gap:4px; }
   .list-filters .note { width:100%; margin:0; font-size:12px; }
-  /* one line per conversation: who, subject and status, time; Done and Read on hover */
-  .ib-row { display:grid; grid-template-columns:150px minmax(0,1fr) 58px; align-items:center; gap:8px; padding:0 10px; height:36px; border-bottom:1px solid var(--border); cursor:pointer; font-size:13px; color:var(--text); text-decoration:none; position:relative; }
+  /* two short lines per conversation: who and the time, then subject, chips and status; Done and Read on hover */
+  .ib-row { display:grid; grid-template-columns:minmax(0,1fr) 58px; align-items:center; column-gap:8px; row-gap:1px; padding:5px 10px; border-bottom:1px solid var(--border); cursor:pointer; font-size:13px; color:var(--text); text-decoration:none; position:relative; }
+  .ib-row .who { grid-column:1; grid-row:1; }
+  .ib-row .when { grid-column:2; grid-row:1; }
+  .ib-row .mid { grid-column:1 / -1; grid-row:2; }
   .ib-row:hover { background:var(--surface-2); }
   .ib-row.active { background:var(--accent-dim); box-shadow:inset 3px 0 0 var(--accent); }
   .ib-row .who, .ib-row .subj { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ib-row.unread .who, .ib-row.unread .subj { font-weight:700; }
   .ib-row .mid { display:flex; align-items:center; gap:6px; min-width:0; white-space:nowrap; overflow:hidden; }
-  .ib-row .subj { flex:0 1 auto; }
-  .ib-row .st { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font-size:12px; }
+  .ib-row .subj { flex:1 1 auto; min-width:45%; }
+  .ib-row .st { flex:0 1 auto; min-width:0; max-width:50%; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font-size:12px; }
   .ib-row .st.waiting { color:var(--red); font-weight:700; }
   .ib-row .st.onit { color:#e0a526; font-weight:700; }
   .ib-row .st.replied { color:var(--green); }
   .ib-row .st.reason { font-style:italic; color:var(--accent); }
   .ib-row .when { font-size:12px; color:var(--muted); text-align:right; white-space:nowrap; }
-  .ib-row .chip { margin:0; flex:none; }
-  .ib-row .acts { display:none; position:absolute; right:6px; top:5px; bottom:5px; align-items:center; gap:4px; padding-left:14px; background:linear-gradient(90deg, transparent, var(--surface-2) 30%); }
+  .ib-row .chip { margin:0; flex:none; display:inline-block; max-width:120px; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; }
+  .ib-row .acts { display:none; position:absolute; right:6px; top:0; bottom:0; align-items:center; gap:4px; padding-left:14px; background:linear-gradient(90deg, transparent, var(--surface-2) 30%); }
   .ib-row .acts button { font-size:11px; padding:3px 8px; }
   @media (hover:hover) { .ib-row:hover .acts { display:flex; } }
   .job-group { display:flex; justify-content:space-between; gap:8px; align-items:baseline; padding:8px 10px 3px; border-bottom:1px solid var(--border); }
@@ -142,8 +145,8 @@
     .inbox-app.reading .ib-side, .inbox-app.reading .ib-list { display:none; }
     .inbox-app:not(.reading) .ib-read { display:none; }
     .back-btn { display:inline-block; }
-    .ib-row { grid-template-columns:minmax(0,1fr) 58px; height:auto; padding:7px 12px; row-gap:2px; }
-    .ib-row .mid { grid-column:1 / -1; }
+    .ib-row { padding:7px 12px; row-gap:2px; }
+    .ib-row .chip { max-width:110px; }
     .ib-row .acts { display:none !important; }
     .msg-head .to { display:none; }
   }
@@ -222,7 +225,7 @@
       if (t.section === 'priority') return { cls: 'waiting', text: 'Nobody has replied yet' };
       return null;
     }
-    const statusHtml = (t, l, extra) => { const st = threadStatus(t, l); return st ? `<div class="inbox-status ${st.cls}" ${extra || ''}>${escapeHtml(st.text)}</div>` : ''; };
+    const statusHtml = (t, l) => { const st = threadStatus(t, l); return st ? `<span class="inbox-status ${st.cls}">${escapeHtml(st.text)}</span>` : ''; };
     const mb = () => (S.box === 'mine' ? S.mine : S.shared);
     // the list: today's time, else the day ("10:42 am", "11 Nov", "11 Nov 25"); a message: both
     const SYD = 'Australia/Sydney';
@@ -431,7 +434,8 @@
 
     // `waitFor`: labels and drafts still loading (first load of a box); the list paints
     // without their chips first, then again once they and the latest emails are in.
-    // One line per conversation (who, subject, status, time), like Gmail; a search box
+    // Two short lines per conversation (who and time, then subject and status), like Gmail's
+    // list squeezed beside a reading pane; a search box
     // above it looks through the whole inbox (subject, sender, client, words in the email).
     async function loadList(waitFor) {
       const listEl = document.getElementById('thread-list');
@@ -549,10 +553,10 @@
           if (S.view === 'priority') header += note('Nobody on it first. Open one and press "I\'ve got this" so the team knows you are handling it.');
         }
 
-        // one row: who (From, or To when we wrote last), subject, status and chips, time
+        // one row: who (From, or To when we wrote last) and the time, then subject, chips and status
         const rowHtml = (id, { who, subject, st, chips: ch, when, unread, title, acts }) => `<a class="ib-row ${id === S.activeThreadId ? 'active' : ''} ${unread ? 'unread' : ''}" data-id="${id}" title="${escapeHtml(title || '')}">`
           + `<span class="who">${escapeHtml(who || 'unknown')}</span>`
-          + `<span class="mid"><span class="subj">${escapeHtml(subject || '(no subject)')}</span>${ch || ''}${st ? `<span class="st ${st.cls || ''}">${escapeHtml(st.text)}</span>` : ''}</span>`
+          + `<span class="mid"><span class="subj">${escapeHtml(subject || '(no subject)')}</span>${st ? `<span class="st ${st.cls || ''}">${escapeHtml(st.text)}</span>` : ''}${ch || ''}</span>`
           + `<span class="when">${when}</span>${acts || ''}</a>`;
         let body;
         if (draftRows) {
@@ -752,9 +756,9 @@
           <button type="button" class="secondary back-btn" id="back-btn" style="font-size:12px; padding:4px 10px; margin-bottom:6px;">&larr; Back</button>
           <h2>${escapeHtml(thread.subject || '(no subject)')}</h2>
           <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:12px;">
-            ${thread.clients?.name ? `<span class="subtitle" style="font-size:12px;">${escapeHtml(thread.clients.name)}</span>` : ''}
+            ${thread.clients?.name ? `<span style="color:var(--muted);">${escapeHtml(thread.clients.name)}</span>` : ''}
             ${statusHtml(thread, lastMsg)}
-            <span class="subtitle" style="font-size:12px;">${ordered.length} email${ordered.length === 1 ? '' : 's'}</span>
+            <span style="color:var(--muted);">${ordered.length} email${ordered.length === 1 ? '' : 's'}</span>
           </div>
           <div class="thread-bar">
             ${assignCtl}
