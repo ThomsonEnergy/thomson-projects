@@ -220,7 +220,6 @@
     // handling it (assigned_to, "I've got this"), and "Tagged to jobs" groups the last 30
     // days by job. See docs/PROJECT_SPEC.md A18.
 
-    const NOTICE_VERSION = 1;
     const SECTION_NAMES = { priority: 'Priority', other: 'Other', updates: 'Subscriptions and updates' };
     const S = {
       me: null, role: 'staff', assistant: 'Sparky', box: 'sales', view: 'priority', unreadOnly: false, mineOnly: false, search: '', staff: [],
@@ -494,8 +493,9 @@
       m.addEventListener('click', (e) => e.stopPropagation());
       m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const it = items[+b.dataset.i]; closeMenu(); it.run(); }));
       setTimeout(() => {
-        const off = () => { closeMenu(); document.removeEventListener('keydown', esc); };
-        const esc = (e) => { if (e.key === 'Escape') off(); };
+        let off = null;
+        const esc = (e) => { if (e.key === 'Escape' && off) off(); };
+        off = () => { closeMenu(); document.removeEventListener('keydown', esc); };
         document.addEventListener('click', off, { once: true });
         document.addEventListener('contextmenu', off, { once: true });
         document.addEventListener('keydown', esc);

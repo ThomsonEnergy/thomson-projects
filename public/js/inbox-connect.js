@@ -4,6 +4,7 @@
 // google-oauth-start, disconnecting through email-actions.js (disconnect). Needs
 // supabase-client.js (supabaseClient, escapeHtml). Called with the page's state and helpers.
 
+const NOTICE_VERSION = 1; // bump when the notice text changes, so people see it again
 const NOTICE_TEXT = `Connecting your work Gmail to TEops
 
 What happens if you connect
