@@ -587,7 +587,7 @@ async function draftReplies(admin, apiKey, mailbox, threads, ctx, usage, { onReq
     // who the reply goes to: their last email (on request we may have written last: a follow-up)
     const last = onRequest ? list.filter((m) => m.direction === 'inbound').slice(-1)[0] : latest;
     if (!last || last.direction !== 'inbound') continue;
-    if (!onRequest && (!t.asks_for_answer || new Date(last.sent_at).getTime() < cutoff)) continue;
+    if (!onRequest && (!t.asks_for_answer || t.answered_at || new Date(last.sent_at).getTime() < cutoff)) continue; // answered_at: we emailed them another way (item 80)
     const followUp = onRequest && latest.direction === 'outbound';
     const { count } = await admin.from('email_drafts').select('id', { count: 'exact', head: true }).eq('thread_id', t.id).eq('status', 'draft');
     if (count) continue;
