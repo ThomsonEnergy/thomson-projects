@@ -190,6 +190,8 @@ async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox =
     patch.is_read = personal ? !labels.includes('UNREAD') : false;
     patch.is_done = personal ? !labels.includes('INBOX') : false;
     patch.triaged_at = null;
+    // they wrote back: an "answered by another email" mark no longer holds (item 80)
+    patch.answered_at = null; patch.answered_by = null; patch.answered_email_id = null;
   }
   // our reply can turn a one-off into a conversation: the older-conversations pass reads it again (item 56)
   if (direction === 'outbound' && thread.suggested_label === '') patch.suggested_label = null;

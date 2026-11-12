@@ -87,6 +87,10 @@ async function sendRecordedEmail(admin, opts) {
   // sending claims an unclaimed conversation for the sender, so the team sees who has it
   const claim = !thread.assigned_to && senderId ? { assigned_to: senderId, assigned_by: senderId, assigned_at: nowIso } : {};
   await admin.from('email_threads').update({ last_message_at: nowIso, last_direction: 'outbound', is_read: true, ...claim }).eq('id', thread.id);
+  // an email to a person answers their other open Priority conversations too (item 80)
+  try {
+    await answerOpenThreads(admin, { mailbox, threadId: thread.id, recipients: [...splitAddresses(to), ...splitAddresses(cc)], senderId, emailId: emailRow.id, at: nowIso });
+  } catch (e) { console.error('send-recorded-email: could not mark other conversations answered', e.message); }
 
   if (tagProjectId && UUID.test(tagProjectId)) {
     // already tagged to that job? leave the existing tag as it is
@@ -97,6 +101,32 @@ async function sendRecordedEmail(admin, opts) {
   }
 
   return { thread, emailId: emailRow.id, gmailMessageId: sent.id, subject: finalSubject };
+}
+
+// Any email to a person answers their open Priority conversations in this inbox, even a new
+// email (a booking, a quote) rather than a reply in their own thread. Those conversations get
+// answered_at, answered_by and the email that did it, leave Priority ("You emailed them ...,
+// waiting on them") and are claimed by the sender when nobody was on them. The Gmail sync
+// clears the mark when the person writes back (gmail-sync.js).
+const addrOnly = (raw) => { const m = String(raw || '').match(/<([^>]+)>/); return (m ? m[1] : String(raw || '')).trim().toLowerCase(); };
+async function answerOpenThreads(admin, { mailbox, threadId, recipients, senderId, emailId, at }) {
+  const addrs = [...new Set(recipients.map(addrOnly).filter(Boolean))];
+  if (!addrs.length) return;
+  const { data: open } = await admin.from('email_threads').select('id, assigned_to')
+    .eq('mailbox_id', mailbox.id).eq('section', 'priority').eq('last_direction', 'inbound').eq('is_done', false).is('answered_at', null)
+    .neq('id', threadId).limit(300);
+  if (!open || !open.length) return;
+  const { data: mails } = await admin.from('emails').select('thread_id, from_address')
+    .in('thread_id', open.map((t) => t.id)).eq('direction', 'inbound').order('sent_at', { ascending: false }).limit(3000);
+  const from = {};
+  for (const e of (mails || [])) if (!from[e.thread_id]) from[e.thread_id] = addrOnly(e.from_address);
+  const hit = open.filter((t) => addrs.includes(from[t.id]));
+  if (!hit.length) return;
+  const mark = { answered_at: at, answered_by: senderId || null, answered_email_id: emailId };
+  const unclaimed = hit.filter((t) => !t.assigned_to && senderId).map((t) => t.id);
+  const claimed = hit.filter((t) => !unclaimed.includes(t.id)).map((t) => t.id);
+  if (unclaimed.length) await admin.from('email_threads').update({ ...mark, assigned_to: senderId, assigned_by: senderId, assigned_at: at }).in('id', unclaimed);
+  if (claimed.length) await admin.from('email_threads').update(mark).in('id', claimed);
 }
 
 // A new email from sales@ in a staff member's name (their signature), recorded on the job.

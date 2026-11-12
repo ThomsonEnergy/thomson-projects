@@ -222,6 +222,11 @@
         const also = t.assigned_to && t.assigned_to !== l.created_by ? `, ${claimed.replace('You are', 'you are')}` : '';
         return { cls: 'replied', text: `${by} ${timeAgo(l.sent_at)}${t.section === 'priority' ? ', waiting on them' : ''}${also}` };
       }
+      // we emailed them another way (a booking, a quote, another thread), item 80
+      if (t.answered_at) {
+        const also = t.assigned_to && t.assigned_to !== t.answered_by ? `, ${claimed.replace('You are', 'you are')}` : '';
+        return { cls: 'replied', text: `${who(t.answered_by)} emailed them ${timeAgo(t.answered_at)} (a new email)${t.section === 'priority' ? ', waiting on them' : ''}${also}` };
+      }
       if (t.assigned_to) return { cls: 'onit', text: `${claimed.replace('You are', "You're")}${t.assigned_at ? ' (claimed ' + timeAgo(t.assigned_at) + ')' : ''}` };
       if (t.section === 'priority') return { cls: 'waiting', text: 'Nobody has replied yet' };
       return null;
@@ -355,8 +360,9 @@
       return supabaseClient.from('email_threads').select(select || '*, clients(name)').eq('mailbox_id', mb().id).eq('is_supplier_bill', false);
     }
     const viewFilter = {
-      priority: (q) => q.eq('section', 'priority').eq('last_direction', 'inbound').eq('is_done', false),
-      other: (q) => q.eq('is_done', false).or('section.is.null,section.eq.other,and(section.eq.priority,last_direction.eq.outbound)'),
+      // answered_at: we emailed them another way (a booking, a quote), so it is not waiting on us (item 80)
+      priority: (q) => q.eq('section', 'priority').eq('last_direction', 'inbound').eq('is_done', false).is('answered_at', null),
+      other: (q) => q.eq('is_done', false).or('section.is.null,section.eq.other,and(section.eq.priority,last_direction.eq.outbound),and(section.eq.priority,answered_at.not.is.null)'),
       updates: (q) => q.eq('section', 'updates').eq('is_done', false),
       done: (q) => q.eq('is_done', true),
       all: (q) => q,
@@ -745,6 +751,7 @@
       const lastMsg = (emails || []).slice(-1)[0];
       const lastOut = lastMsg?.direction === 'outbound';
       const sec = thread.section || 'other';
+      const waiting = sec === 'priority' && !lastOut && !thread.answered_at; // still waiting on us
       const gmailUrl = `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(mb().address)}#all/${thread.gmail_thread_id}`;
       const others = S.staff.filter(s => s.active && s.id !== thread.assigned_to);
       const assignCtl = `<span style="display:inline-flex; gap:6px; align-items:center;">`
@@ -775,7 +782,7 @@
           </div>
           <div class="thread-bar">
             ${assignCtl}
-            <span class="section-pill ${sec === 'priority' && !lastOut ? 'priority' : ''}">${sec === 'priority' && lastOut ? 'Replied, waiting on them' : SECTION_NAMES[sec]}${thread.section_reason && sec === 'priority' && !lastOut ? ': ' + escapeHtml(thread.section_reason) : ''}</span>
+            <span class="section-pill ${waiting ? 'priority' : ''}">${sec === 'priority' && !waiting ? 'Replied, waiting on them' : SECTION_NAMES[sec]}${thread.section_reason && waiting ? ': ' + escapeHtml(thread.section_reason) : ''}</span>
             <select id="move-section" title="Move to">
               <option value="">Move to...</option>
               ${Object.entries(SECTION_NAMES).filter(([k]) => k !== sec).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
@@ -786,7 +793,7 @@
           </div>
         </div>
         <div class="ib-read-body">
-          ${someoneElse && !lastOut ? `<div class="claim-banner"><strong>${escapeHtml(staffName(thread.assigned_to))} is on this</strong>${thread.assigned_at ? ', claimed ' + timeAgo(thread.assigned_at) : ''}. Check with them before you reply, so the client is not chased twice.</div>` : ''}
+          ${someoneElse && waiting ? `<div class="claim-banner"><strong>${escapeHtml(staffName(thread.assigned_to))} is on this</strong>${thread.assigned_at ? ', claimed ' + timeAgo(thread.assigned_at) : ''}. Check with them before you reply, so the client is not chased twice.</div>` : ''}
           ${thread.suggested_label ? `<div class="suggest">${escapeHtml(S.assistant)} suggests a label: <strong>${escapeHtml(thread.suggested_label)}</strong><button type="button" id="accept-label">Add</button><button type="button" class="secondary" id="dismiss-label">No</button></div>` : ''}
           ${thread.projects ? `<div class="suggest">${escapeHtml(S.assistant)} thinks this is about <strong>${escapeHtml(projectRef(thread.projects))} ${escapeHtml(thread.projects.name || '')}</strong><button type="button" id="accept-job">Tag it</button><button type="button" class="secondary" id="dismiss-job">No</button></div>` : ''}
           <div class="thread-chips" id="thread-labels"></div>
