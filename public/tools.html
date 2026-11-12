@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .tl-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
@@ -33,35 +33,44 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Tools and equipment</h1>
-    <p class="subtitle">Every tool and perishable we own, where it sits (Warehouse or a vehicle) and what state it is in. Tools bought on a PO land here when the line is received; over $500 ex GST a tool needs its serial number, a photo and the receipt.</p>
-
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Tools in use</div><div class="value" id="stat-tools">-</div></div>
-      <div class="stat"><div class="label">Value in use</div><div class="value" id="stat-value">-</div></div>
-      <div class="stat"><div class="label">Needs serial, photo or receipt</div><div class="value" id="stat-needs" style="color:var(--red);">-</div></div>
-      <div class="stat"><div class="label">Perishables, last 12 months</div><div class="value" id="stat-perishables">-</div></div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 320px;">
+        <h1>Tools and equipment</h1>
+        <p class="subtitle">Every tool and perishable we own, where it sits (Warehouse or a vehicle) and what state it is in. Tools bought on a PO land here when the line is received; over $500 ex GST a tool needs its serial number, a photo and the receipt.</p>
+      </div>
+      <div class="grid cols-4" style="flex:1 1 560px; max-width:760px;">
+        <div class="stat"><div class="label">Tools in use</div><div class="value" id="stat-tools">-</div></div>
+        <div class="stat"><div class="label">Value in use</div><div class="value" id="stat-value">-</div></div>
+        <div class="stat"><div class="label">Needs serial, photo or receipt</div><div class="value" id="stat-needs" style="color:var(--red);">-</div></div>
+        <div class="stat"><div class="label">Perishables, last 12 months</div><div class="value" id="stat-perishables">-</div></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; flex:1 1 100%;">
+        <div class="tl-tabs" id="tl-tabs" style="margin:0;">
+          <button type="button" class="secondary active" data-tab="all">All</button>
+          <button type="button" class="secondary" data-tab="tools">Tools</button>
+          <button type="button" class="secondary" data-tab="perishables">Perishables</button>
+          <button type="button" class="secondary" data-tab="needs">Needs details</button>
+          <button type="button" class="secondary" data-tab="out">Broken, lost, gone</button>
+          <button type="button" class="secondary" data-tab="vehicles">By vehicle</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; flex:0 1 440px;">
+          <input id="tl-search" placeholder="Search name, serial, supplier..." style="flex:1 1 200px; margin:0;" autocomplete="off" />
+          <button id="add-tool-btn">+ Add tool</button>
+        </div>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="tl-tabs" id="tl-tabs">
-        <button type="button" class="secondary active" data-tab="all">All</button>
-        <button type="button" class="secondary" data-tab="tools">Tools</button>
-        <button type="button" class="secondary" data-tab="perishables">Perishables</button>
-        <button type="button" class="secondary" data-tab="needs">Needs details</button>
-        <button type="button" class="secondary" data-tab="out">Broken, lost, gone</button>
-        <button type="button" class="secondary" data-tab="vehicles">By vehicle</button>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="tl-body"><p class="subtitle">Loading...</p></div>
+        </div>
       </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-        <input id="tl-search" placeholder="Search name, serial, supplier..." style="max-width:320px;" autocomplete="off" />
-        <button id="add-tool-btn">+ Add tool</button>
-      </div>
-      <div id="tl-body"><p class="subtitle">Loading...</p></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let tools = [], vehicles = [], suppliers = [], myRole = 'staff', tab = 'all';

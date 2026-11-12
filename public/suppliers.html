@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,8 +26,8 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+  <div class="wrap fill">
+    <div class="page-head">
       <div>
         <h1>Suppliers</h1>
         <p class="subtitle">Who you owe, how much, and what's actually due.</p>
@@ -39,28 +39,33 @@
         <button class="secondary" id="run-payments-btn" style="margin-right:8px;">Pay bills due</button>
         <button id="add-supplier-btn">+ Add supplier</button>
       </div>
-    </div>
-
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Invoiced, not paid</div><div class="value" id="stat-outstanding">-</div></div>
-      <div class="stat"><div class="label">Approved for payment</div><div class="value" id="stat-approved">-</div></div>
-      <div class="stat"><div class="label">Not approved</div><div class="value" id="stat-pending">-</div></div>
-      <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
-    </div>
-
-    <div class="card">
-      <div id="supplier-kind" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
-        <button type="button" class="secondary" data-kind="all" style="font-size:13px; padding:6px 14px; border-radius:20px;">All</button>
-        <button type="button" class="secondary" data-kind="supplier" style="font-size:13px; padding:6px 14px; border-radius:20px;">Suppliers</button>
-        <button type="button" class="secondary" data-kind="contractor" style="font-size:13px; padding:6px 14px; border-radius:20px;">Contractors</button>
-        <button type="button" class="secondary" data-kind="review" style="font-size:13px; padding:6px 14px; border-radius:20px;">New, check details</button>
+      <div class="grid cols-4" style="flex:1 1 560px; max-width:760px;">
+        <div class="stat"><div class="label">Invoiced, not paid</div><div class="value" id="stat-outstanding">-</div></div>
+        <div class="stat"><div class="label">Approved for payment</div><div class="value" id="stat-approved">-</div></div>
+        <div class="stat"><div class="label">Not approved</div><div class="value" id="stat-pending">-</div></div>
+        <div class="stat"><div class="label">Overdue</div><div class="value" id="stat-overdue">-</div></div>
       </div>
-      <input id="supplier-search" placeholder="Search suppliers..." style="margin-bottom:14px; max-width:320px;" />
-      <div id="suppliers-list"><p class="subtitle">Loading...</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <div id="supplier-kind" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="secondary" data-kind="all" style="font-size:13px; padding:6px 14px; border-radius:20px;">All</button>
+          <button type="button" class="secondary" data-kind="supplier" style="font-size:13px; padding:6px 14px; border-radius:20px;">Suppliers</button>
+          <button type="button" class="secondary" data-kind="contractor" style="font-size:13px; padding:6px 14px; border-radius:20px;">Contractors</button>
+          <button type="button" class="secondary" data-kind="review" style="font-size:13px; padding:6px 14px; border-radius:20px;">New, check details</button>
+        </div>
+        <input id="supplier-search" placeholder="Search suppliers..." style="max-width:320px; margin:0;" />
+      </div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="suppliers-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allSuppliers = [];

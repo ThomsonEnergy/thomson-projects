@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .asset-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
@@ -32,69 +32,76 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Customer equipment</h1>
-    <p class="subtitle">What we've installed for each customer, with warranty and servicing dates - so we can remind them when a service is due or a warranty is running out, and let owners of particular equipment know about news.</p>
-
-    <div class="asset-tabs">
-      <button type="button" class="secondary active" data-tab="list">All equipment</button>
-      <button type="button" class="secondary" data-tab="reminders" id="tab-reminders-btn">Reminders due</button>
-      <button type="button" class="secondary" data-tab="campaign">Email owners</button>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 480px;">
+        <h1>Customer equipment</h1>
+        <p class="subtitle">What we've installed for each customer, with warranty and servicing dates - so we can remind them when a service is due or a warranty is running out, and let owners of particular equipment know about news.</p>
+      </div>
+      <div class="asset-tabs" style="margin:0;">
+        <button type="button" class="secondary active" data-tab="list">All equipment</button>
+        <button type="button" class="secondary" data-tab="reminders" id="tab-reminders-btn">Reminders due</button>
+        <button type="button" class="secondary" data-tab="campaign">Email owners</button>
+      </div>
     </div>
 
-    <!-- All assets -->
-    <div class="card" id="tab-list">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-        <h2 style="margin:0;">Equipment</h2>
-        <button id="add-asset-btn">+ Add asset</button>
-      </div>
-      <div class="grid cols-3" style="margin-bottom:12px;">
-        <input id="asset-search" placeholder="Search customer, asset, make, serial..." autocomplete="off" />
-        <select id="asset-type-filter"><option value="">All types</option></select>
-        <select id="asset-status-filter">
-          <option value="active">Active only</option>
-          <option value="attention">Needs attention</option>
-          <option value="decommissioned">Decommissioned</option>
-          <option value="all">Everything</option>
-        </select>
-      </div>
-      <div id="asset-list"><p class="subtitle">Loading...</p></div>
-    </div>
+    <div class="page-cols">
+      <div class="page-col">
+        <!-- All assets -->
+        <div class="card" id="tab-list">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+            <h2 style="margin:0;">Equipment</h2>
+            <button id="add-asset-btn">+ Add asset</button>
+          </div>
+          <div class="grid cols-3" style="margin-bottom:12px;">
+            <input id="asset-search" placeholder="Search customer, asset, make, serial..." autocomplete="off" />
+            <select id="asset-type-filter"><option value="">All types</option></select>
+            <select id="asset-status-filter">
+              <option value="active">Active only</option>
+              <option value="attention">Needs attention</option>
+              <option value="decommissioned">Decommissioned</option>
+              <option value="all">Everything</option>
+            </select>
+          </div>
+          <div id="asset-list"><p class="subtitle">Loading...</p></div>
+        </div>
 
-    <!-- Reminders due -->
-    <div class="card" id="tab-reminders" style="display:none;">
-      <h2>Reminders due</h2>
-      <p class="subtitle" style="margin-bottom:6px;">Services due within 30 days (or overdue) and warranties ending within 90 days. Nothing is emailed until you press Send - review the wording first. Anything already emailed (or skipped) in the last 60 days is hidden.</p>
-      <div id="reminder-list"><p class="subtitle">Loading...</p></div>
-    </div>
+        <!-- Reminders due -->
+        <div class="card" id="tab-reminders" style="display:none;">
+          <h2>Reminders due</h2>
+          <p class="subtitle" style="margin-bottom:6px;">Services due within 30 days (or overdue) and warranties ending within 90 days. Nothing is emailed until you press Send - review the wording first. Anything already emailed (or skipped) in the last 60 days is hidden.</p>
+          <div id="reminder-list"><p class="subtitle">Loading...</p></div>
+        </div>
 
-    <!-- Campaign -->
-    <div class="card" id="tab-campaign" style="display:none;">
-      <h2>Email owners of certain equipment</h2>
-      <p class="subtitle" style="margin-bottom:12px;">For news that matters to people who have a particular thing installed - e.g. battery prices have dropped (to anyone with a hybrid inverter), or storm season is coming. One email per customer, from sales@.</p>
-      <div class="grid cols-3">
-        <div><label style="margin-top:0;">Equipment type</label><select id="camp-type"><option value="">Any type</option></select></div>
-        <div><label style="margin-top:0;">Make / model / name contains</label><input id="camp-text" placeholder="e.g. hybrid, Fronius, Tesla" /></div>
-        <div><label style="margin-top:0;">Installed before (optional)</label><input id="camp-before" type="date" /></div>
-      </div>
-      <div id="camp-match" class="subtitle" style="margin:10px 0;"></div>
-      <div id="camp-recipients" style="max-height:200px; overflow-y:auto; margin-bottom:12px;"></div>
+        <!-- Campaign -->
+        <div class="card" id="tab-campaign" style="display:none;">
+          <h2>Email owners of certain equipment</h2>
+          <p class="subtitle" style="margin-bottom:12px;">For news that matters to people who have a particular thing installed - e.g. battery prices have dropped (to anyone with a hybrid inverter), or storm season is coming. One email per customer, from sales@.</p>
+          <div class="grid cols-3">
+            <div><label style="margin-top:0;">Equipment type</label><select id="camp-type"><option value="">Any type</option></select></div>
+            <div><label style="margin-top:0;">Make / model / name contains</label><input id="camp-text" placeholder="e.g. hybrid, Fronius, Tesla" /></div>
+            <div><label style="margin-top:0;">Installed before (optional)</label><input id="camp-before" type="date" /></div>
+          </div>
+          <div id="camp-match" class="subtitle" style="margin:10px 0;"></div>
+          <div id="camp-recipients" style="max-height:200px; overflow-y:auto; margin-bottom:12px;"></div>
 
-      <label>Subject</label>
-      <input id="camp-subject" placeholder="e.g. Get your {asset} ready for storm season" />
-      <label>Message <span class="subtitle" style="font-weight:400;">- use {first_name}, {asset} and {address} to personalise</span></label>
-      <textarea id="camp-body" style="min-height:160px;"></textarea>
-      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button type="button" class="secondary" id="camp-tpl-storm" style="font-size:12px; padding:6px 10px;">Use: storm season</button>
-        <button type="button" class="secondary" id="camp-tpl-battery" style="font-size:12px; padding:6px 10px;">Use: battery price drop</button>
-        <button type="button" class="secondary" id="camp-preview-btn" style="font-size:12px; padding:6px 10px;">Preview first email</button>
+          <label>Subject</label>
+          <input id="camp-subject" placeholder="e.g. Get your {asset} ready for storm season" />
+          <label>Message <span class="subtitle" style="font-weight:400;">- use {first_name}, {asset} and {address} to personalise</span></label>
+          <textarea id="camp-body" style="min-height:160px;"></textarea>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="secondary" id="camp-tpl-storm" style="font-size:12px; padding:6px 10px;">Use: storm season</button>
+            <button type="button" class="secondary" id="camp-tpl-battery" style="font-size:12px; padding:6px 10px;">Use: battery price drop</button>
+            <button type="button" class="secondary" id="camp-preview-btn" style="font-size:12px; padding:6px 10px;">Preview first email</button>
+          </div>
+          <div id="camp-msg"></div>
+          <button type="button" id="camp-send-btn" style="margin-top:14px;">Send</button>
+        </div>
       </div>
-      <div id="camp-msg"></div>
-      <button type="button" id="camp-send-btn" style="margin-top:14px;">Send</button>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/assets.js?v=3"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>

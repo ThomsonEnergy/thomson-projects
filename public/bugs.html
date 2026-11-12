@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,55 +26,65 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Updates and ideas</h1>
-    <p class="subtitle">Report something broken, or suggest a change. Answers are written to save straight to the point - specific enough that whoever picks this up (including an AI session working in the app's own repo) can act on it without needing to ask you to explain again.</p>
-
-    <div class="card">
-      <h2>New report</h2>
-      <label style="margin-top:0">Type</label>
-      <div style="display:flex; gap:16px; margin-bottom:10px;">
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="bug" checked style="width:auto;" /> Bug - something's broken</label>
-        <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="update_idea" style="width:auto;" /> Update idea - something to add or change</label>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Updates and ideas</h1>
+        <p class="subtitle">Report something broken, or suggest a change. Answers are written to save straight to the point - specific enough that whoever picks this up (including an AI session working in the app's own repo) can act on it without needing to ask you to explain again.</p>
       </div>
+    </div>
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <h2>New report</h2>
+          <label style="margin-top:0">Type</label>
+          <div style="display:flex; flex-wrap:wrap; gap:4px 16px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="bug" checked style="width:auto;" /> Bug - something's broken</label>
+            <label style="display:flex; align-items:center; gap:6px; margin-top:0;"><input type="radio" name="report-type" value="update_idea" style="width:auto;" /> Update idea - something to add or change</label>
+          </div>
 
-      <label>Title</label>
-      <input id="report-title" placeholder="Short summary, e.g. 'Create PO button does nothing on a new job'" />
+          <label>Title</label>
+          <input id="report-title" placeholder="Short summary, e.g. 'Create PO button does nothing on a new job'" />
 
-      <label>Page or feature (optional)</label>
-      <input id="report-page" placeholder="e.g. Job pipeline board, Quotes, Settings > Xero Mapping" />
+          <label>Page or feature (optional)</label>
+          <input id="report-page" placeholder="e.g. Job pipeline board, Quotes, Settings > Xero Mapping" />
 
-      <label id="report-description-label">What's happening?</label>
-      <textarea id="report-description" placeholder="Describe it as precisely as you can - what you clicked, what you expected, what actually happened." style="min-height:100px;"></textarea>
+          <label id="report-description-label">What's happening?</label>
+          <textarea id="report-description" placeholder="Describe it as precisely as you can - what you clicked, what you expected, what actually happened." style="min-height:100px;"></textarea>
 
-      <div id="expected-behavior-field">
-        <label>What should happen instead?</label>
-        <textarea id="report-expected" placeholder="Optional, but the more specific this is the less back-and-forth is needed later." style="min-height:70px;"></textarea>
+          <div id="expected-behavior-field">
+            <label>What should happen instead?</label>
+            <textarea id="report-expected" placeholder="Optional, but the more specific this is the less back-and-forth is needed later." style="min-height:70px;"></textarea>
+          </div>
+
+          <button id="submit-report-btn" style="margin-top:14px;">Submit</button>
+          <div id="submit-report-msg"></div>
+        </div>
       </div>
-
-      <button id="submit-report-btn" style="margin-top:14px;">Submit</button>
-      <div id="submit-report-msg"></div>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <h2 style="margin:0;">Open (<span id="count-open">-</span>)</h2>
+      <div class="page-col">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h2 style="margin:0;">Open (<span id="count-open">-</span>)</h2>
+          </div>
+          <div id="open-list"><p class="subtitle">Loading...</p></div>
+        </div>
       </div>
-      <div id="open-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>In Progress (<span id="count-in-progress">-</span>)</h2>
-      <div id="in-progress-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Resolved (<span id="count-resolved">-</span>)</h2>
-      <div id="resolved-list"><p class="subtitle">Loading...</p></div>
+      <div class="page-col">
+        <div class="card">
+          <h2>In Progress (<span id="count-in-progress">-</span>)</h2>
+          <div id="in-progress-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
+      <div class="page-col">
+        <div class="card">
+          <h2>Resolved (<span id="count-resolved">-</span>)</h2>
+          <div id="resolved-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     async function syncToRepo() {

@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .imp-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
@@ -45,6 +45,10 @@
   .imp-result.fail { color:var(--red); }
   .imp-job details { margin-top:10px; font-size:13px; }
   .imp-job details pre { white-space:pre-wrap; font-family:inherit; background:var(--surface-2); padding:10px; border-radius:8px; margin:8px 0 0; max-height:260px; overflow:auto; }
+  /* Item 77: Load and the stats in the head line, the review list in a wide left column */
+  .sm8-side { flex:1 1 560px; min-width:0; }
+  .sm8-side .card { margin-bottom:8px; }
+  @media (min-width: 901px) { .sm8-side #stats { grid-template-columns:repeat(5, minmax(0, 1fr)); gap:8px; } }
   .imp-bar { position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--border); padding:12px 0; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:6px; }
 </style>
 </head>
@@ -60,72 +64,79 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>ServiceM8 Import</h1>
-    <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Nothing is ticked to start: search a ServiceM8 number, check it, tick it and press Import, one at a time or several. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
-
-    <div class="card">
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button id="load-btn">Load open jobs from ServiceM8</button>
-        <label style="margin:0; display:flex; gap:6px; align-items:center; font-weight:normal;">Plus open quotes from the last
-          <input type="number" id="quote-months" value="6" min="0" max="120" style="width:70px; margin:0;" /> months</label>
-        <span id="load-msg" class="subtitle"></span>
+  <div class="wrap fill">
+    <div class="page-head" style="align-items:flex-start;">
+      <div style="flex:1 1 420px; min-width:0;">
+        <h1>ServiceM8 Import</h1>
+        <p class="subtitle">Brings the jobs still open in ServiceM8 (status Work Order) across as jobs, and open quotes (status Quote) from the last few months as quotes: Quote sent if ServiceM8 sent it, otherwise Draft quote. Loading the list is a dry run: it only reads from ServiceM8 and saves nothing. Nothing is ticked to start: search a ServiceM8 number, check it, tick it and press Import, one at a time or several. Jobs already brought across are skipped, so this can be run again on cutover day.</p>
       </div>
-    </div>
-
-    <div id="stats" class="grid cols-4" style="display:none;">
-      <div class="stat"><div class="label">Open jobs in ServiceM8</div><div class="value" id="stat-open">-</div></div>
-      <div class="stat"><div class="label">Already imported</div><div class="value" id="stat-done">-</div></div>
-      <div class="stat"><div class="label">Need checking</div><div class="value" id="stat-check">-</div></div>
-      <div class="stat"><div class="label">Open quotes to bring</div><div class="value" id="stat-quote-rows">-</div></div>
-      <div class="stat"><div class="label">Older quotes (left behind)</div><div class="value" id="stat-quotes">-</div></div>
-    </div>
-
-    <div id="review" class="card" style="display:none;">
-      <h2 style="margin:0 0 6px;">Review</h2>
-      <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. Each job comes across with its ServiceM8 line items: every bundle as a prebuild with its real parts and labour, at the prices the client was quoted, so labour and materials split properly when it is invoiced to Xero. Lettered jobs (4515A deposit, 4515B progress claim, and so on) are not imported as jobs: a Completed one counts toward 4515's invoiced to date, and the app only lets you invoice what is left. Check the Labour/Material choice on any line that is not part of a prebuild.</p>
-      <div id="orphan-claims"></div>
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
-        <div>
-          <input type="search" id="imp-search" placeholder="Search ServiceM8 number, client, name or address" style="margin:0 0 8px; max-width:420px;" />
-          <div class="imp-filters" id="filters"></div>
-        </div>
-        <div class="imp-filters">
-          <button type="button" class="secondary" id="tick-all-btn">Tick all</button>
-          <button type="button" class="secondary" id="untick-all-btn">Untick all</button>
+      <div class="sm8-side">
+      <div class="card">
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <button id="load-btn">Load open jobs from ServiceM8</button>
+          <label style="margin:0; display:flex; gap:6px; align-items:center; font-weight:normal;">Plus open quotes from the last
+            <input type="number" id="quote-months" value="6" min="0" max="120" style="width:70px; margin:0;" /> months</label>
+          <span id="load-msg" class="subtitle"></span>
         </div>
       </div>
-      <div id="job-list"></div>
-      <div class="imp-bar">
-        <button id="import-btn">Import selected jobs</button>
-        <span id="import-msg" class="subtitle"></span>
+      <div id="stats" class="grid cols-4" style="display:none;">
+        <div class="stat"><div class="label">Open jobs in ServiceM8</div><div class="value" id="stat-open">-</div></div>
+        <div class="stat"><div class="label">Already imported</div><div class="value" id="stat-done">-</div></div>
+        <div class="stat"><div class="label">Need checking</div><div class="value" id="stat-check">-</div></div>
+        <div class="stat"><div class="label">Open quotes to bring</div><div class="value" id="stat-quote-rows">-</div></div>
+        <div class="stat"><div class="label">Older quotes (left behind)</div><div class="value" id="stat-quotes">-</div></div>
+      </div>
       </div>
     </div>
-
-    <div class="card">
-      <h2 style="margin:0 0 6px;">Staff</h2>
-      <p class="subtitle" style="margin:0 0 12px;">Match each ServiceM8 staff member to their TEops login, so their check-ins land on the right person and ticked checklist items show who ticked them. Do this before importing. Matches are suggested by email, mobile, then name; nothing is saved until you press Save. Anyone left on "Not matched" has their time skipped (the summary below says how much).</p>
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button id="staff-load-btn" class="secondary">Load ServiceM8 staff</button>
-        <button id="staff-save-btn" style="display:none;">Save staff matches</button>
-        <span id="staff-msg" class="subtitle"></span>
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:2; padding-bottom:0;">
+        <div id="review" class="card" style="display:none;">
+          <h2 style="margin:0 0 6px;">Review</h2>
+          <p class="subtitle" style="margin:0 0 12px;">All amounts are ex GST, like everywhere else in the app. Each job comes across with its ServiceM8 line items: every bundle as a prebuild with its real parts and labour, at the prices the client was quoted, so labour and materials split properly when it is invoiced to Xero. Lettered jobs (4515A deposit, 4515B progress claim, and so on) are not imported as jobs: a Completed one counts toward 4515's invoiced to date, and the app only lets you invoice what is left. Check the Labour/Material choice on any line that is not part of a prebuild.</p>
+          <div id="orphan-claims"></div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;">
+            <div>
+              <input type="search" id="imp-search" placeholder="Search ServiceM8 number, client, name or address" style="margin:0 0 8px; max-width:420px;" />
+              <div class="imp-filters" id="filters"></div>
+            </div>
+            <div class="imp-filters">
+              <button type="button" class="secondary" id="tick-all-btn">Tick all</button>
+              <button type="button" class="secondary" id="untick-all-btn">Untick all</button>
+            </div>
+          </div>
+          <div id="job-list"></div>
+          <div class="imp-bar">
+            <button id="import-btn">Import selected jobs</button>
+            <span id="import-msg" class="subtitle"></span>
+          </div>
+        </div>
       </div>
-      <div id="staff-list" style="margin-top:12px;"></div>
-    </div>
-
-    <div class="card">
-      <h2 style="margin:0 0 6px;">Timesheets, checklists, docs and photos</h2>
-      <p class="subtitle" style="margin:0 0 12px;">Starts by itself once jobs are imported (and after saving staff matches). For every imported job it brings across: each ServiceM8 check-in as a timesheet entry on the job (shown on the job only, marked already paid, never sent to Xero again), every checklist item as a task (ticked if it was ticked), pictures into Photos and other files (PDFs, plans, HEIC photos, videos...) into Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: nothing is doubled up, failed files are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
-      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button id="copy-btn">Copy timesheets, checklists, docs and photos</button>
-        <span id="copy-msg" class="subtitle"></span>
+      <div class="page-col">
+        <div class="card">
+          <h2 style="margin:0 0 6px;">Staff</h2>
+          <p class="subtitle" style="margin:0 0 12px;">Match each ServiceM8 staff member to their TEops login, so their check-ins land on the right person and ticked checklist items show who ticked them. Do this before importing. Matches are suggested by email, mobile, then name; nothing is saved until you press Save. Anyone left on "Not matched" has their time skipped (the summary below says how much).</p>
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <button id="staff-load-btn" class="secondary">Load ServiceM8 staff</button>
+            <button id="staff-save-btn" style="display:none;">Save staff matches</button>
+            <span id="staff-msg" class="subtitle"></span>
+          </div>
+          <div id="staff-list" style="margin-top:12px;"></div>
+        </div>
+        <div class="card">
+          <h2 style="margin:0 0 6px;">Timesheets, checklists, docs and photos</h2>
+          <p class="subtitle" style="margin:0 0 12px;">Starts by itself once jobs are imported (and after saving staff matches). For every imported job it brings across: each ServiceM8 check-in as a timesheet entry on the job (shown on the job only, marked already paid, never sent to Xero again), every checklist item as a task (ticked if it was ticked), pictures into Photos and other files (PDFs, plans, HEIC photos, videos...) into Documents under a "ServiceM8" folder. It runs in the background, so you can leave this page, and it is safe to press again: nothing is doubled up, failed files are retried, and anything left over when a run hits its 15 minute limit is picked up next time.</p>
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <button id="copy-btn">Copy timesheets, checklists, docs and photos</button>
+            <span id="copy-msg" class="subtitle"></span>
+          </div>
+          <div id="copy-summary" style="margin-top:12px;"></div>
+          <div id="copy-progress" style="margin-top:12px;"></div>
+        </div>
       </div>
-      <div id="copy-summary" style="margin-top:12px;"></div>
-      <div id="copy-progress" style="margin-top:12px;"></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const BATCH = 5;

@@ -1,6 +1,4 @@
 /* Shared by the HR pages: staff.html, incident.html, incidents.html, letter.html. */
-.grid.cols-2 { grid-template-columns: 1fr 1fr; }
-@media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
 .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 12px; font-size: 14px; margin: 0; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }

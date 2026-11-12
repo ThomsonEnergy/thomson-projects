@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .stc-filters { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
@@ -34,49 +34,55 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>STCs</h1>
-    <p class="subtitle">Every job's STCs, where they are up to with Formbay, and what they sold for. Customers are credited the booked price on the quote; the gain is what Formbay pays (less its fee) above that. All figures ex GST.</p>
-
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Awaiting sale</div><div class="value" id="stat-awaiting">-</div><div class="sub" id="stat-awaiting-sub"></div></div>
-      <div class="stat"><div class="label">Sold, not paid</div><div class="value" id="stat-sold">-</div><div class="sub" id="stat-sold-sub"></div></div>
-      <div class="stat"><div class="label">Expected gain (unpaid)</div><div class="value" id="stat-expected-gain">-</div><div class="sub" id="stat-expected-sub"></div></div>
-      <div class="stat"><div class="label">Received from Formbay</div><div class="value" id="stat-received">-</div><div class="sub" id="stat-received-sub"></div></div>
-    </div>
-
-    <div class="card">
-      <h2 style="margin:0 0 6px;">Expected Formbay price</h2>
-      <p class="subtitle" style="margin:0 0 10px;">Used for jobs not sold yet. Formbay's price moves (usually $38.00 to $39.50).</p>
-      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-        <div><label style="margin-top:0;">Sale price per STC ($)</label><input id="set-price" type="number" step="0.01" style="width:140px;" /></div>
-        <div><label style="margin-top:0;">Formbay fee per STC, ex GST ($)</label><input id="set-fee" type="number" step="0.01" style="width:140px;" /></div>
-        <button id="save-settings-btn" class="secondary">Save</button>
-        <span id="settings-msg" class="subtitle"></span>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>STCs</h1>
+        <p class="subtitle">Every job's STCs, where they are up to with Formbay, and what they sold for. Customers are credited the booked price on the quote; the gain is what Formbay pays (less its fee) above that. All figures ex GST.</p>
+      </div>
+      <div class="grid cols-4" style="flex:1 1 560px; max-width:760px;">
+        <div class="stat"><div class="label">Awaiting sale</div><div class="value" id="stat-awaiting">-</div><div class="sub" id="stat-awaiting-sub"></div></div>
+        <div class="stat"><div class="label">Sold, not paid</div><div class="value" id="stat-sold">-</div><div class="sub" id="stat-sold-sub"></div></div>
+        <div class="stat"><div class="label">Expected gain (unpaid)</div><div class="value" id="stat-expected-gain">-</div><div class="sub" id="stat-expected-sub"></div></div>
+        <div class="stat"><div class="label">Received from Formbay</div><div class="value" id="stat-received">-</div><div class="sub" id="stat-received-sub"></div></div>
       </div>
     </div>
-
-    <div class="card">
-      <h2 style="margin:0 0 14px;">Jobs</h2>
-      <div class="stc-filters" id="stc-filters"></div>
-      <div id="stc-list"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-        <h2 style="margin:0;">Formbay payments</h2>
-        <label class="secondary" style="margin:0; cursor:pointer; display:inline-block; padding:8px 14px; border:1px solid var(--border); border-radius:8px;">
-          Import payment advice PDFs
-          <input id="advice-files" type="file" accept="application/pdf" multiple style="display:none;" />
-        </label>
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:2">
+        <div class="card">
+          <h2 style="margin:0 0 6px;">Expected Formbay price</h2>
+          <p class="subtitle" style="margin:0 0 10px;">Used for jobs not sold yet. Formbay's price moves (usually $38.00 to $39.50).</p>
+          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+            <div><label style="margin-top:0;">Sale price per STC ($)</label><input id="set-price" type="number" step="0.01" style="width:140px;" /></div>
+            <div><label style="margin-top:0;">Formbay fee per STC, ex GST ($)</label><input id="set-fee" type="number" step="0.01" style="width:140px;" /></div>
+            <button id="save-settings-btn" class="secondary">Save</button>
+            <span id="settings-msg" class="subtitle"></span>
+          </div>
+        </div>
+        <div class="card">
+          <h2 style="margin:0 0 14px;">Jobs</h2>
+          <div class="stc-filters" id="stc-filters"></div>
+          <div id="stc-list"><p class="subtitle">Loading...</p></div>
+        </div>
       </div>
-      <p class="subtitle" style="margin:8px 0 12px;">Pick Formbay's Payment Advice and its fee tax invoice (FEE...) together, or several payments at once. Nothing is saved until you check the figures and press Save. Lines are matched to jobs by Formbay job ID.</p>
-      <div id="import-preview"></div>
-      <div id="advice-list"><p class="subtitle">Loading...</p></div>
+      <div class="page-col">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <h2 style="margin:0;">Formbay payments</h2>
+            <label class="secondary" style="margin:0; cursor:pointer; display:inline-block; padding:8px 14px; border:1px solid var(--border); border-radius:8px;">
+              Import payment advice PDFs
+              <input id="advice-files" type="file" accept="application/pdf" multiple style="display:none;" />
+            </label>
+          </div>
+          <p class="subtitle" style="margin:8px 0 12px;">Pick Formbay's Payment Advice and its fee tax invoice (FEE...) together, or several payments at once. Nothing is saved until you check the figures and press Save. Lines are matched to jobs by Formbay job ID.</p>
+          <div id="import-preview"></div>
+          <div id="advice-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/formbay-advice-parser.js"></script>
   <script>

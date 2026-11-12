@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,32 +26,32 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+  <div class="wrap fill">
+    <div class="page-head">
       <div>
-        <h1 style="margin-bottom:4px;">Tasks</h1>
+        <h1>Tasks</h1>
         <p class="subtitle">Assigned to you, your role, or open for anyone free to pick up.</p>
       </div>
       <button type="button" id="add-task-btn">+ Add task</button>
     </div>
 
-    <div class="card">
-      <h2>Assigned to you</h2>
-      <div id="my-tasks"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Assigned to your role</h2>
-      <div id="role-tasks"><p class="subtitle">Loading...</p></div>
-    </div>
-
-    <div class="card">
-      <h2>Unassigned - up for grabs</h2>
-      <div id="open-tasks"><p class="subtitle">Loading...</p></div>
+    <div class="page-cols">
+      <div class="page-col"><div class="card">
+        <h2>Assigned to you</h2>
+        <div id="my-tasks"><p class="subtitle">Loading...</p></div>
+      </div></div>
+      <div class="page-col"><div class="card">
+        <h2>Assigned to your role</h2>
+        <div id="role-tasks"><p class="subtitle">Loading...</p></div>
+      </div></div>
+      <div class="page-col"><div class="card">
+        <h2>Unassigned - up for grabs</h2>
+        <div id="open-tasks"><p class="subtitle">Loading...</p></div>
+      </div></div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     function taskRow(task, showPickUp) {
@@ -62,7 +62,7 @@
       const dueFmt = task.due_date ? new Date(task.due_date + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
       const dueHtml = !task.due_date ? '' : (task.due_date < TODAY ? ` &middot; <span style="color:var(--red); font-weight:600;">Overdue: ${dueFmt}</span>` : (task.due_date === TODAY ? ' &middot; <span style="font-weight:600;">Due today</span>' : ` &middot; Due ${dueFmt}`));
       return `
-        <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid var(--border);">
+        <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:8px 12px; padding:7px 0; border-bottom:1px solid var(--border);">
           <div style="flex:1 1 200px; min-width:0;">
             ${task.project_id ? `<a href="/project.html?id=${task.project_id}" class="link-quiet">${escapeHtml(task.description)}</a>` : `<span>${escapeHtml(task.description)}</span>`}
             <p class="subtitle" style="margin:2px 0 0; font-size:12px;">

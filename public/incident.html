@@ -10,8 +10,20 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
-<link rel="stylesheet" href="/css/hr.css?v=2" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/hr.css?v=3" />
+<style>
+  /* Item 77: a tab's cards side by side on a laptop (Details and Reporting two across, Evidence three), stacked in order on a phone */
+  @media (min-width: 901px) {
+    .settings-panel.inc-cols.three.active, .inc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+    .inc-cols > .card, .inc-grid > .card { margin: 0; }
+    .inc-cols.three > :not(.card) { grid-column: 1 / -1; }
+    .inc-grid { margin-bottom: 12px; } /* the cards' own grid, so the Save bar after it still sticks */
+    #panel-reporting .inc-grid > .card:first-child { grid-row: span 2; } /* SafeWork on the left, the two shorter cards stacked beside it */
+    #panel-reporting .inc-grid > .card:nth-child(3) { grid-column: 2; }
+  }
+  @media (min-width: 1101px) { .settings-panel.inc-cols.three.active { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+</style>
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -31,7 +43,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script src="/js/hr-templates.js?v=3"></script>
@@ -92,11 +104,11 @@
           <button class="settings-tab" data-panel="reporting">Reporting</button>
           <button class="settings-tab" data-panel="letters">Letters<span class="tab-count" id="c-letters"></span></button>
         </div>
-        <div class="settings-panel active" id="panel-details"></div>
+        <div class="settings-panel inc-cols active" id="panel-details"></div>
         <div class="settings-panel" id="panel-people"></div>
-        <div class="settings-panel" id="panel-evidence"></div>
+        <div class="settings-panel inc-cols three" id="panel-evidence"></div>
         <div class="settings-panel" id="panel-actions"></div>
-        <div class="settings-panel" id="panel-reporting"></div>
+        <div class="settings-panel inc-cols" id="panel-reporting"></div>
         <div class="settings-panel" id="panel-letters"></div>`;
       document.querySelectorAll('#inc-tabs .settings-tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.panel)));
       document.getElementById('btn-form10').addEventListener('click', () => showHrDocument(incidentReportHtml(inc, HR.company, people), `${ref} Form 10`));
@@ -142,6 +154,7 @@
       const r = inc;
       const staffOpts = HR.staff.map(s => `<option value="${s.id}" ${s.id === r.injured_profile_id ? 'selected' : ''}>${escapeHtml(s.full_name)}</option>`).join('');
       document.getElementById('panel-details').innerHTML = `
+        <div class="inc-grid">
         <div class="card">
           <h2>What happened</h2>
           <div class="grid cols-3">
@@ -210,6 +223,7 @@
           <label>Signature</label>
           ${r.completed_signature_data_url ? `<div id="d-sig-existing"><img src="${r.completed_signature_data_url}" style="max-width:220px; background:#fff; border-radius:6px; display:block;" /><button type="button" class="secondary" id="d-sig-redo" style="font-size:12px; padding:5px 10px; margin-top:6px;">Sign again</button></div>` : ''}
           <div id="d-sig" style="${r.completed_signature_data_url ? 'display:none;' : ''}"></div>
+        </div>
         </div>
         <div style="position:sticky; bottom:0; background:var(--bg); padding:10px 0; display:flex; gap:8px; align-items:center;">
           <button type="button" id="d-save">Save details</button><span id="d-msg"></span>
@@ -573,6 +587,7 @@
         if (creds && creds[0]) { r._suggestInsurer = creds[0].provider; r._suggestPolicy = creds[0].reference_number; }
       }
       document.getElementById('panel-reporting').innerHTML = `
+        <div class="inc-grid">
         <div class="card">
           <h2>SafeWork NSW</h2>
           <p class="subtitle" style="margin-bottom:10px;">Tick anything that happened. If any apply it's a notifiable incident: call <a href="tel:131050">13 10 50</a> immediately, don't disturb the site until an inspector says so, and send written notice within 48 hours if asked.</p>
@@ -611,6 +626,7 @@
             <div style="grid-column: span 2;"><label>Return to work coordinator</label>${inp('r-rtw-name', r.rtw_coordinator_name)}</div>
           </div>
           <label>Notes</label>${area('r-wc-notes', r.wc_notes)}
+        </div>
         </div>
         <div style="position:sticky; bottom:0; background:var(--bg); padding:10px 0; display:flex; gap:8px; align-items:center;">
           <button type="button" id="r-save">Save reporting</button><span id="r-msg"></span>

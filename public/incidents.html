@@ -10,8 +10,8 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
-<link rel="stylesheet" href="/css/hr.css?v=2" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/hr.css?v=3" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,9 +26,9 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-      <div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 480px;">
         <h1>Incidents</h1>
         <p class="subtitle">Near misses, incidents and accidents, with everyone involved, evidence, actions, and reporting to SafeWork and the insurer. Keep records for at least 5 years.</p>
       </div>
@@ -36,11 +36,17 @@
         <button type="button" class="secondary" id="blank-btn">Blank Form 10</button>
         <button type="button" id="new-btn">+ New incident</button>
       </div>
+      <div id="inc-filters" style="display:flex; gap:6px; flex-wrap:wrap; flex:1 1 100%;"></div>
     </div>
-    <div id="content"><p class="subtitle">Loading...</p></div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div id="content"><p class="subtitle">Loading...</p></div>
+      </div>
+    </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=136"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=3"></script>
   <script src="/js/hr-shared.js?v=4"></script>
@@ -59,10 +65,9 @@
         if (i.wc_required) f.push(`<span class="badge ${i.wc_insurer_notified_at ? 'sent' : 'red'}">${i.wc_insurer_notified_at ? 'Workers comp' : 'Insurer not told'}</span>`);
         return f.join(' ');
       };
+      const filtersEl = document.getElementById('inc-filters');
+      filtersEl.innerHTML = ['open', 'closed', 'all'].map(k => `<button type="button" class="${k === filter ? '' : 'secondary'} f-btn" data-f="${k}" style="font-size:12px; padding:5px 12px;">${k[0].toUpperCase() + k.slice(1)} (${counts[k]})</button>`).join('');
       el.innerHTML = `
-        <div style="display:flex; gap:6px; margin:6px 0 14px; flex-wrap:wrap;">
-          ${['open', 'closed', 'all'].map(k => `<button type="button" class="${k === filter ? '' : 'secondary'} f-btn" data-f="${k}" style="font-size:12px; padding:5px 12px;">${k[0].toUpperCase() + k.slice(1)} (${counts[k]})</button>`).join('')}
-        </div>
         <div class="card">
           ${list.length ? `<table class="responsive-stack">
             <thead><tr><th>Ref</th><th>Date</th><th>What happened</th><th>Type</th><th>People</th><th></th></tr></thead>
@@ -78,7 +83,7 @@
               </tr>`;
             }).join('')}</tbody></table>` : `<p class="subtitle">${filter === 'open' ? 'No open incidents.' : 'Nothing here yet.'}</p>`}
         </div>`;
-      el.querySelectorAll('.f-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
+      filtersEl.querySelectorAll('.f-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.f; render(); }));
       // The ref is a real link (long-press, new tab, copy); the rest of the row follows it
       el.querySelectorAll('.inc-row').forEach(r => r.addEventListener('click', (e) => { if (!e.target.closest('a')) r.querySelector('a').click(); }));
     }

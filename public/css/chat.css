@@ -7,7 +7,7 @@ body.chat-page { overflow: hidden; height: 100%; }
 body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !important; }
 
 .chat-app {
-  --ch-top: 76px;
+  --ch-top: var(--top-h);
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   height: calc(var(--ch-vh, 100dvh) - var(--ch-top));
@@ -133,7 +133,7 @@ body.chat-page #ai-chat-toggle, body.chat-page #ai-chat-panel { display: none !i
 
 @media (max-width: 700px) {
   /* minmax(0, 1fr): the column never grows past the screen to fit a wide header */
-  .chat-app { --ch-top: 64px; grid-template-columns: minmax(0, 1fr) !important; }
+  .chat-app { grid-template-columns: minmax(0, 1fr) !important; }
   .ch-side, .ch-conv, .ch-thread { grid-column: 1; grid-row: 1; }
   .ch-conv, .ch-thread { display: none; }
   .chat-app.show-conv .ch-side { display: none; }
