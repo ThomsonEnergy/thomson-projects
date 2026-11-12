@@ -10,21 +10,24 @@
 // see the conversation; the conversation must be tagged to that job. The job rows are written as
 // that person, so the same rules apply as an upload in the browser (a document is filed as
 // yourself, only pricing roles file into Electricity bill: guard_project_documents_writes).
+// supplier_quote_request_id (pricing roles, item 81): the file is a supplier's quote for that
+// request: it goes into Documents > Supplier quotes with a supplier_quotes row, and the mailbox
+// worker reads it with Tally (_shared/supplier-quote-intake.js).
 
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { downloadAttachment } = require('./_shared/google-client');
 const { threadForUser } = require('./_shared/mailboxes');
 const { getUserClient } = require('./_shared/require-admin');
+const { PRICING_ROLES } = require('./_shared/require-pricing-role');
+const { safeName, extOf, fileNameWithExt, markAttachmentSaved } = require('./_shared/email-attachment-files');
+const { FOLDER: SUPPLIER_QUOTES_FOLDER } = require('./_shared/supplier-quote-intake');
+const { startMailboxWork } = require('./_shared/gmail-sync');
 
 const MAX_BYTES = 25 * 1024 * 1024; // Gmail's own limit
 const SQUASH_OVER = 1024 * 1024;
 const PHOTO_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
-const safeName = (s) => String(s || 'file').replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 100);
-const extOf = (name) => { const m = String(name || '').match(/\.([a-z0-9]{1,6})$/i); return m ? m[1].toLowerCase() : ''; };
-// a picture pasted into an email often has no file name (gmail-sync calls it inline-<cid>)
-const EXT_BY_MIME = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' };
 
 // The picture at 1920 px at most: put up for a moment under a temporary name, read back through
 // the image tools, then removed. The original comes back if the image tools cannot do it.
@@ -51,9 +54,19 @@ exports.handler = async (event) => {
   const { supabaseAdmin: admin, user } = auth;
   const asUser = getUserClient(String(event.headers.authorization || event.headers.Authorization || '').replace(/^Bearer\s+/i, ''));
   try {
-    const { email_id: emailId, part_id: partId, project_id: projectId, to, label, folder } = JSON.parse(event.body || '{}');
+    const body = JSON.parse(event.body || '{}');
+    const { email_id: emailId, part_id: partId, project_id: projectId, to, label, supplier_quote_request_id: requestId } = body;
+    let folder = body.folder;
     if (!UUID.test(String(emailId || '')) || !UUID.test(String(projectId || '')) || partId === undefined || partId === null) return json(400, { ok: false, error: 'email_id, part_id and project_id are required.' });
     if (to !== 'photos' && to !== 'documents') return json(400, { ok: false, error: 'Choose Site Photos or Documents.' });
+    let request = null;
+    if (requestId) {
+      if (to !== 'documents' || !UUID.test(String(requestId)) || !PRICING_ROLES.includes(auth.role)) return json(400, { ok: false, error: 'A supplier quote is filed in Documents by Admin, Finance or Sales.' });
+      const { data: r } = await admin.from('supplier_quote_requests').select('id, project_id, supplier_id').eq('id', requestId).maybeSingle();
+      if (!r || r.project_id !== projectId) return json(404, { ok: false, error: 'That price request is not on this job.' });
+      request = r;
+      folder = SUPPLIER_QUOTES_FOLDER;
+    }
 
     const { data: email } = await admin.from('emails').select('id, thread_id, gmail_message_id, attachments').eq('id', emailId).maybeSingle();
     if (!email) return json(404, { ok: false, error: 'Email not found.' });
@@ -72,8 +85,7 @@ exports.handler = async (event) => {
     let buf = await downloadAttachment(email.gmail_message_id, partId, seen.mailbox);
     if (buf.length > MAX_BYTES) return json(413, { ok: false, error: 'That file is over 25 MB.' });
 
-    let original = String(listed.name || 'file');
-    if (!extOf(original) && EXT_BY_MIME[mime]) original = `${original}.${EXT_BY_MIME[mime]}`;
+    const original = fileNameWithExt(listed.name, mime);
     const caption = String(label || '').trim().slice(0, 200);
     let bucket, path, table, row;
     if (to === 'photos') {
@@ -96,15 +108,16 @@ exports.handler = async (event) => {
     const { data: made, error } = await asUser.from(table).insert(row).select('id').single();
     if (error) { await admin.storage.from(bucket).remove([path]); return json(403, { ok: false, error: error.message }); }
     const saved = { kind: to === 'photos' ? 'photo' : 'document', id: made.id };
+    await markAttachmentSaved(admin, email.id, partId, projectId, { ...saved, by: user.id });
 
-    // mark it on the email (read again just before writing, so a save of another attachment is kept)
-    const { data: fresh } = await admin.from('emails').select('attachments').eq('id', email.id).single();
-    const list = (fresh && fresh.attachments) || [];
-    const entry = list.find(a => String(a.part_id) === String(partId));
-    if (entry) {
-      entry.saved_to = [...(entry.saved_to || []), { project_id: projectId, ...saved, at: new Date().toISOString(), by: user.id }];
-      const { error: markErr } = await admin.from('emails').update({ attachments: list }).eq('id', email.id);
-      if (markErr) console.error('save-email-attachment: saved, but could not mark the email', email.id, markErr.message);
+    if (request) {
+      // the supplier's quote: a row the mailbox worker reads next (it is started now)
+      const { error: sqErr } = await admin.from('supplier_quotes').insert({
+        project_id: projectId, supplier_id: request.supplier_id, request_id: request.id, document_id: made.id,
+        file_path: path, file_name: row.file_name, mime_type: mime, email_id: email.id, attachment_part_id: String(partId), status: 'reading', created_by: user.id,
+      });
+      if (sqErr && !/duplicate|unique/i.test(sqErr.message)) throw sqErr;
+      startMailboxWork().catch(err => console.error('save-email-attachment: could not start the mailbox worker', err.message));
     }
     return json(200, { ok: true, ...saved });
   } catch (err) {

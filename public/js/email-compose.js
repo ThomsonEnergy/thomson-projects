@@ -91,7 +91,7 @@ function emailLocalFilePicker(el, opts = {}) {
 // js/email-job-files.js (Save to job, Add from job), downloaded the first time a page needs it so the
 // job page, Inbox and PO pages stay within their weight budgets. Resolves once it is ready.
 function emailJobFilesReady() {
-  return (emailJobFilesReady.p ||= loadJsOnce('/js/email-job-files.js?v=1', () => typeof openJobFilePicker === 'function')
+  return (emailJobFilesReady.p ||= loadJsOnce('/js/email-job-files.js?v=2', () => typeof openJobFilePicker === 'function')
     .catch((err) => { emailJobFilesReady.p = null; throw err; }));
 }
 
@@ -124,7 +124,8 @@ const emailSendNow = (payload) => emailPostFn('send-gmail', payload, 'The email 
 //         attachOptions: [{ group, label, bucket, path, name, size, checked }], onSent(threadId, { attachments, to }),
 //         mailbox: { id, address, kind } (send from My inbox instead of sales@), draftId (a saved draft: Save draft
 //         button, and the draft is cleared once sent), onDraftSaved(),
-//         invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } (js/invoice-actions.js: the send goes in the invoice's history) }
+//         invoiceEvent: { invoiceId, kind: 'emailed' | 'reminder' } (js/invoice-actions.js: the send goes in the invoice's history),
+//         onClose() (Cancel pressed, nothing sent) }
 function openEmailComposer(opts) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:120; padding:16px;';
@@ -165,7 +166,8 @@ function openEmailComposer(opts) {
     extra: () => ({ count: ticked().length, bytes: ticked().reduce((n, o) => n + (o.size || 0), 0) }),
   });
   overlay.querySelectorAll('.ec-opt').forEach(c => c.addEventListener('change', picker.refresh));
-  overlay.querySelector('#ec-cancel').addEventListener('click', () => overlay.remove());
+  // onClose: the window was closed without sending (js/supplier-quotes.js opens the next supplier's)
+  overlay.querySelector('#ec-cancel').addEventListener('click', () => { overlay.remove(); if (opts.onClose) opts.onClose(); });
   let draftId = opts.draftId || null;
   const saveBtn = overlay.querySelector('#ec-save');
   if (saveBtn) saveBtn.addEventListener('click', async () => {
