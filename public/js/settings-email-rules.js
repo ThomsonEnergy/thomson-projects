@@ -19,11 +19,12 @@ async function loadEmailRulesCard() {
   const boxName = (id) => (boxes || []).find((b) => b.id === id)?.address || '';
   const who = (id) => (staff || []).find((p) => p.id === id)?.full_name || '';
   const when = (iso) => new Date(iso).toLocaleDateString('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' });
-  el.innerHTML = `<table class="cleanup-table" style="font-size:13px;"><tbody>${rules.map((r) => `<tr>
-      <td>${escapeHtml(r.sender)}<div class="subtitle" style="font-size:12px;">${escapeHtml(boxName(r.mailbox_id))}</div></td>
-      <td>${r.label_id ? '&rarr; ' + escapeHtml(labelName(r.label_id)) : '<span style="color:var(--muted);">no label from Postie</span>'}</td>
-      <td class="subtitle" style="font-size:12px; white-space:nowrap;">${escapeHtml(who(r.created_by))} ${when(r.created_at)}${r.taught_by_thread_id ? ` &middot; <a href="/inbox.html?thread=${r.taught_by_thread_id}" class="link-quiet">the email</a>` : ''}</td>
-      <td style="white-space:nowrap;"><button type="button" class="secondary" data-rule="${r.id}" style="font-size:12px; padding:3px 8px;">Remove</button></td>
+  const td = 'style="padding:8px 6px; border-bottom:1px solid var(--border); vertical-align:top;"';
+  el.innerHTML = `<table style="width:100%; border-collapse:collapse; font-size:13px;"><tbody>${rules.map((r) => `<tr>
+      <td ${td}>${escapeHtml(r.sender)}<div class="subtitle" style="font-size:12px;">${escapeHtml(boxName(r.mailbox_id))}</div></td>
+      <td ${td}>${r.label_id ? '&rarr; ' + escapeHtml(labelName(r.label_id)) : '<span style="color:var(--muted);">no label from Postie</span>'}</td>
+      <td ${td} class="subtitle" style="font-size:12px; white-space:nowrap; padding:8px 6px; border-bottom:1px solid var(--border);">${escapeHtml(who(r.created_by))} ${when(r.created_at)}${r.taught_by_thread_id ? ` &middot; <a href="/inbox.html?thread=${r.taught_by_thread_id}" class="link-quiet">the email</a>` : ''}</td>
+      <td ${td} style="white-space:nowrap; padding:8px 6px; border-bottom:1px solid var(--border);"><button type="button" class="secondary" data-rule="${r.id}" style="font-size:12px; padding:3px 8px;">Remove</button></td>
     </tr>`).join('')}</tbody></table>`;
   el.querySelectorAll('[data-rule]').forEach((b) => b.addEventListener('click', async () => {
     const { error: err } = await supabaseClient.from('email_label_rules').delete().eq('id', b.dataset.rule);

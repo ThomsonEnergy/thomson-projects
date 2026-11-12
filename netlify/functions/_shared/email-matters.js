@@ -69,7 +69,11 @@ async function groupOldSuggestions(admin, apiKey, mailbox, ctx, usage) {
     .eq('mailbox_id', mailbox.id).not('suggested_label', 'is', null).neq('suggested_label', '').lt('triaged_at', GROUP_BEFORE).limit(200);
   if (!threads || !threads.length) return 0;
   const skip = await taken(admin, threads.map((t) => t.id));
-  const open = threads.filter((t) => !skip.has(t.id));
+  // a sender a person ruled to no label keeps no suggestion either (item 81)
+  const msgsFor = await messagesFor(admin, threads.map((t) => t.id));
+  const ruledOut = new Set(threads.filter((t) => { const r = labelRuleFor(ctx.labelRules, lastFrom(msgsFor[t.id])); return r && !r.label_id; }).map((t) => t.id));
+  if (ruledOut.size) await admin.from('email_threads').update({ suggested_label: '' }).in('id', [...ruledOut]);
+  const open = threads.filter((t) => !skip.has(t.id) && !ruledOut.has(t.id));
   const names = [...new Set(open.map((t) => t.suggested_label))];
   let groups = [];
   if (names.length) {
@@ -118,6 +122,14 @@ async function fileOldConversations(admin, apiKey, mailbox, ctx, usage, deadline
     const items = threads
       .filter((t) => t.section !== 'updates' && !skip.has(t.id) && isConversation(msgs[t.id]) && !labelRuleFor(ctx.labelRules, lastFrom(msgs[t.id]))) // a person's rule for the sender decides (item 81)
       .map((t) => ({ id: t.id, text: threadText(t, msgs[t.id]), conversation: true }));
+    // a sender a person ruled to a label: filed there, no AI; ruled to no label: left alone
+    for (const t of threads) {
+      const rule = skip.has(t.id) ? null : labelRuleFor(ctx.labelRules, lastFrom(msgs[t.id]));
+      if (!rule) continue;
+      const label = rule.label_id ? ctx.labels.find((l) => l.id === rule.label_id) : null;
+      if (label && await fileUnder(admin, mailbox, t, label)) filed += 1;
+      await admin.from('email_threads').update({ suggested_label: '' }).eq('id', t.id);
+    }
     const picks = items.length ? await chooseLabels(apiKey, { who: inboxWho(mailbox, ctx), labels: ctx.labels, items }, usage) : {};
     const asked = new Set(items.map((i) => i.id));
     let done = 0;

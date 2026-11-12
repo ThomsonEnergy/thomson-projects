@@ -142,8 +142,8 @@
   .ib-row.swipe-done { background:var(--green-dim); }
   .ib-row.swipe-read { background:var(--accent-dim); }
   .ib-row[data-swipe]:not([data-swipe=""])::after { content:attr(data-swipe); position:absolute; top:0; bottom:0; display:flex; align-items:center; font-weight:700; font-size:13px; padding:0 12px; }
-  .ib-row.swipe-done::after { right:100%; color:var(--green); }
-  .ib-row.swipe-read::after { left:100%; color:var(--accent); }
+  .ib-row.swipe-done::after { left:100%; color:var(--green); }
+  .ib-row.swipe-read::after { right:100%; color:var(--accent); }
   .ib-row.gone { transition:transform .2s, opacity .2s; opacity:0; }
   .back-btn { display:none; }
   @media (max-width: 1000px) {
@@ -472,16 +472,20 @@
       if (dl) dl.addEventListener('click', disconnectMine);
       // right-click (hold on the phone) on a label: its menu
       side.querySelectorAll('[data-view^="label:"]').forEach(a => {
-        a.addEventListener('contextmenu', (e) => { e.preventDefault(); const l = S.labels.find(x => x.id === a.dataset.view.slice(6)); if (l) labelMenu(l, e.clientX, e.clientY); });
-        holdToOpen(a, (x, y) => { const l = S.labels.find(x2 => x2.id === a.dataset.view.slice(6)); if (l) labelMenu(l, x, y); });
+        a.addEventListener('contextmenu', (e) => { e.preventDefault(); const l = S.labels.find(x => x.id === a.dataset.view.slice(6)); if (l) labelMenu(l, e.clientX, e.clientY, a); });
+        holdToOpen(a, (x, y) => { const l = S.labels.find(x2 => x2.id === a.dataset.view.slice(6)); if (l) labelMenu(l, x, y, a); });
       });
     }
 
     // ---------- menus: right-click on a laptop, hold on the phone (item 81) ----------
 
-    function closeMenu() { document.querySelectorAll('.ctx-menu').forEach(m => m.remove()); }
-    // items: { label, run, danger } or { head } or '-' for a line
-    function showMenu(x, y, items) {
+    let menuOff = null; // the open menu's document listeners, removed with it
+    function closeMenu() { document.querySelectorAll('.ctx-menu').forEach(m => m.remove()); if (menuOff) { menuOff(); menuOff = null; } }
+    // items: { label, run, danger } or { head } or '-' for a line. src: the element asked, so a
+    // hold and a contextmenu on the same spot (Android fires both) open one menu, not two
+    function showMenu(x, y, items, src) {
+      if (src && src.dataset.menuAt && Date.now() - +src.dataset.menuAt < 700) return;
+      if (src) src.dataset.menuAt = String(Date.now());
       closeMenu();
       const m = document.createElement('div');
       m.className = 'ctx-menu';
@@ -493,12 +497,13 @@
       m.addEventListener('click', (e) => e.stopPropagation());
       m.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const it = items[+b.dataset.i]; closeMenu(); it.run(); }));
       setTimeout(() => {
-        let off = null;
-        const esc = (e) => { if (e.key === 'Escape' && off) off(); };
-        off = () => { closeMenu(); document.removeEventListener('keydown', esc); };
-        document.addEventListener('click', off, { once: true });
-        document.addEventListener('contextmenu', off, { once: true });
+        if (!m.isConnected) return;
+        const esc = (e) => { if (e.key === 'Escape') closeMenu(); };
+        const away = () => closeMenu();
+        document.addEventListener('click', away);
+        document.addEventListener('contextmenu', away);
         document.addEventListener('keydown', esc);
+        menuOff = () => { document.removeEventListener('click', away); document.removeEventListener('contextmenu', away); document.removeEventListener('keydown', esc); };
       }, 0);
     }
     // hold (500 ms, no movement) opens a menu on a touch screen
@@ -527,11 +532,11 @@
       showMenu(x, y, items);
     }
     const afterChange = async (threadId) => { await Promise.all([loadLabels(), loadDrafts()]); await renderSide(); await loadList(); if (threadId && S.activeThreadId === threadId) openThread(threadId, { keepUrl: true }); };
-    function labelMenu(label, x, y) {
+    function labelMenu(label, x, y, src) {
       const done = label.status === 'done';
       showMenu(x, y, [
         { head: label.name },
-        { label: 'Open', run: () => { S.view = 'label:' + label.id; S.activeThreadId = null; renderSide(); loadList(); } },
+        { label: 'Open', run: () => { S.view = 'label:' + label.id; S.activeThreadId = null; S.search = ''; document.getElementById('inbox-search').value = ''; renderSide(); loadList(); } },
         { label: 'Rename', run: async () => { const name = prompt('New name', label.name); if (!name || !name.trim() || name.trim() === label.name) return; try { await act('update_label', { label_id: label.id, name: name.trim() }); } catch (err) { alert(err.message); } afterChange(); } },
         { label: 'What belongs here', run: () => openLabelEditor(label) },
         { label: 'Merge into...', run: () => pickLabel(x, y, { head: `Merge "${label.name}" into`, exclude: label.id, onPick: async (into) => {
@@ -548,9 +553,9 @@
           if (S.view === 'label:' + label.id) S.view = 'priority';
           afterChange();
         } },
-      ]);
+      ], src);
     }
-    function rowMenu(t, x, y) {
+    function rowMenu(t, x, y, src) {
       const inLabel = !S.search && S.view.startsWith('label:') ? S.view.slice(6) : null;
       const onThread = (S.rowLabels[t.id] || []).map(x2 => S.labels.find(l => l.id === x2.label_id)).filter(Boolean);
       const items = [
@@ -567,7 +572,7 @@
         } }) },
         ...onThread.map(l => ({ label: `Remove label: ${l.name}`, run: async () => { try { await act('remove_label', { thread_id: t.id, label_id: l.id }); } catch (err) { alert(err.message); } afterChange(t.id); } })),
       ];
-      showMenu(x, y, items);
+      showMenu(x, y, items, src);
     }
     // the phone: swipe left on a row for Done, right for Read or Unread; a hold opens the menu
     function bindRowTouch(listBody) {
@@ -577,7 +582,7 @@
         const row = e.target.closest('.ib-row');
         if (!row || e.touches.length !== 1 || row.dataset.id.startsWith('draft:')) { sw = null; return; }
         sw = { row, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, lock: null, held: false };
-        holdTimer = setTimeout(() => { holdTimer = null; if (sw && !sw.lock) { sw.held = true; const t = S.rowThreads[row.dataset.id]; if (t) rowMenu(t, sw.x, sw.y); } }, 500);
+        holdTimer = setTimeout(() => { holdTimer = null; if (sw && !sw.lock) { sw.held = true; const t = S.rowThreads[row.dataset.id]; if (t) rowMenu(t, sw.x, sw.y, row); } }, 500);
       }, { passive: true });
       listBody.addEventListener('touchmove', (e) => {
         if (!sw) return;
@@ -804,7 +809,7 @@
         listEl.querySelectorAll('.ib-row').forEach(a => a.addEventListener('contextmenu', (e) => {
           const t = S.rowThreads[a.dataset.id];
           if (!t) return;
-          e.preventDefault(); rowMenu(t, e.clientX, e.clientY);
+          e.preventDefault(); rowMenu(t, e.clientX, e.clientY, a);
         }));
         // Done and Read or Unread on hover (the row itself opens the conversation)
         listEl.querySelectorAll('.ib-row [data-act]').forEach(b => b.addEventListener('click', async (e) => {
