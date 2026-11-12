@@ -33,7 +33,7 @@ const ROI_ASSUMPTIONS = {
   maxBatteryKwh: 100,
   // Four seasons, each a quarter of the year: what the panels make and the home uses against the
   // yearly average. In each, 30% of days are overcast (about a third of a clear day's power), so
-  // the battery does not fill every day. A site with sun records uses its own (roiSiteSun).
+  // the battery does not fill every day. A site with sun records uses its own seasons (roiSiteSun).
   dayTypes: [{ name: 'clear', share: 0.7, gen: 1.2786 }, { name: 'overcast', share: 0.3, gen: 0.35 }],
   seasons: [
     { name: 'Summer', gen: 1.25, load: 1.10 },
@@ -64,12 +64,14 @@ function roiSiteYield(zoneRating, address) {
 }
 
 // The site's own sun figures (projects.site_sun, item 75, written by site-sun.js) when they are
-// for this address and believable; else null, and the zone's figures are used.
+// for this address and believable; else null, and the zone's figures are used. Only the yearly
+// figure and the seasons are taken. The clear and dull days are not: the records average an area
+// about 100 km across, which hides a roof's dull days (first live run: 1 day in 10, not 3).
 function roiSiteSun(s, address) {
   if (!s || String(s.for_address || '').trim() !== String(address || '').trim()) return null;
-  const y = roiNum(s.yield_per_kw), c = roiNum(s.clear_share), o = roiNum(s.overcast_output), seasons = [].concat(s.seasons || []).map(roiNum);
-  const ok = y >= 2.5 && y <= 6 && c >= 0.3 && c <= 1 && o != null && o >= 0 && o <= 0.9 && seasons.length === 4 && seasons.every(v => v >= 0.3 && v <= 1.8);
-  return ok ? { yield: y, clearShare: c, overcastGen: o, seasons, years: String(s.years || 'ten years') } : null;
+  const y = roiNum(s.yield_per_kw), seasons = [].concat(s.seasons || []).map(roiNum);
+  const ok = y >= 2.5 && y <= 6 && seasons.length === 4 && seasons.every(v => v >= 0.3 && v <= 1.8);
+  return ok ? { yield: y, seasons, years: String(s.years || 'ten years') } : null;
 }
 
 // The assumed values in use: the normal ones (the site's own sun figures when it has them), with
@@ -81,8 +83,8 @@ function roiSettings(inputs, zoneRating, siteAddress, siteSun) {
   const num = (key, min, max) => { const n = roiNum(typed[key]); return n != null && n >= min && n <= max ? n : null; };
   const site = roiSiteSun(siteSun, siteAddress);
   const zoneYield = site ? site.yield : roiSiteYield(zoneRating, siteAddress);
-  const clearShare = num('clear_day_share', 0.3, 1) ?? (site ? site.clearShare : A.dayTypes[0].share);
-  const overcastGen = num('overcast_output', 0, 0.9) ?? (site ? site.overcastGen : A.dayTypes[1].gen);
+  const clearShare = num('clear_day_share', 0.3, 1) ?? A.dayTypes[0].share;
+  const overcastGen = num('overcast_output', 0, 0.9) ?? A.dayTypes[1].gen;
   // a clear day is lifted so that the clear and the overcast days still average to the yearly yield
   const dayTypes = clearShare >= 0.999 ? [{ name: 'clear', share: 1, gen: 1 }]
     : [{ name: 'clear', share: clearShare, gen: (1 - (1 - clearShare) * overcastGen) / clearShare }, { name: 'overcast', share: 1 - clearShare, gen: overcastGen }];
@@ -1090,7 +1092,7 @@ function roiBasisLists({ est, reading, gaps, dollars, bills, money, overridden, 
     const fromRecords = S.sunRecords && S.typed.yield_per_kw == null ? `, from the sun records for your area (${S.sunRecords})` : '';
     assumed.push(['Sun', `${S.yieldPerKw} kWh a day from each kW of panels${fromRecords}. That is the average over the whole year, with cloudy days and normal losses already counted`]);
     const clear = Math.round(S.clearShare * 10);
-    assumed.push(['Clear and dull days', clear >= 10 ? 'Every day is taken as an average day' : `The year's sun is spread as ${clear} clear days in 10 and ${10 - clear} overcast${S.typed.overcast_output != null || S.sunRecords ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}. That does not change the yearly total: it allows for dull days, when the panels cover less of the home${est.batteryKwh > 0 ? ' and the battery does not fill' : ''}`]);
+    assumed.push(['Clear and dull days', clear >= 10 ? 'Every day is taken as an average day' : `The year's sun is spread as ${clear} clear days in 10 and ${10 - clear} overcast${S.typed.overcast_output != null ? ` (an overcast day making ${Math.round(S.overcastGen * 100)}% of a normal day's power)` : ''}. That does not change the yearly total: it allows for dull days, when the panels cover less of the home${est.batteryKwh > 0 ? ' and the battery does not fill' : ''}`]);
   }
   if (Object.keys(S.typed).some(k => /^season_/.test(k))) assumed.push(['Seasons', `Against the yearly average, summer, autumn, winter and spring: panels make ${S.seasons.map(sn => `${Math.round(sn.gen * 100)}%`).join(', ')}; the home uses ${S.seasons.map(sn => `${Math.round(sn.load * 100)}%`).join(', ')}`]);
   if (home.existingKw > 0) assumed.push(['Your existing solar', `${home.existingKw} kW${typedIn.has('existing') ? ' (our estimate: we do not have its size)' : ''}${home.ownSolarKwh > 0 ? `, supplying about ${roiKwh(home.ownSolarKwh)} a year that your bill does not show` : ''}. ${home.existingRemoved ? 'It comes off the roof with this job' : 'It stays and keeps working'}`]);

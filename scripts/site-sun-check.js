@@ -76,7 +76,8 @@ say(alike.yield_per_kw > 3.5 && alike.yield_per_kw < 5, 'quote: two cities readi
 // 5. The estimate takes them, and only for the address they are for.
 const address = '1 Example St, Sampletown NSW 2484';
 const got = roiSettings({}, 1.382, address, { ...at(4.9), for_address: address });
-say(got.sunRecords === '2015 to 2024' && got.yieldPerKw === at(4.9).yield_per_kw && near(got.clearShare, at(4.9).clear_share, 1e-9), 'estimate: the site\'s figures are the normal values on its quote');
+say(got.sunRecords === '2015 to 2024' && got.yieldPerKw === at(4.9).yield_per_kw && near(got.seasons[2].gen, at(4.9).seasons[2], 0.002), 'estimate: the site\'s yearly figure and seasons are the normal values on its quote');
+say(got.clearShare === 0.7 && got.overcastGen === 0.35 && roiSettings({}, 1.382, address, { ...at(4.9), clear_share: 0.9, overcast_output: 0.45, for_address: address }).clearShare === 0.7, 'estimate: the clear and dull days stay the estimate\'s own, whatever the records say');
 say(roiSettings({}, 1.382, '2 Other St, Sydney NSW 2000', { ...at(4.9), for_address: address }).sunRecords === null, 'estimate: figures for another address are not used');
 say(roiSettings({ assumptions: { yield_per_kw: 3.6 } }, 1.382, address, { ...at(4.9), for_address: address }).yieldPerKw === 3.6, 'estimate: a figure typed for the quote still wins');
 

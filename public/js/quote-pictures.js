@@ -12,9 +12,15 @@
 // then). Reads project_photos and the quote's site inspection answers for "From this job's
 // pictures", and other jobs' tagged pictures for "Recent installs with this gear" (js/photo-tags.js,
 // item 73b); a picked picture is copied, so deleting it from Site Photos later never empties the
-// proposal. Uploads go through uploadPhotos(), which compresses them.
+// proposal. Uploads go through uploadPhotos(), which compresses them. "Put equipment on this
+// picture" opens the picture editor (js/photo-compose.js, item 73c): what it saves comes back as
+// a new picture, captioned "Indicative picture".
 
 const QUOTE_PICTURE_CAPTIONS = ['Your site', 'Similar system', 'Indicative picture'];
+// The newest pictures box on the page: how a picture made elsewhere (the picture editor, open for
+// minutes) is added, so it lands on the box now showing even when the page was redrawn meanwhile.
+let quotePicturesAdd = null;
+let quotePicturesComposing = false; // the editor is being opened: a second tap does nothing
 
 function mountQuotePictures({ el, project, onSettled }) {
   if (!el) return;
@@ -61,6 +67,7 @@ function mountQuotePictures({ el, project, onSettled }) {
     }).finally(() => { inFlight--; });
     return queue;
   }
+  quotePicturesAdd = (url, caption) => { list.push({ url, caption }); render(); save(); };
   // leaving with a caption still being typed or a save on its way asks first
   window.addEventListener('beforeunload', (e) => { if (typing || inFlight) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -72,6 +79,7 @@ function mountQuotePictures({ el, project, onSettled }) {
           <input type="text" class="qp-caption" maxlength="80" placeholder="Caption under the picture" value="${escapeHtml(p.caption)}" style="margin:0 0 6px;" />
           <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
             ${QUOTE_PICTURE_CAPTIONS.map(c => `<button type="button" class="${p.caption === c ? '' : 'secondary '}qp-chip" data-caption="${escapeHtml(c)}" style="font-size:12px; padding:4px 10px;">${escapeHtml(c)}</button>`).join('')}
+            <button type="button" class="link-quiet qp-compose" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:4px; font-size:12px; cursor:pointer;">Put equipment on this picture</button>
             <button type="button" class="link-quiet qp-remove" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:4px; font-size:12px; cursor:pointer;">Remove</button>
           </div>
           <p class="subtitle qp-none" style="margin:4px 0 0; font-size:11.5px;${p.caption.trim() ? ' display:none;' : ''}">No caption: the client may take this for their own place.</p>
@@ -94,6 +102,16 @@ function mountQuotePictures({ el, project, onSettled }) {
       input.addEventListener('change', () => { if (typing) save(); });
       row.querySelectorAll('.qp-chip').forEach(b => b.addEventListener('click', () => { list[i].caption = b.dataset.caption; render(); save(); }));
       row.querySelector('.qp-remove').addEventListener('click', () => { list.splice(i, 1); render(); save(); });
+      // the picture editor: this picture is the wall, the result is added as a new picture
+      row.querySelector('.qp-compose').addEventListener('click', () => {
+        if (quotePicturesComposing) return;
+        quotePicturesComposing = true;
+        const picture = list[i];
+        loadJsOnce('/js/photo-compose.js?v=1', () => typeof openPhotoComposer === 'function')
+          .then(() => openPhotoComposer({ project, baseUrl: picture.url, others: list.filter(p => p !== picture), onSaved: (url) => quotePicturesAdd(url, 'Indicative picture') }))
+          .catch((err) => say(friendlyError(err), true))
+          .finally(() => { quotePicturesComposing = false; });
+      });
     });
   }
 
