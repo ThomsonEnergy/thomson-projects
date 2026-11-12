@@ -124,4 +124,19 @@ async function xeroRequest(api, path, { method = 'GET', body = null } = {}) {
   return json;
 }
 
-module.exports = { getXeroToken, xeroRequest, redactSensitive };
+
+// Uploads a file as an attachment (PUT Invoices/{id}/Attachments/{name}, CreditNotes/... too): the body
+// is the file itself, not JSON. Used by _shared/push-bill-to-xero.js to put the supplier's invoice on the bill.
+async function xeroUpload(path, buffer, contentType) {
+  const token = await getXeroToken();
+  const res = await fetch(`https://api.xero.com/api.xro/2.0/${path}`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json', 'Content-Type': contentType || 'application/octet-stream', 'Content-Length': String(buffer.length) },
+    body: buffer,
+  });
+  if (!res.ok) throw new Error(`Xero did not take the attachment (${res.status})`);
+  const text = await res.text();
+  try { return text ? JSON.parse(text) : {}; } catch { return {}; }
+}
+
+module.exports = { getXeroToken, xeroRequest, redactSensitive, xeroUpload };
