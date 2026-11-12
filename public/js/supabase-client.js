@@ -6048,6 +6048,17 @@ async function resolveSupplierAndHandoff(extracted, uploadType, extractedPayload
 
 function poQty(n) { return String(Math.round((Number(n) || 0) * 100) / 100); }
 
+// How alike two item names are, 0 to 1 (words over two letters in common). Suggest POs on the job
+// page and the supplier price request (js/supplier-quotes.js) match quoted lines to Stock with it.
+function fuzzyMatchScore(a, b) {
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const wordsA = new Set(norm(a));
+  const wordsB = norm(b);
+  if (!wordsA.size || !wordsB.length) return 0;
+  const matches = wordsB.filter(w => wordsA.has(w)).length;
+  return matches / Math.max(wordsA.size, wordsB.length);
+}
+
 function poLineMoney(li) {
   return `${li.quantity} × ${money(li.unit_cost)} = ${money(li.quantity * li.unit_cost)}`;
 }
@@ -7140,7 +7151,7 @@ const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=10
 // The Stock / prebuild picker (js/stock-picker.js): variations on the job page and items added to an invoice.
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([
-  loadJsOnce('/js/email-compose.js?v=12', () => typeof openEmailComposer === 'function'),
+  loadJsOnce('/js/email-compose.js?v=13', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
   loadJsOnce('/js/invoice-actions.js?v=4', () => typeof openInvoicePanel === 'function'),
 ]);
