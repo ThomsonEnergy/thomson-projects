@@ -30,7 +30,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=134"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -48,6 +48,7 @@
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
   <script src="/js/email-compose.js?v=12"></script>
+  <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/job-schedule.js?v=3"></script>
   <script src="/js/job-contacts.js?v=3"></script>
   <script src="/js/share-with-client.js?v=1"></script>
@@ -8241,9 +8242,11 @@
       // A PO with a line on another job, the Warehouse or a van shows only this job's share
       // (poJobShare), with the whole PO's figure under it so the supplier's bill still adds up.
       const shares = pos.map(po => [po, poJobShare(po, projectId)]);
+      // emailed bills still waiting for a PO, counted on the row (js/po-bills-match.js, item 83); pricing roles see them
+      const toMatch = typeof loadBillsToMatch === 'function' && isPricingRole(await getMyRole()) ? await loadBillsToMatch([...new Set(pos.map(po => po.supplier_id).filter(Boolean))]) : [];
       listEl.innerHTML = shares.map(([po, share]) => {
         const stage = stageName(po.cost_centre_id);
-        const stageNote = stage ? `<span class="subtitle">${escapeHtml(stage)}</span>` : '';
+        const stageNote = (stage ? `<span class="subtitle">${escapeHtml(stage)}</span>` : '') + (billsToMatchNote(toMatch, po) ? ' ' + billsToMatchNote(toMatch, po) : '');
         if (share.whole) return renderPoRow(po, { showWhere: false, note: stageNote });
         return renderPoRow(po, { showWhere: false, note: share.note + stageNote, progress: share.progress, total: share.amount, totalNote: `of PO ${money(poTotalAmount(po))}` });
       }).join('') + `<p class="subtitle" style="margin-top:6px;">Total on this job: ${money(shares.reduce((s, [, share]) => s + share.amount, 0))}</p>`;

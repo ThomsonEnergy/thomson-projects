@@ -6480,9 +6480,16 @@ async function loadBillsForPos(poIds) {
   const out = {};
   if (!poIds || !poIds.length) return out;
   const { data, error } = await supabaseClient.from('supplier_bills')
-    .select('id, po_id, bill_number, bill_date, amount, paid, approved_for_payment, pay_on, check_status, query_sent_at, supplier_bill_line_items(id, description, quantity, unit_cost, po_line_item_id, flag_reason, resolution, resolution_note)')
+    .select('id, po_id, bill_number, bill_date, amount, paid, approved_for_payment, pay_on, check_status, query_sent_at, file_path, file_name, supplier_bill_line_items(id, description, quantity, unit_cost, po_line_item_id, flag_reason, resolution, resolution_note)')
     .in('po_id', poIds).order('bill_date', { ascending: false });
   if (error) { console.error('bills for POs:', error.message); return out; }
+  // the packing slips filed with each bill (item 83): shown as Open docket beside the invoice
+  const ids = (data || []).map(b => b.id);
+  if (ids.length) {
+    const { data: dockets } = await supabaseClient.from('supplier_bill_inbox').select('bill_id, file_path, file_name')
+      .in('bill_id', ids).eq('extracted->>document_type', 'delivery_docket').not('file_path', 'is', null);
+    (dockets || []).forEach(d => { const b = data.find(x => x.id === d.bill_id); if (b) (b.dockets = b.dockets || []).push(d); });
+  }
   (data || []).forEach(b => { (out[b.po_id] = out[b.po_id] || []).push(b); });
   return out;
 }
@@ -6520,6 +6527,8 @@ function renderPoBills(bills, po, role) {
         <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center; font-size:13px;">
           <span><strong>Bill ${escapeHtml(b.bill_number || '(no number)')}</strong>${b.bill_date ? ' &middot; ' + escapeHtml(poShortDay(b.bill_date)) : ''} &middot; ${money(b.amount)}</span>
           <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${billStatusChip(b)}
+            ${b.file_path ? `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(b.file_path)}" title="${escapeHtml(b.file_name || '')}">Open invoice</button>` : ''}
+            ${(b.dockets || []).map(d => `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(d.file_path)}" title="${escapeHtml(d.file_name || '')}">Open docket</button>`).join('')}
             ${canDecide && !b.paid && needsWord(b) ? `<button type="button" class="secondary btn-sm po-bill-query-btn" data-bill-id="${b.id}">${b.query_sent_at ? 'Email supplier again' : 'Query supplier'}</button>` : ''}
           </span>
         </div>
@@ -6613,6 +6622,10 @@ function wirePoBillButtons(containerEl, onComplete) {
   containerEl.querySelectorAll('.po-bill-query-btn').forEach(btn => btn.addEventListener('click', async () => {
     await openSupplierQueryEmail(btn.dataset.billId);
     if (onComplete) await onComplete();
+  }));
+  // the supplier's invoice (and any packing slip filed with it), one tap from the bill (item 83)
+  containerEl.querySelectorAll('.po-bill-file-btn').forEach(btn => btn.addEventListener('click', async () => {
+    try { await openSignedDocInNewTab(btn.dataset.path); } catch (err) { alert(friendlyError(err)); }
   }));
 }
 

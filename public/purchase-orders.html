@@ -42,6 +42,7 @@
       <div class="stat po-tile" data-tab="waiting" role="button" tabindex="0" title="Ordered, not all in yet"><div class="label">Waiting on delivery</div><div class="value" id="stat-waiting">-</div></div>
       <div class="stat po-tile" data-tab="ready" role="button" tabindex="0" title="Every line received: close them to approve their bills"><div class="label">Ready to close</div><div class="value" id="stat-ready">-</div></div>
       <div class="stat po-tile" data-tab="bills" role="button" tabindex="0" title="A bill line not on the PO or charged more"><div class="label">Bills needing a decision</div><div class="value" id="stat-bills">-</div></div>
+      <div class="stat po-tile" data-tab="match" role="button" tabindex="0" title="An emailed bill with no PO number on it: say which PO it is for" style="display:none;"><div class="label">Bills to match</div><div class="value" id="stat-match">-</div></div>
     </div>
 
     <div class="card">
@@ -50,6 +51,7 @@
         <button type="button" class="settings-tab" data-tab="waiting">Waiting on delivery</button>
         <button type="button" class="settings-tab" data-tab="ready">Ready to close</button>
         <button type="button" class="settings-tab" data-tab="bills" id="po-tab-bills" style="display:none;">Bills needing a decision</button>
+        <button type="button" class="settings-tab" data-tab="match" id="po-tab-match" style="display:none;">Bills to match</button>
         <button type="button" class="settings-tab" data-tab="closed">Closed</button>
       </div>
       <input id="po-search" placeholder="Search by PO number, supplier, job or vehicle..." style="max-width:380px; margin-bottom:12px;" />
@@ -57,13 +59,15 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=133"></script>
+  <script src="/js/supabase-client.js?v=134"></script>
   <script src="/js/email-compose.js?v=12"></script>
+  <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // The list: open POs load first (lines and bill states, no bill lines); Closed loads when asked
     // for. Everything about one PO happens on purchase-order.html. Backlog item 31.
     let openPos = [];
+    let toMatch = []; // emailed bills with no sure PO (js/po-bills-match.js, item 83), pricing roles
     let closedPos = null; // loaded on the Closed tab
     let myRole = 'staff';
     let tab = 'open';
@@ -85,6 +89,8 @@
       closedPos = null;
       myRole = await getMyRole();
       document.getElementById('po-tab-bills').style.display = isPricingRole(myRole) ? '' : 'none';
+      toMatch = isPricingRole(myRole) ? await loadBillsToMatch(null) : [];
+      document.getElementById('po-tab-match').style.display = isPricingRole(myRole) && toMatch.length ? '' : 'none';
       renderStats();
       await renderList();
     }
@@ -103,6 +109,7 @@
     }
 
     const needsDecision = (po) => (po.supplier_bills || []).some(poBillNeedsDecision);
+    const needsMatch = (po) => billsToMatchFor(toMatch, po).length > 0;
     const isReady = (po) => !po.closed_at && po.status === 'received' && (po.purchase_order_line_items || []).length > 0;
     const isWaiting = (po) => !po.closed_at && !isReady(po);
 
@@ -112,10 +119,17 @@
       const billsTile = document.querySelector('.po-tile[data-tab="bills"]');
       billsTile.style.display = isPricingRole(myRole) ? '' : 'none';
       document.getElementById('stat-bills').textContent = openPos.filter(needsDecision).length;
+      const matchTile = document.querySelector('.po-tile[data-tab="match"]');
+      const showMatch = isPricingRole(myRole) && toMatch.length > 0;
+      matchTile.style.display = showMatch ? '' : 'none';
+      document.getElementById('po-tiles').classList.toggle('cols-4', showMatch);
+      document.getElementById('po-tiles').classList.toggle('cols-3', !showMatch);
+      document.getElementById('stat-match').textContent = toMatch.length;
     }
 
     // Open POs: the ones needing a decision first, then ready to close, then part received, then ordered.
     function openOrder(po) {
+      if (needsMatch(po)) return 0;
       if (needsDecision(po)) return 0;
       if (isReady(po)) return 1;
       if (po.status === 'part_received') return 2;
@@ -137,6 +151,7 @@
         if (tab === 'waiting') rows = rows.filter(isWaiting);
         if (tab === 'ready') rows = rows.filter(isReady);
         if (tab === 'bills') rows = rows.filter(needsDecision);
+        if (tab === 'match') rows = rows.filter(needsMatch);
       }
       if (q) {
         rows = rows.filter(po =>
@@ -147,11 +162,11 @@
         );
       }
       if (!rows.length) {
-        const empty = { open: 'No open purchase orders.', waiting: 'Nothing waiting on delivery.', ready: 'Nothing ready to close.', bills: 'No bills need a decision.', closed: 'No closed purchase orders.' }[tab];
+        const empty = { open: 'No open purchase orders.', waiting: 'Nothing waiting on delivery.', ready: 'Nothing ready to close.', bills: 'No bills need a decision.', match: 'No emailed bills waiting for a PO.', closed: 'No closed purchase orders.' }[tab];
         listEl.innerHTML = `<p class="subtitle">${q ? 'No purchase orders match.' : empty}</p>`;
         return;
       }
-      listEl.innerHTML = rows.map(po => renderPoRow(po)).join('')
+      listEl.innerHTML = rows.map(po => renderPoRow(po, { note: billsToMatchNote(toMatch, po) })).join('')
         + (tab === 'closed' && rows.length >= 300 ? '<p class="subtitle">Showing the last 300 closed. Search for an older one by PO number.</p>' : '');
     }
 

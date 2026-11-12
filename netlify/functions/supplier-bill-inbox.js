@@ -3,11 +3,14 @@
 // Pricing roles only (the same people who can save supplier bills).
 //
 //   save          { id, po_id, amount } save the bill against that PO (po_id null = no PO); amount is the
-//                                      bill total the person has confirmed (inc GST, as on the bill)
+//                                      bill total the person has confirmed (inc GST, as on the bill).
+//                                      Also the one tap on a PO page ("This bill is for PO2009", js/po-bills-match.js).
+//                                      A packing slip (document_type delivery_docket) is refused: nothing to pay.
 //   set_supplier  { id, supplier_id }  supplier picked by hand: match the POs again
 //   mark_saved    { id, bill_id }      saved through the full review screen instead
 //   not_a_bill    { id }               not a bill (statement, remittance, spam): put aside
 //   reopen        { id }               bring a put-aside or duplicate one back to check
+//   is_a_bill     { id }               a file the reader called a packing slip is a bill after all: matched again as an invoice
 //   retry         { id }               read the file again (after a failure)
 //   delete        { id }               a duplicate or something that is not a bill: hide it for good (the row
 //                                      stays as 'deleted' so the 30-day Gmail search does not bring it back;
@@ -19,7 +22,7 @@
 //                                      never shows in Pay bills due.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { analyse, saveInboxItemAsBill, startSupplierBillProcessing } = require('./_shared/supplier-bill-intake');
+const { analyse, saveInboxItemAsBill, fileDocketsWithBill, startSupplierBillProcessing } = require('./_shared/supplier-bill-intake');
 const { FINANCE_ROLES } = require('./_shared/require-finance-role');
 const { sydneyToday, isCalendarDate } = require('./_shared/bill-check');
 
@@ -60,11 +63,21 @@ exports.handler = async (event) => {
       const { data: bill } = await supabaseAdmin.from('supplier_bills').select('id, supplier_id, po_id').eq('id', billId).maybeSingle();
       if (!bill) return json(404, { ok: false, error: 'That bill was not found.' });
       await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'saved', bill_id: bill.id, supplier_id: bill.supplier_id, po_id: bill.po_id, ...resolved }).eq('id', id);
+      await fileDocketsWithBill(supabaseAdmin, bill.id, { gmailMessageId: item.gmail_message_id }); // the packing slip from the same email
       return json(200, { ok: true });
     }
 
     if (action === 'not_a_bill') {
       await supabaseAdmin.from('supplier_bill_inbox').update({ status: 'not_a_bill', ...resolved }).eq('id', id);
+      return json(200, { ok: true });
+    }
+
+    if (action === 'is_a_bill') {
+      // the reader called it a packing slip and a person says it is a bill: read as an invoice from here on
+      if (item.bill_id) return json(400, { ok: false, error: 'That packing slip is filed with a saved bill.' });
+      const ex = { ...(item.extracted || {}), document_type: 'invoice' };
+      const result = await analyse(supabaseAdmin, { ...item, extracted: ex }, { supplierId: item.supplier_id || null });
+      await supabaseAdmin.from('supplier_bill_inbox').update({ ...result, extracted: result.extracted || ex, status: 'to_check', duplicate_of_bill_id: null, resolved_by: null, resolved_at: null }).eq('id', id);
       return json(200, { ok: true });
     }
 
