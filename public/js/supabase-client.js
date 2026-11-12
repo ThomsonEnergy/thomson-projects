@@ -7140,7 +7140,7 @@ const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=10
 // The Stock / prebuild picker (js/stock-picker.js): variations on the job page and items added to an invoice.
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([
-  loadJsOnce('/js/email-compose.js?v=11', () => typeof openEmailComposer === 'function'),
+  loadJsOnce('/js/email-compose.js?v=12', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
   loadJsOnce('/js/invoice-actions.js?v=4', () => typeof openInvoicePanel === 'function'),
 ]);
