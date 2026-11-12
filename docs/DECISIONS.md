@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up.
 
+## 13 Nov 2026
+
+- Planned (waiting on yes): item 81, ask suppliers for prices from a quote (RFQ1001, an email with a request PDF, not an order), the supplier's quote filed on the job by itself when it comes back on that conversation and its prices read onto the lines, Convert to PO on the job once the client approves. With it, part A as a bug fix into `main`: any email sent from a quote's Emails tab moved it to Quote Sent; now only an email that carries the quote PDF does. Detail: `docs/IDEAS_BACKLOG.md` item 81.
+
 ## 12 Nov 2026
 
 - Released (Thursday 12 Nov, evening Sydney, the owner's "Release"): item 76, the Inbox on the whole screen, is LIVE. Release PR 401, `main` at `b48eb0a`, no migration. The Kind regards fix (item 78, PR 394) and PR 400 (bill reader photo size, scope page pictures) were on `main` already. Detail: `docs/PROJECT_SPEC.md` A18.
