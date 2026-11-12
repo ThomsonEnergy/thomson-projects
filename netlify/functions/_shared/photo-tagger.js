@@ -16,17 +16,13 @@ const THINGS = ['inverter', 'battery', 'solar panels', 'switchboard', 'meter box
 // never shown to another customer, whatever else the reading says
 const NOT_FOR_OTHERS = ['people', 'paperwork', 'vehicle', 'screen'];
 const VIDEO = /\.(mp4|mov|m4v|webm|avi)(\?|$)/i;
-const STORAGE = '/storage/v1/object/public/';
+const { renderedImageUrl, STORAGE_PUBLIC: STORAGE } = require('./storage-image');
 const MAX_TRIES = 3;        // failed reads before the tagger gives up on a picture
 const CLAIM_MINUTES = 10;   // how long a run holds the pictures it is reading
 
 // The picture as the model is given it: Supabase's resized copy (1,024 px on the long side is
 // plenty to read a logo or a label, and keeps the cost of a picture small).
-function tagImageUrl(url) {
-  const i = String(url || '').indexOf(STORAGE);
-  if (i === -1) return url;
-  return `${url.slice(0, i)}/storage/v1/render/image/public/${url.slice(i + STORAGE.length).split('?')[0]}?width=1024&height=1024&resize=contain&quality=75`;
-}
+const tagImageUrl = (url) => renderedImageUrl(url, { width: 1024, height: 1024, quality: 75 });
 
 // The job's own equipment, as lines for the prompt: the Pylon design's panels, inverters and
 // batteries, each said with its kind. A hint only (the prompt says how far it may be trusted).

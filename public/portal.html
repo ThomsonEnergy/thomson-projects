@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<script>document.documentElement.setAttribute('data-theme', 'navy');</script>
+<title>Your jobs - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=24" />
+<style>
+  /* The client portal (backlog item 74): one page, phone first. Logged in clients see their jobs
+     and quotes; everything comes from portal-read.js. The look follows pick-time.html. */
+  body { padding-top: 0; }
+  .pt-head { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 16px; border-bottom:1px solid var(--border); }
+  .pt-head img { height:32px; }
+  .pt-head .who { font-size:12px; color:var(--muted); text-align:right; }
+  .pt-head .who button { font-size:12px; padding:4px 10px; margin-left:6px; }
+  .wrap { max-width: 720px; }
+  .pl-card { border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin:10px 0; background:var(--surface); }
+  .pl-row { display:block; text-decoration:none; color:inherit; border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin:8px 0; background:var(--surface); }
+  .pl-row:hover { border-color: var(--accent); }
+  .pl-row .ref { font-weight:700; font-size:13px; color:var(--muted); }
+  .pl-row .name { font-weight:600; font-size:16px; margin:2px 0; }
+  .pl-row .site { font-size:13px; color:var(--muted); }
+  .pl-row .status { font-size:14px; margin-top:6px; }
+  .pl-row.done { opacity:0.7; }
+  .pl-status { display:inline-block; font-size:13px; padding:3px 10px; border-radius:999px; background:var(--surface-2); }
+  .pl-status.live { background:#1f8a4c; color:#fff; }
+  .pl-status.warn { background:#b7791f; color:#fff; }
+  .pl-need { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .pl-need:last-child { border-bottom:0; }
+  .pl-need a { white-space:nowrap; }
+  .pl-fact { display:flex; gap:10px; font-size:14px; margin:4px 0; }
+  .pl-fact .k { color:var(--muted); min-width:84px; }
+  .pl-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px; }
+  .pl-grid img { width:100%; height:120px; object-fit:cover; border-radius:8px; display:block; background:#000; }
+  .pl-grid .cap { font-size:11px; color:var(--muted); margin-top:3px; }
+  .pl-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .pl-table th, .pl-table td { text-align:left; padding:6px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .pl-table th { font-weight:600; color:var(--muted); font-size:12px; }
+  .pl-table td.n, .pl-table th.n { text-align:right; white-space:nowrap; }
+  .pl-muted { color:var(--muted); font-size:13px; }
+  .pl-big { font-size:22px; font-weight:700; }
+  .pl-code input { font-size:28px; letter-spacing:8px; text-align:center; width:100%; max-width:260px; }
+  .pl-login { max-width:420px; margin:40px auto; }
+  .pl-login input[type=email] { width:100%; font-size:16px; }
+  .pl-login button { width:100%; margin-top:10px; font-size:16px; padding:12px; }
+  .pl-back { display:inline-block; margin:12px 0 4px; font-size:14px; }
+  h2.pl-h { font-size:16px; margin:18px 0 6px; }
+  .pl-card h3 { font-size:14px; margin:14px 0 4px; }
+  .pl-btn { display:inline-block; padding:6px 12px; font-size:13px; text-decoration:none; }
+  .pl-lightbox { position:fixed; inset:0; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .pl-lightbox img { max-width:96vw; max-height:92vh; object-fit:contain; }
+  @media (max-width: 600px) { .pl-table th:nth-child(3), .pl-table td:nth-child(3) { display:none; } }
+</style>
+</head>
+<body>
+  <div class="pt-head">
+    <a href="/portal.html"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    <div class="who" id="pl-who"></div>
+  </div>
+  <div class="wrap" id="pl-main" style="padding:12px 16px 40px;">
+    <p class="subtitle">Loading...</p>
+  </div>
+  <script src="/js/portal.js?v=3"></script>
+</body>
+</html>

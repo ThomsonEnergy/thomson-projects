@@ -6,19 +6,9 @@
 // also returns invite/sign-in status). Returns nothing except {id, email}
 // pairs - no role/invite/sign-in details.
 
+const { allAuthUsers } = require('./_shared/auth-users');
 const { requireActiveUser } = require('./_shared/require-active-user');
 
-// Every auth user, page by page (the default is the first 50 only: F36 in docs/BUG_REVIEW_2026-10-23.md).
-async function allAuthUsers(supabaseAdmin) {
-  const users = [];
-  for (let page = 1; page <= 50; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw error;
-    users.push(...((data && data.users) || []));
-    if (!data || !data.nextPage || !(data.users || []).length) break;
-  }
-  return users;
-}
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'GET') {
