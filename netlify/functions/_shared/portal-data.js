@@ -247,7 +247,8 @@ const EMPTY_WORK = { labour: [], materials: [], purchaseOrders: [], labourOpen: 
 
 async function portalWork(admin, p) {
   const [actuals, { data: pos }] = await Promise.all([
-    jobActuals(admin, p.id, { includeBilled: true }),
+    // a failed read is the same "not ready" note as a job with no cost centre, never a wrong figure
+    jobActuals(admin, p.id, { includeBilled: true }).catch((err) => ({ ok: false, error: err.message })),
     admin.from('purchase_orders').select('id, po_number, supplier_name, status, received, order_date, cost_centre_id, purchase_order_line_items(description, quantity, unit_cost, received, is_backordered, backorder_eta)').eq('project_id', p.id).neq('po_kind', 'tools').order('order_date', { ascending: false }),
   ]);
   if (!actuals.ok) {

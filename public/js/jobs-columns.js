@@ -1,7 +1,8 @@
-// The Jobs list's columns (backlog item 85): what each column shows, which ones a person has
-// switched on and in what order, and the Columns panel that changes it. The choice is saved on the
-// person's own profile (profiles.ui_prefs.jobs_columns, migration 20261203000000) so the laptop
-// and the phone match, with a copy on the device so the list paints straight away.
+// The Jobs list's columns (backlog item 85): what each column shows, and which ones a person has
+// switched on and in what order. The choice is saved on the person's own profile
+// (profiles.ui_prefs.jobs_columns, migration 20261203000000) so the laptop and the phone match,
+// with a copy on the device so the list paints straight away. The Columns panel that changes it
+// is js/jobs-columns-panel.js, loaded when the button is pressed.
 // Called by projects.html, which loads the rows. Writes profiles.ui_prefs (the person's own row).
 
 const JOB_TYPE_LABELS = { direct_job: 'Do and charge', new_build: 'New build', solar: 'Solar', battery: 'Battery', quick_estimate: 'Quick estimate', renovation: 'Renovation', service_work: 'Service work' };
@@ -74,134 +75,65 @@ function jobsTableHtml(rows, keys, s, devMode) {
 }
 
 const JOBS_COLUMNS_KEY = 'te-jobs-columns';
-// The device's copy (or the default set): what the list paints with before the profile answers.
+// The device's copy: { u: whose it is, k: the keys, d: true while a change has not reached the profile }.
+function jobsColumnsDevice() {
+  try { const v = JSON.parse(localStorage.getItem(JOBS_COLUMNS_KEY)); return v && Array.isArray(v.k) ? v : null; } catch (e) { return null; }
+}
+function jobsColumnsCache(userId, keys, unsaved) {
+  try { localStorage.setItem(JOBS_COLUMNS_KEY, JSON.stringify({ u: userId, k: keys, d: !!unsaved })); } catch (e) { /* storage blocked: the profile copy still works */ }
+}
+// What the list paints with before the profile answers.
 function jobsColumnsCached() {
-  try { return jobsColumnsClean(JSON.parse(localStorage.getItem(JOBS_COLUMNS_KEY))) || jobsColumnsDefault(); } catch (e) { return jobsColumnsDefault(); }
+  const dev = jobsColumnsDevice();
+  return (dev && jobsColumnsClean(dev.k)) || jobsColumnsDefault();
 }
-function jobsColumnsCache(keys) {
-  try { localStorage.setItem(JOBS_COLUMNS_KEY, JSON.stringify(keys)); } catch (e) { /* storage blocked: the profile copy still works */ }
-}
-async function jobsUiPrefs() {
+async function jobsColumnsSession() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) throw new Error('Not logged in');
-  const { data, error } = await supabaseClient.from('profiles').select('ui_prefs').eq('id', session.user.id).maybeSingle();
+  return session.user.id;
+}
+async function jobsUiPrefs(userId) {
+  const { data, error } = await supabaseClient.from('profiles').select('ui_prefs').eq('id', userId).maybeSingle();
   if (error) throw error;
-  return { userId: session.user.id, prefs: (data && data.ui_prefs) || {} };
+  return (data && data.ui_prefs) || {};
 }
-// The columns saved on the profile, or null when none are saved (or it could not be read: the
-// device's copy carries on).
+// The person's columns once the profile has answered. The profile wins (another device may have
+// changed them), except over a change made on this device that never reached it (the page was
+// left first, or the save failed): that one is kept and sent again. Someone else's device copy is
+// never inherited. null only when nobody is logged in.
+let jobsColumnsUser = null;
 async function loadJobsColumns() {
-  try {
-    const keys = jobsColumnsClean((await jobsUiPrefs()).prefs.jobs_columns);
-    if (keys) jobsColumnsCache(keys);
-    return keys;
-  } catch (err) {
-    console.error('Jobs columns not read from the profile:', err.message);
-    return null;
-  }
+  let userId;
+  try { userId = await jobsColumnsSession(); } catch (err) { return null; }
+  jobsColumnsUser = userId;
+  const dev = jobsColumnsDevice();
+  const mine = dev && dev.u === userId ? jobsColumnsClean(dev.k) : null;
+  if (mine && dev.d) { saveJobsColumns(mine); return mine; }
+  let saved = null;
+  try { saved = jobsColumnsClean((await jobsUiPrefs(userId)).jobs_columns); } catch (err) { console.error('Jobs columns not read from the profile:', err.message); }
+  const keys = saved || mine || jobsColumnsDefault();
+  jobsColumnsCache(userId, keys, false);
+  return keys;
 }
-// Saves to the device now and to the profile half a second after the last change (a drag makes
-// several). The profile is read first so anything else kept in ui_prefs stays. onSaved(error).
+// Saves to the device now (marked unsaved) and to the profile half a second after the last change
+// (a drag makes several). The profile is read first so anything else kept in ui_prefs stays.
+// onSaved(error) when the profile has answered.
 let jobsColumnsSaveTimer = null;
 function saveJobsColumns(keys, onSaved) {
-  jobsColumnsCache(keys);
+  jobsColumnsCache(jobsColumnsUser || (jobsColumnsDevice() || {}).u || null, keys, true);
   clearTimeout(jobsColumnsSaveTimer);
   jobsColumnsSaveTimer = setTimeout(async () => {
     let failed = null;
     try {
-      const { userId, prefs } = await jobsUiPrefs();
+      const userId = await jobsColumnsSession();
+      const prefs = await jobsUiPrefs(userId);
       const { error } = await supabaseClient.from('profiles').update({ ui_prefs: { ...prefs, jobs_columns: keys } }).eq('id', userId);
       if (error) throw error;
+      jobsColumnsCache(userId, keys, false);
     } catch (err) {
       failed = err;
       console.error('Jobs columns not saved to the profile:', err.message);
     }
     if (onSaved) onSaved(failed);
   }, 500);
-}
-
-// The Columns panel. visible: the keys showing now. onChange(keys) runs on every tick, move and
-// reset, so the list behind redraws straight away; the save follows by itself.
-function openJobsColumnsPanel(visible, onChange) {
-  let order = [...visible, ...JOBS_COLUMNS.map((c) => c.key).filter((k) => !visible.includes(k))];
-  let on = new Set(visible);
-  const overlay = openModal(`
-    <h2>Columns</h2>
-    <p class="subtitle" style="margin-bottom:8px;">Tick what to show. Drag a row, or use the arrows, to change the order. Saved for you on every device.</p>
-    <div id="jc-list"></div>
-    <div id="jc-msg"></div>
-    <div style="display:flex; gap:8px; margin-top:12px;">
-      <button type="button" id="jc-done">Done</button>
-      <button type="button" class="secondary" id="jc-reset">Reset to default</button>
-    </div>`, { maxWidth: 400, closeOnBackdrop: true });
-  const list = overlay.querySelector('#jc-list');
-  const msg = overlay.querySelector('#jc-msg');
-  function draw() {
-    list.innerHTML = order.map((k, i) => `
-      <div class="jc-row" draggable="true" data-i="${i}" style="display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid var(--border);">
-        <span aria-hidden="true" style="cursor:grab; color:var(--muted);">&#8942;&#8942;</span>
-        <label style="flex:1; display:flex; align-items:center; gap:8px; margin:0; font-weight:400; cursor:pointer;"><input type="checkbox" data-k="${k}" style="width:auto; margin:0;" ${on.has(k) ? 'checked' : ''} /> ${escapeHtml(jobsColumn(k).label)}</label>
-        <button type="button" class="secondary btn-sm" data-move="-1" title="Move up" ${i ? '' : 'disabled'}>&uarr;</button>
-        <button type="button" class="secondary btn-sm" data-move="1" title="Move down" ${i < order.length - 1 ? '' : 'disabled'}>&darr;</button>
-      </div>`).join('');
-  }
-  function apply() {
-    const keys = order.filter((k) => on.has(k));
-    onChange(keys);
-    saveJobsColumns(keys, (error) => {
-      if (!msg.isConnected) return;
-      msg.innerHTML = error ? '<div class="error-box">Saved on this device only: your profile could not be reached, so other devices keep their own columns for now.</div>' : '';
-    });
-  }
-  function move(from, to) {
-    if (to < 0 || to >= order.length || to === from) return;
-    order.splice(to, 0, order.splice(from, 1)[0]);
-    draw();
-    apply();
-  }
-  list.addEventListener('change', (e) => {
-    const k = e.target.dataset.k;
-    if (!k) return;
-    if (e.target.checked) on.add(k); else on.delete(k);
-    apply();
-  });
-  list.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-move]');
-    if (!btn) return;
-    const i = Number(btn.closest('.jc-row').dataset.i);
-    move(i, i + Number(btn.dataset.move));
-  });
-  // Drag with a mouse; the arrows do the same job on a touch screen.
-  let dragFrom = null;
-  const mark = (row) => list.querySelectorAll('.jc-row').forEach((r) => { r.style.boxShadow = r === row ? 'inset 0 2px 0 var(--accent)' : ''; });
-  list.addEventListener('dragstart', (e) => {
-    const row = e.target.closest('.jc-row');
-    if (!row) return;
-    dragFrom = Number(row.dataset.i);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(dragFrom));
-  });
-  list.addEventListener('dragover', (e) => {
-    if (dragFrom === null) return;
-    e.preventDefault();
-    mark(e.target.closest('.jc-row'));
-  });
-  list.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const row = e.target.closest('.jc-row');
-    const from = dragFrom;
-    dragFrom = null;
-    mark(null);
-    if (row && from !== null) move(from, Number(row.dataset.i));
-  });
-  list.addEventListener('dragend', () => { dragFrom = null; mark(null); });
-  overlay.querySelector('#jc-reset').addEventListener('click', () => {
-    const def = jobsColumnsDefault();
-    order = [...def, ...JOBS_COLUMNS.map((c) => c.key).filter((k) => !def.includes(k))];
-    on = new Set(def);
-    draw();
-    apply();
-  });
-  overlay.querySelector('#jc-done').addEventListener('click', () => overlay.remove());
-  draw();
 }

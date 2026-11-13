@@ -97,12 +97,10 @@
     // next booked day and who, open tasks, open POs, and for pricing roles the materials cost to
     // date: every PO line received to the job and every item taken from stock for it, the moment
     // it is received or used. The job page's Actual cost adds up the same records.
-    let factsError = '';
     async function loadFacts(ids) {
       const { data, error } = await supabaseClient.rpc('jobs_list_facts', { p_project_ids: ids });
-      factsError = error ? friendlyError(error) : '';
-      if (error) { console.error('Jobs facts fetch failed:', error.message); return {}; }
-      return Object.fromEntries((data || []).map(f => [f.project_id, f]));
+      if (error) { console.error('Jobs facts fetch failed:', error.message); return { facts: {}, error: friendlyError(error) }; }
+      return { facts: Object.fromEntries((data || []).map(f => [f.project_id, f])), error: '' };
     }
 
     // Actual labour cost, per job - computed entirely server-side
@@ -134,51 +132,68 @@
       return { labour, indirect, hours };
     }
 
-    let loadSeq = 0; // a slower earlier load must not repaint over a newer one
-    let factsLoaded = false, leftLoaded = false;
+    let loadSeq = 0; // a slower earlier load must not repaint over a newer one, or mark its figures as landed
+    let listReady = false; // the jobs have landed: until then a redraw would say "No jobs yet"
+    let factsLoaded = false, factsError = '';
+    // Left to invoice on do and charge jobs lands in two goes: the jobs not archived with the list,
+    // the archived ones the first time the Archived folder is opened (most old jobs end up there).
+    let leftLoaded = false, leftArchivedLoaded = false;
+    let loadArchivedLeft = () => {};
     async function loadProjects() {
       const seq = ++loadSeq;
+      const live = () => seq === loadSeq;
       const listEl = document.getElementById('projects-list');
       const { data: projects, error } = await supabaseClient.from('projects')
         .select('id, name, job_number, quote_number, client_name, client_address, client_phone, client_email, created_at, pipeline_stage, proposal_template, source_quote:projects!source_quote_id(quote_number), cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
         .not('job_number', 'is', null)
         .order('created_at', { ascending: false });
+      if (!live()) return;
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
       // Cost outlayed is labour (wages and direct overhead, each shift from the moment it is clocked
       // out) plus the materials figure above; null when the person's role is not shown costs.
       // Left to invoice: a quoted job is signed minus invoiced; a do and charge job is the work not
       // yet invoiced at sell price (js/left-to-invoice.js), null until it lands or when not shown.
-      const buildRows = (facts, labour, left) => (projects || []).map(p => {
+      let facts = {}, labour = { labour: {}, indirect: {}, hours: {} };
+      const left = {};
+      const buildRows = () => (projects || []).map(p => {
         const signed = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
         const invoiced = (p.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
         const f = facts[p.id] || null;
         const labourCost = labour.labour[p.id], materials = f ? f.materials_cost : null;
         const costOutlayed = labourCost == null && materials == null ? null : (Number(labourCost) || 0) + (Number(materials) || 0);
         const isDnc = p.proposal_template === 'direct_job';
-        const leftToInvoice = isDnc ? (left && left[p.id] != null ? left[p.id] : null) : Math.max(0, signed - invoiced);
+        const leftToInvoice = isDnc ? (left[p.id] != null ? left[p.id] : null) : Math.max(0, signed - invoiced);
         return { ...p, facts: f, signed, invoiced, costOutlayed, costInclOverheads: costOutlayed == null ? null : costOutlayed + (labour.indirect[p.id] || 0), hours: labour.hours[p.id], isDnc, leftToInvoice };
       });
+      const repaint = () => { if (!live()) return; allRows = buildRows(); renderProjects(); };
 
       // The list paints as soon as the jobs land; dates, costs and do and charge figures fill in after.
-      const none = { labour: {}, indirect: {}, hours: {} };
       const empty = !(projects && projects.length);
-      costsLoaded = factsLoaded = leftLoaded = empty;
-      allRows = buildRows({}, none, null);
-      renderProjects();
+      costsLoaded = factsLoaded = leftLoaded = leftArchivedLoaded = empty;
+      factsError = '';
+      loadArchivedLeft = () => {};
+      listReady = true;
+      repaint();
       if (empty) return;
 
       const ids = projects.map(p => p.id);
-      let facts = {}, labour = none, left = null;
-      const repaint = () => { if (seq !== loadSeq) return; allRows = buildRows(facts, labour, left); renderProjects(); };
-      const factsDone = loadFacts(ids).then(f => { facts = f; factsLoaded = true; });
-      const labourDone = loadLabourCosts(ids).then(l => { labour = l; });
+      const factsDone = loadFacts(ids).then(r => { if (!live()) return; facts = r.facts; factsError = r.error; factsLoaded = true; });
+      const labourDone = loadLabourCosts(ids).then(l => { if (live()) labour = l; });
       factsDone.then(repaint);
-      Promise.all([factsDone, labourDone]).then(() => { costsLoaded = true; repaint(); });
-      fetchLeftToInvoice(projects.filter(p => p.proposal_template === 'direct_job').map(p => p.id)).then(l => { left = l; leftLoaded = true; repaint(); });
+      Promise.all([factsDone, labourDone]).then(() => { if (!live()) return; costsLoaded = true; repaint(); });
+      const dnc = (archived) => projects.filter(p => p.proposal_template === 'direct_job' && (p.pipeline_stage === 'archived') === archived).map(p => p.id);
+      fetchLeftToInvoice(dnc(false)).then(l => { if (!live()) return; Object.assign(left, l || {}); leftLoaded = true; repaint(); });
+      let archivedAsked = false;
+      loadArchivedLeft = () => {
+        if (archivedAsked) return;
+        archivedAsked = true;
+        fetchLeftToInvoice(dnc(true)).then(l => { if (!live()) return; Object.assign(left, l || {}); leftArchivedLoaded = true; repaint(); });
+      };
     }
 
     function renderProjects() {
+      if (!listReady) return;
       const listEl = document.getElementById('projects-list');
       const q = document.getElementById('project-search').value.trim().toLowerCase();
       // Folder counts ignore the search box, as the Quotes tabs do.
@@ -203,6 +218,8 @@
       }));
 
       const folderRows = allRows.filter(p => inFolder(p, currentFolder));
+      if (currentFolder === 'archived') loadArchivedLeft();
+      const leftNow = currentFolder === 'archived' ? leftArchivedLoaded : leftLoaded;
       const filtered = q
         ? folderRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || (p.client_address || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
         : folderRows;
@@ -215,7 +232,8 @@
       document.getElementById('stat-cost').textContent = !costsLoaded ? '...' : costShown ? money(totals.cost) : '-';
       document.getElementById('stat-cost-incl').textContent = costsLoaded && costShown ? `incl. overheads ${money(totals.costIncl)}` : '';
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
-      document.getElementById('stat-left').textContent = leftLoaded ? money(totals.left) : '...';
+      // a total with a job's figure missing (not this role's to see, or it could not be read) would read low: show none
+      document.getElementById('stat-left').textContent = !leftNow ? '...' : filtered.every(p => p.leftToInvoice != null) ? money(totals.left) : '-';
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">${allRows.length ? (q ? 'No jobs match.' : 'No jobs in this folder.') : 'No jobs yet.'}</p>`; return; }
 
@@ -224,7 +242,7 @@
       document.getElementById('bulk-delete-projects-hint').style.display = devMode ? 'none' : 'block';
 
       listEl.innerHTML = (factsError ? `<div class="error-box" style="margin:0 0 8px;">The dates, counts and materials costs could not be loaded: ${escapeHtml(factsError)}</div>` : '')
-        + jobsTableHtml(filtered, jobCols, { today: sydneyDateKey(new Date()), costsLoaded, factsLoaded, leftLoaded }, devMode);
+        + jobsTableHtml(filtered, jobCols, { today: sydneyDateKey(new Date()), costsLoaded, factsLoaded, leftLoaded: leftNow }, devMode);
 
       // The number and name are real links (long-press, new tab, copy); a
       // click anywhere else on the row follows them, except the Dev Mode tick box.
@@ -390,7 +408,8 @@
       document.getElementById('new-job-btn').addEventListener('click', () => {
         openQuickJobPanel((project) => { window.location.href = `/project.html?id=${project.id}`; });
       });
-      document.getElementById('jobs-columns-btn').addEventListener('click', () => {
+      document.getElementById('jobs-columns-btn').addEventListener('click', async () => {
+        await loadJsOnce('/js/jobs-columns-panel.js?v=1', () => typeof openJobsColumnsPanel === 'function');
         openJobsColumnsPanel(jobCols, (keys) => { jobCols = keys; renderProjects(); });
       });
       // the columns saved on the profile (another device may have changed them) replace the device's copy

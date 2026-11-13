@@ -7,18 +7,21 @@
 // what is left to invoice is the work done and not yet on an invoice, at the price the next
 // invoice would carry: labour at each person's sell rate in the Schedule of Rates bands (with the
 // job's rate card and the minimum hours a day), materials at cost plus the stage's markup, less a
-// commercial agreement's percent off labour. The maths is _shared/job-actuals.js (jobActuals and
-// priceActuals), the same copy the do and charge invoice panel and the portal's Work so far read.
-// A quoted job is not answered here: its figure is signed minus invoiced, which the page has.
+// commercial agreement's percent off labour, less anything the job was invoiced as a plain amount
+// (a ServiceM8 import's invoices, materials billed in Bulk). The maths is _shared/job-actuals.js
+// (jobActuals and priceActuals), the same copy the do and charge invoice panel and the portal's
+// Work so far read. A quoted job is not answered here: its figure is signed minus invoiced, which
+// the page has.
 //
-// Returns { ok, byProject: { [id]: { leftToInvoice, labour, materials, agreementOff } } } with one
-// entry per do and charge job asked for (zeros when nothing is open). Reads only.
+// Returns { ok, byProject: { [id]: { leftToInvoice, labour, materials, agreementOff, lumpInvoiced } } }
+// with one entry per do and charge job asked for (zeros when nothing is open). A failed read fails
+// the whole call (500): a money figure is never guessed. Reads only.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { jobActuals, priceActuals } = require('./_shared/job-actuals');
+const { jobActuals, priceActuals, loadActualsShared } = require('./_shared/job-actuals');
 
 const MAX_JOBS = 200;
-const AT_ONCE = 8; // jobs read side by side: each jobActuals is about ten small reads
+const AT_ONCE = 8; // jobs read side by side: each jobActuals is about seven small reads
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 exports.handler = async (event) => {
@@ -43,12 +46,13 @@ exports.handler = async (event) => {
 
     const byProject = {};
     const queue = (jobs || []).map((j) => j.id);
+    const shared = queue.length ? await loadActualsShared(supabaseAdmin) : null; // read once, not once per job
     const worker = async () => {
       for (let id = queue.shift(); id; id = queue.shift()) {
-        const actuals = await jobActuals(supabaseAdmin, id);
+        const actuals = await jobActuals(supabaseAdmin, id, { shared });
         // a job with no cost centre yet has nothing clocked or received against a stage: nothing to invoice
-        const priced = actuals.ok ? priceActuals(actuals.data) : { leftToInvoice: 0, labourOpen: 0, materialsOpen: 0, agreementOff: 0 };
-        byProject[id] = { leftToInvoice: priced.leftToInvoice, labour: priced.labourOpen, materials: priced.materialsOpen, agreementOff: priced.agreementOff };
+        const priced = actuals.ok ? priceActuals(actuals.data) : { leftToInvoice: 0, labourOpen: 0, materialsOpen: 0, agreementOff: 0, lumpInvoiced: 0 };
+        byProject[id] = { leftToInvoice: priced.leftToInvoice, labour: priced.labourOpen, materials: priced.materialsOpen, agreementOff: priced.agreementOff, lumpInvoiced: priced.lumpInvoiced };
       }
     };
     await Promise.all(Array.from({ length: Math.min(AT_ONCE, queue.length) }, worker));

@@ -1,11 +1,12 @@
 // Left to invoice on do and charge jobs (backlog item 85): the work done and not yet on an invoice,
-// at the price the next invoice would carry. Asked of jobs-left-to-invoice.js (pricing roles only,
-// maths in _shared/job-actuals.js). Used by the Jobs list (projects.html) and the job page's money
-// strip (project.html). A quoted job's figure is signed minus invoiced: the page has that already.
-// Reads only.
+// at the price the next invoice would carry, less anything invoiced as a plain amount. Asked of
+// jobs-left-to-invoice.js (pricing roles only, maths in _shared/job-actuals.js). Used by the Jobs
+// list (projects.html) and the job page's money strip (project.html). A quoted job's figure is
+// signed minus invoiced: the page has that already. Reads only.
 
 // { [projectId]: dollars } for the do and charge jobs among projectIds. null when the person is not
-// a pricing role (the figure is not theirs to see); a job missing from the answer could not be read.
+// a pricing role (the figure is not theirs to see). The server answers a batch of jobs all or
+// nothing, so a job missing from the answer was in a batch that could not be read.
 async function fetchLeftToInvoice(projectIds) {
   if (!projectIds.length || !isPricingRole(await getMyRole())) return null;
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -28,4 +29,14 @@ async function fetchLeftToInvoice(projectIds) {
     }
   }));
   return out;
+}
+
+// The job page's money strip on a do and charge job: fills #job-left-to-invoice. project.html
+// calls it on every draw, so a new invoice shows straight away.
+function fillJobLeftToInvoice(projectId) {
+  const el = document.getElementById('job-left-to-invoice');
+  if (!el) return;
+  fetchLeftToInvoice([projectId]).then((left) => {
+    if (el.isConnected) el.textContent = left && left[projectId] != null ? money(left[projectId]) : '-';
+  });
 }

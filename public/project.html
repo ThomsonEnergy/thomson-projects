@@ -3898,7 +3898,8 @@
       // "Cost allocated" and "Profit" on jobs must always reflect real
       // spend, never the estimate - accrued labour comes from logged
       // timesheets (actual_labour_cost, per stage), accrued materials
-      // from PO line items that have actually been received. Net warranty
+      // from what was costed to the job (job_material_usage: PO lines received
+      // to it and stock used on it, see loadProject()). Net warranty
       // cost (any warranty jobs raised against this one, minus whatever
       // each has itself recovered - see loadProject()) folds in here too,
       // never into the quoted/estimated side, since warranty work by
@@ -4031,7 +4032,7 @@
                   <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
                   <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
-                  <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(Math.max(0, quoted - invoiced))}</div></div>` : ''}
+                  <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>` : ''}
           ${project.job_number ? `
                   <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>` : ''}
@@ -4807,9 +4808,7 @@
       if (document.getElementById('assets-card')) loadAssetsCard(project);
       if (document.getElementById('meetings-card')) loadMeetingsCard(project);
       applyOverheadsToCosts(project);
-      // do and charge: the money strip's Left to invoice (js/left-to-invoice.js), read again on every redraw so a new invoice shows
-      const leftEl = document.getElementById('job-left-to-invoice');
-      if (leftEl) fetchLeftToInvoice([project.id]).then((left) => { if (leftEl.isConnected) leftEl.textContent = left && left[project.id] != null ? money(left[project.id]) : '-'; });
+      fillJobLeftToInvoice(project.id);
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;

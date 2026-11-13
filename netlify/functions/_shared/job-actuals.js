@@ -6,7 +6,9 @@
 // Reads only; an individual's pay rate never leaves the server (same reason as
 // compute-labour-cost.js), only the derived sell $ and hours.
 //
-// jobActuals(admin, projectId, { invoiceId, includeBilled }) -> { ok, data } | { ok: false, error }
+// jobActuals(admin, projectId, { invoiceId, includeBilled, shared }) -> { ok, data } | { ok: false, error }
+//   Throws when a read fails: these are money figures, so a failed read is an error, never a low number.
+//   shared: loadActualsShared()'s answer, when one caller reads many jobs (jobs-left-to-invoice.js).
 //   invoiceId: edit mode (item 64): that invoice's shifts and materials count as not yet billed
 //     and `invoice` carries the row with its claims and line items.
 //   includeBilled: shifts and materials already on an invoice come back too, each marked
@@ -17,7 +19,7 @@
 //           materialSell, invoicedAmount, labourLines, materialLines }], rateTiers, rateCard, rules,
 //         invoice, openInvoices }
 //
-// priceActuals(data) -> { labour, materials, labourOpen, materialsOpen, notInvoiced, agreementOff, leftToInvoice }
+// priceActuals(data) -> { labour, materials, labourOpen, materialsOpen, notInvoiced, agreementOff, lumpInvoiced, leftToInvoice }
 //   The same lines at the price a do and charge invoice carries by default (the panel's
 //   "As per Schedule of Rates"), so "work not yet invoiced" is one figure everywhere: the
 //   portal's Work so far (portal-data.js) and Left to invoice on the Jobs list and the job page
@@ -29,7 +31,22 @@ const { rateCardFor, rateAt } = require('./rate-cards');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeBilled = false } = {}) {
+// The three lookups every job shares (the default markup, the public holidays, the rate tiers).
+async function loadActualsShared(supabaseAdmin) {
+  const reads = await Promise.all([
+    supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
+    supabaseAdmin.from('public_holidays').select('holiday_date'),
+    supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate').order('sort_order'),
+  ]);
+  failOnReadError(reads);
+  return { settings: reads[0].data, holidays: reads[1].data, tiers: reads[2].data };
+}
+function failOnReadError(reads) {
+  const failed = reads.find((r) => r && r.error);
+  if (failed) throw new Error(`The job's figures could not be read: ${failed.error.message}`);
+}
+
+async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeBilled = false, shared = null } = {}) {
   let editInvoice = null;
   if (invoiceId) {
     const { data: inv, error: invErr } = await supabaseAdmin.from('invoices')
@@ -42,33 +59,38 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     editInvoice = inv;
   }
 
-  const { data: centres } = await supabaseAdmin
+  const centresRead = await supabaseAdmin
     .from('cost_centres')
     .select('id, name, markup_percent, invoiced_amount, sort_order')
     .eq('project_id', projectId)
     .order('sort_order');
+  failOnReadError([centresRead]);
+  const centres = centresRead.data;
   if (!(centres || []).length) return { ok: false, error: 'This job has no cost centre yet.' };
   const firstId = centres[0].id;
   const centreOf = (id) => (id && centres.some(c => c.id === id) ? id : firstId);
 
-  const [{ data: entries }, { data: usage }, { data: invItems }, { data: settings }, { data: holidays }, { data: tiers }, { data: openInvoices }] = await Promise.all([
+  const [entriesRead, usageRead, invItemsRead, openInvoicesRead, lookups] = await Promise.all([
     supabaseAdmin.from('time_entries').select('id, staff_id, clock_in, clock_out, break_minutes, cost_centre_id, selected_cost_centre_ids, billable').eq('project_id', projectId).not('clock_out', 'is', null).order('clock_in'),
     // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
     // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
     supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost, source, billable, material_id, created_at, materials(name), purchase_order_line_items(description, purchase_orders(po_number))').eq('project_id', projectId).order('created_at'),
     supabaseAdmin.from('invoice_line_items').select('invoice_id, cost_centre_id, kind, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id, invoice_number)').eq('invoices.project_id', projectId),
-    supabaseAdmin.from('company_settings').select('default_markup_percent').eq('id', 1).maybeSingle(),
-    supabaseAdmin.from('public_holidays').select('holiday_date'),
-    supabaseAdmin.from('billable_rate_tiers').select('id, name, sell_rate').order('sort_order'),
     // do-and-charge invoices on this job that can still be added to (item 64)
     supabaseAdmin.from('invoices').select('id, invoice_number, sent_at, invoice_line_items(id)').eq('project_id', projectId).is('xero_invoice_id', null).is('paid_at', null).order('sent_at', { ascending: false }),
+    shared || loadActualsShared(supabaseAdmin),
   ]);
+  failOnReadError([entriesRead, usageRead, invItemsRead, openInvoicesRead]);
+  const entries = entriesRead.data, usage = usageRead.data, invItems = invItemsRead.data, openInvoices = openInvoicesRead.data;
+  const { settings, holidays, tiers } = lookups;
 
   const staffIds = [...new Set((entries || []).map(e => e.staff_id))];
-  const [{ data: profiles }, rateCard] = await Promise.all([
+  const [profilesRead, rateCard] = await Promise.all([
     staffIds.length ? supabaseAdmin.from('profiles').select('id, full_name, rate_tier_id').in('id', staffIds) : Promise.resolve({ data: [] }),
     rateCardFor(supabaseAdmin, projectId),  // every $/hr below is at the job's surcharge level (item 46); an agreement is its own line (item 48)
   ]);
+  failOnReadError([profilesRead]);
+  const profiles = profilesRead.data;
   const tierById = Object.fromEntries((tiers || []).map(t => [t.id, t]));
   const profileById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
   const sellRateByProfile = {};
@@ -194,7 +216,11 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
 // each billable line at cost plus its stage's markup. A line already on an invoice keeps its place
 // (the portal lists it) but only open lines count in the totals. A not billable line that was never
 // invoiced is left out. agreementOff is the commercial agreement's percent off the open labour,
-// the minus line create-invoice.js adds; leftToInvoice is what the next invoice would come to.
+// the minus line create-invoice.js adds. lumpInvoiced is what the job has been invoiced as plain
+// amounts, tied to no shift or material line (a ServiceM8 import's invoices, materials billed in
+// Bulk): the panel takes it off its Bulk materials figure the same way. leftToInvoice is the open
+// work less the agreement and less that lump, never under zero: on a job invoiced line by line
+// it is what the next invoice would come to.
 function priceActuals(d) {
   const bandOrder = Object.keys(RULES.bands);
   const labour = [];
@@ -230,12 +256,13 @@ function priceActuals(d) {
   const labourOpen = r2(labour.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const materialsOpen = r2(materials.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const agreementOff = d.rateCard && d.rateCard.percentOff > 0 ? r2(labourOpen * d.rateCard.percentOff / 100) : 0;
+  const lumpInvoiced = r2(d.invoicedAmount);
   return {
     labour, materials, labourOpen, materialsOpen,
     notInvoiced: r2(labourOpen + materialsOpen),
-    agreementOff,
-    leftToInvoice: r2(labourOpen - agreementOff + materialsOpen),
+    agreementOff, lumpInvoiced,
+    leftToInvoice: r2(Math.max(0, labourOpen - agreementOff + materialsOpen - lumpInvoiced)),
   };
 }
 
-module.exports = { jobActuals, priceActuals };
+module.exports = { jobActuals, priceActuals, loadActualsShared };
