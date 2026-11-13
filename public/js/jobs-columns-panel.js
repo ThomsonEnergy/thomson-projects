@@ -55,9 +55,10 @@ function openJobsColumnsPanel(visible, onChange) {
   });
   // Drag with a mouse; the arrows do the same job on a touch screen.
   let dragFrom = null;
+  const rowOf = (e) => (e.target.nodeType === 1 ? e.target : e.target.parentElement)?.closest('.jc-row'); // Firefox can name a text node as the target
   const mark = (row) => list.querySelectorAll('.jc-row').forEach((r) => { r.style.boxShadow = r === row ? 'inset 0 2px 0 var(--accent)' : ''; });
   list.addEventListener('dragstart', (e) => {
-    const row = e.target.closest('.jc-row');
+    const row = rowOf(e);
     if (!row) return;
     dragFrom = Number(row.dataset.i);
     e.dataTransfer.effectAllowed = 'move';
@@ -66,11 +67,11 @@ function openJobsColumnsPanel(visible, onChange) {
   list.addEventListener('dragover', (e) => {
     if (dragFrom === null) return;
     e.preventDefault();
-    mark(e.target.closest('.jc-row'));
+    mark(rowOf(e));
   });
   list.addEventListener('drop', (e) => {
     e.preventDefault();
-    const row = e.target.closest('.jc-row');
+    const row = rowOf(e);
     const from = dragFrom;
     dragFrom = null;
     mark(null);

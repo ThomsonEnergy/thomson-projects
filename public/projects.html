@@ -144,7 +144,7 @@
       const live = () => seq === loadSeq;
       const listEl = document.getElementById('projects-list');
       const { data: projects, error } = await supabaseClient.from('projects')
-        .select('id, name, job_number, quote_number, client_name, client_address, client_phone, client_email, created_at, pipeline_stage, proposal_template, source_quote:projects!source_quote_id(quote_number), cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
+        .select('id, name, job_number, quote_number, client_name, client_address, client_phone, client_email, created_at, pipeline_stage, proposal_template, source_quote_id, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
         .not('job_number', 'is', null)
         .order('created_at', { ascending: false });
       if (!live()) return;
@@ -155,7 +155,7 @@
       // Left to invoice: a quoted job is signed minus invoiced; a do and charge job is the work not
       // yet invoiced at sell price (js/left-to-invoice.js), null until it lands or when not shown.
       let facts = {}, labour = { labour: {}, indirect: {}, hours: {} };
-      const left = {};
+      const left = {}, quoteNumbers = {};
       const buildRows = () => (projects || []).map(p => {
         const signed = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
         const invoiced = (p.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
@@ -164,7 +164,7 @@
         const costOutlayed = labourCost == null && materials == null ? null : (Number(labourCost) || 0) + (Number(materials) || 0);
         const isDnc = p.proposal_template === 'direct_job';
         const leftToInvoice = isDnc ? (left[p.id] != null ? left[p.id] : null) : Math.max(0, signed - invoiced);
-        return { ...p, facts: f, signed, invoiced, costOutlayed, costInclOverheads: costOutlayed == null ? null : costOutlayed + (labour.indirect[p.id] || 0), hours: labour.hours[p.id], isDnc, leftToInvoice };
+        return { ...p, facts: f, quoteNumber: quoteNumbers[p.source_quote_id] || p.quote_number || null, signed, invoiced, costOutlayed, costInclOverheads: costOutlayed == null ? null : costOutlayed + (labour.indirect[p.id] || 0), hours: labour.hours[p.id], isDnc, leftToInvoice };
       });
       const repaint = () => { if (!live()) return; allRows = buildRows(); renderProjects(); };
 
@@ -178,6 +178,15 @@
       if (empty) return;
 
       const ids = projects.map(p => p.id);
+      // A job made from a quote has no quote number of its own: read its quote's (the Quote column).
+      const quoteIds = [...new Set(projects.map(p => p.source_quote_id).filter(Boolean))];
+      if (quoteIds.length) {
+        supabaseClient.from('projects').select('id, quote_number').in('id', quoteIds).then(({ data }) => {
+          if (!live()) return;
+          (data || []).forEach(q => { quoteNumbers[q.id] = q.quote_number; });
+          repaint();
+        });
+      }
       const factsDone = loadFacts(ids).then(r => { if (!live()) return; facts = r.facts; factsError = r.error; factsLoaded = true; });
       const labourDone = loadLabourCosts(ids).then(l => { if (live()) labour = l; });
       factsDone.then(repaint);

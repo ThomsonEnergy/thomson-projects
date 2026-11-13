@@ -40,7 +40,7 @@ const JOBS_COLUMNS = [
   { key: 'cost', label: 'Cost outlayed', on: true, num: true, cell: (p, s) => (!s.costsLoaded ? JC_WAIT : p.costOutlayed == null ? JC_DASH : `${money(p.costOutlayed)}${p.costInclOverheads > p.costOutlayed ? `<div class="subtitle" style="font-size:11px; margin:0;">incl. overheads ${money(p.costInclOverheads)}</div>` : ''}`) },
   { key: 'invoiced', label: 'Partial invoiced', on: true, num: true, cell: (p) => money(p.invoiced) },
   { key: 'left', label: 'Left to invoice', on: true, num: true, cell: (p, s) => (p.leftToInvoice != null ? money(p.leftToInvoice) : (s.leftLoaded ? JC_DASH : JC_WAIT)) },
-  { key: 'quote', label: 'Quote', cell: (p) => { const q = p.source_quote?.quote_number || p.quote_number; return q ? `Q${escapeHtml(String(q))}` : JC_DASH; } },
+  { key: 'quote', label: 'Quote', cell: (p) => (p.quoteNumber ? `Q${escapeHtml(String(p.quoteNumber))}` : JC_DASH) },
   { key: 'phone', label: 'Client phone', nowrap: true, cell: (p) => (p.client_phone ? `<a class="link-quiet" href="tel:${escapeHtml(String(p.client_phone).replace(/[^\d+]/g, ''))}">${escapeHtml(p.client_phone)}</a>` : JC_DASH) },
   { key: 'email', label: 'Client email', cell: (p) => (p.client_email ? `<a class="link-quiet" href="mailto:${escapeHtml(p.client_email)}">${escapeHtml(p.client_email)}</a>` : JC_DASH) },
   { key: 'type', label: 'Job type', cell: (p) => escapeHtml(JOB_TYPE_LABELS[p.proposal_template] || String(p.proposal_template || '-').replace(/_/g, ' ')) },
