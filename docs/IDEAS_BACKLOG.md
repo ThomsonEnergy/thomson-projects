@@ -19,7 +19,7 @@ Planned work not yet in docs/PROJECT_SPEC.md Part A. Code is the source of truth
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 22 | PO, bills, stock from My Day, tools register (review and 4-delivery plan) | Built 20 Oct 2026, all four LIVE (spec A10, A11c, A12, A12a) | N | Airwallex payouts still to build (needs the payout key) |
 | 84 | Supplier bills with fewer taps: confident bills and credit notes save themselves, Accept all on a bill, no total prompt when the reader got it, uploads through the same path as emails, the Stock match default leaves junk out, Sales get the bills-to-match push | Reviewed 13 Nov 2026, waiting on yes | N | Turn `supplier_bill_auto_save` on with it |
-| 85 | Jobs list columns you choose: Created, Last on site, Next booked, Site address and Status added; Pending (always $0) removed; Left to invoice; costs to date counting every received PO line and stock used the moment it happens, the same on the job page; a Columns button to tick, untick and reorder columns, saved to your profile so the laptop and phone match; more columns to switch on (Q number, phone, email, job type, left to invoice, invoiced %, hours logged, open tasks, open POs, who is booked next) | Planned 13 Nov 2026, waiting on yes | Y (`profiles.ui_prefs`, one read function) | None |
+| 85 | Jobs list columns you choose: Created, Last on site, Next booked, Site address and Status added; Pending (always $0) removed; Left to invoice; costs to date counting every received PO line and stock used the moment it happens, the same on the job page; a Columns button to tick, untick and reorder columns, saved to your profile so the laptop and phone match; more columns to switch on (Q number, phone, email, job type, left to invoice, invoiced %, hours logged, open tasks, open POs, who is booked next) | Owner's yes 13 Nov 2026, building in `claude/bold-albattani-b268hw` | Y (`profiles.ui_prefs`, one read function) | None |
 | 83 | Supplier bills easy to follow and easy to move: packing slips never saved as bills, no guessed PO preselected, the invoice file on the PO and supplier pages, Move to another PO and Remove bill, the Emailed bills page with the file beside the card, and the Xero bill map (H4) | A LIVE 13 Nov 2026 (PR 423); B and C built, PRs into `staging` (spec A11c, H4) | Y (B, C) | Purchase account codes from the owner for C |
 | 82 | Supplier credit notes against POs: a credit note emailed to invoice@ (or uploaded) saves against the PO, takes the credited lines off the PO (and out of Stock or off the job when the goods went back), and nets off in Pay bills due and the supplier balance | Built 13 Nov 2026, PR into `staging` (spec A11c), migration 20261202000000 | Y | None |
 | 81 | Ask suppliers for prices from a quote (RFQ1017), supplier quotes on a tab with Approve (issues the PO) and Deny; a supplier email from a quote no longer marks it Quote Sent | Built 13 Nov 2026: part A LIVE (PR 422), part B PR 425 into `staging` (spec A10) | N | Gmail on staging for the reply test |
@@ -2014,9 +2014,11 @@ Overlaps: none (items 82 and 83 are merged; item 81 part B is on `staging` and t
 Kind: feature (into `staging`); migration no; money no (nothing approves or pays by itself that did not before), stock no, RLS no.
 Size: medium (a morning for 1 to 4 and 6; 5 is another half day).
 
-## 85. Jobs list columns you choose (owner, 13 Nov 2026, waiting on yes)
+## 85. Jobs list columns you choose (owner, 13 Nov 2026, owner's yes the same day)
 
 **Owner, 13 Nov 2026 (photo of the live Jobs list):** add the date the job was created, the last time someone was on site, the next booked site day, the site address and the status (where it is on the Pipeline); remove Pending, it does nothing. Let us rearrange the columns and pick which ones show, and add more we can switch on.
+
+Building in: `claude/bold-albattani-b268hw` (owner's "Yes build", 13 Nov 2026).
 
 **Found:** Pending is always $0 because the Jobs list only loads jobs that have a J number, and a job is always signed. The Total pending tile is the same.
 
