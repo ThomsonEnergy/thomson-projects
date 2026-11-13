@@ -665,7 +665,8 @@ async function voiceContext(admin, mailbox) {
 
 // What Postie knows about a mailbox for one run: labels, sender rules, open jobs, whose voice.
 async function agentContext(admin, mailbox) {
-  const [voice, { data: labels }, { data: rules }, jobs, { data: cs }, { data: labelRules }] = await Promise.all([
+  // the names below are in the same order as the lookups: a mismatch here put the label rules into jobs (13 Nov 2026)
+  const [voice, { data: labels }, { data: rules }, { data: labelRules }, jobs, { data: cs }] = await Promise.all([
     voiceContext(admin, mailbox),
     admin.from('email_labels').select('*').eq('mailbox_id', mailbox.id),
     admin.from('email_sender_rules').select('*').eq('mailbox_id', mailbox.id),
