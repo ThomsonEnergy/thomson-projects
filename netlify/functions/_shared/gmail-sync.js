@@ -114,7 +114,7 @@ async function findClientIdForAddress(supabaseAdmin, address) {
 async function processMessageId(supabaseAdmin, messageId, billLabelId, mailbox = null) {
   const personal = !!mailbox && mailbox.kind === 'personal';
   // Gmail ids are only unique within one mailbox
-  let haveQuery = supabaseAdmin.from('emails').select('id, email_threads!inner(mailbox_id)').eq('gmail_message_id', messageId);
+  let haveQuery = supabaseAdmin.from('emails').select('id, email_threads!emails_thread_id_fkey!inner(mailbox_id)').eq('gmail_message_id', messageId);
   if (mailbox) haveQuery = haveQuery.eq('email_threads.mailbox_id', mailbox.id);
   const { data: alreadyHave } = await haveQuery.limit(1);
   if (alreadyHave && alreadyHave.length) return {}; // already synced (includes ones we sent ourselves via send-gmail.js)
@@ -319,7 +319,7 @@ async function saveNewMessages(admin, msgs, shared, ctx, startedAt, budgetMs) {
   const ids = [...new Set(msgs.filter((m) => !(m.labelIds || []).some((l) => SKIP_LABELS.includes(l))).map((m) => m.id))];
   const known = new Set();
   for (let i = 0; i < ids.length; i += 150) {
-    let q = admin.from('emails').select('gmail_message_id, email_threads!inner(mailbox_id)').in('gmail_message_id', ids.slice(i, i + 150));
+    let q = admin.from('emails').select('gmail_message_id, email_threads!emails_thread_id_fkey!inner(mailbox_id)').in('gmail_message_id', ids.slice(i, i + 150));
     if (shared) q = q.eq('email_threads.mailbox_id', shared.id);
     const { data, error } = await q;
     if (error) throw error;
