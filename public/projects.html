@@ -13,6 +13,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  /* the stage folders stay on one line and scroll sideways when there are many */
+  #jobs-folders .settings-tab { white-space: nowrap; }
+  /* Phone: a job is one compact card, the number and name across the top and the rest two to a
+     line with the label above, so a dozen columns do not make a dozen lines */
+  @media (max-width: 700px) {
+    #projects-list table.responsive-stack tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+    #projects-list table.responsive-stack td, #projects-list table.responsive-stack td.num { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0; padding: 0; text-align: left; }
+    #projects-list table.responsive-stack td::before { font-size: 10px; }
+    #projects-list td[data-label="#"], #projects-list td[data-label="Name"], #projects-list td[data-label="Site address"], #projects-list td[data-label="Client email"] { grid-column: 1 / -1; }
+    #projects-list td[data-label="#"] { font-weight: 700; }
+    #projects-list td[data-label="#"]::before { display: none; }
+  }
+</style>
 </head>
 <body>
   <div class="topbar">
@@ -36,12 +50,13 @@
         <div class="stat"><div class="label">Total signed</div><div class="value" id="stat-signed">-</div></div>
         <div class="stat"><div class="label">Cost outlayed</div><div class="value" id="stat-cost">-</div><div class="subtitle" id="stat-cost-incl" style="margin:2px 0 0; font-size:12px;"></div></div>
         <div class="stat"><div class="label">Total partial invoiced</div><div class="value" id="stat-invoiced">-</div></div>
-        <div class="stat"><div class="label">Total pending</div><div class="value" id="stat-pending">-</div></div>
+        <div class="stat"><div class="label">Left to invoice</div><div class="value" id="stat-left">-</div></div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; flex:1 1 100%;">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1 1 320px;">
-          <input id="project-search" placeholder="Search by name, client, or job number..." style="max-width:320px; margin:0;" />
+          <input id="project-search" placeholder="Search by name, client, address or job number..." style="max-width:320px; margin:0;" />
           <button type="button" class="secondary" id="new-job-btn" style="white-space:nowrap;">+ New job</button>
+          <button type="button" class="secondary" id="jobs-columns-btn" style="white-space:nowrap;" title="Choose which columns show, and their order">Columns</button>
         </div>
         <div id="bulk-delete-projects-controls" style="display:none; align-items:center; gap:10px;">
           <label style="display:flex; align-items:center; gap:6px; margin:0;"><input type="checkbox" id="select-all-projects" style="width:auto;" /> Select all</label>
@@ -63,9 +78,13 @@
   </div>
 
   <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/jobs-columns.js?v=1"></script>
+  <script src="/js/left-to-invoice.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allRows = [];
+    // Which columns show and in what order (js/jobs-columns.js): the device's copy first, the profile's when it answers.
+    let jobCols = jobsColumnsCached();
 
     let costsLoaded = false;
 
@@ -74,26 +93,16 @@
     let currentFolder = 'all';
     try { currentFolder = localStorage.getItem('te-jobs-folder') || 'all'; } catch (e) { /* no storage: start on All */ }
 
-    // Materials actually incurred, per job: only received line items count,
-    // the same rule the job page's "Actual cost" uses, so a part-received PO
-    // shows the same figure in both places. Only the POs for the jobs on
-    // this list, in batches so the request URL stays short.
-    async function loadMaterialCosts(ids) {
-      const byProject = {};
-      const batches = [];
-      for (let i = 0; i < ids.length; i += 100) batches.push(ids.slice(i, i + 100));
-      const results = await Promise.all(batches.map(batch => supabaseClient.from('purchase_orders')
-        .select('project_id, purchase_order_line_items(quantity, unit_cost)')
-        .in('project_id', batch)
-        .eq('purchase_order_line_items.received', true)));
-      results.forEach(({ data, error }) => {
-        if (error) { console.error('PO cost fetch failed:', error.message); return; }
-        (data || []).forEach(po => {
-          const total = (po.purchase_order_line_items || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
-          byProject[po.project_id] = (byProject[po.project_id] || 0) + total;
-        });
-      });
-      return byProject;
+    // Per job, in one call (jobs_list_facts, migration 20261203000000): the last day on site, the
+    // next booked day and who, open tasks, open POs, and for pricing roles the materials cost to
+    // date: every PO line received to the job and every item taken from stock for it, the moment
+    // it is received or used. The job page's Actual cost adds up the same records.
+    let factsError = '';
+    async function loadFacts(ids) {
+      const { data, error } = await supabaseClient.rpc('jobs_list_facts', { p_project_ids: ids });
+      factsError = error ? friendlyError(error) : '';
+      if (error) { console.error('Jobs facts fetch failed:', error.message); return {}; }
+      return Object.fromEntries((data || []).map(f => [f.project_id, f]));
     }
 
     // Actual labour cost, per job - computed entirely server-side
@@ -103,7 +112,7 @@
     // this (or any) browser directly. Labour includes direct overheads;
     // indirect only shows as the "incl. overheads" line.
     async function loadLabourCosts(ids) {
-      const labour = {}, indirect = {};
+      const labour = {}, indirect = {}, hours = {};
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
         const res = await fetch('/.netlify/functions/get-accrued-labour-cost', {
@@ -116,47 +125,57 @@
           Object.entries(data.byProject).forEach(([pid, info]) => {
             labour[pid] = info.totalActualLabourCost;
             indirect[pid] = info.totalIndirectOverhead || 0;
+            hours[pid] = info.totalActualHours;
           });
         }
       } catch (err) {
         console.error('Accrued labour cost fetch failed:', err.message);
       }
-      return { labour, indirect };
+      return { labour, indirect, hours };
     }
 
     let loadSeq = 0; // a slower earlier load must not repaint over a newer one
+    let factsLoaded = false, leftLoaded = false;
     async function loadProjects() {
       const seq = ++loadSeq;
       const listEl = document.getElementById('projects-list');
       const { data: projects, error } = await supabaseClient.from('projects')
-        .select('id, name, job_number, quote_number, client_name, pipeline_stage, cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
+        .select('id, name, job_number, quote_number, client_name, client_address, client_phone, client_email, created_at, pipeline_stage, proposal_template, source_quote:projects!source_quote_id(quote_number), cost_centres(id, quoted_amount, markup_percent, invoiced_amount)')
         .not('job_number', 'is', null)
         .order('created_at', { ascending: false });
       if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
 
-      const buildRows = (materialCostByProject, labourCostByProject, indirectByProject) => (projects || []).map(p => {
-        const totalQuoted = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
-        const isSigned = !!p.job_number;
-        const signed = isSigned ? totalQuoted : 0;
-        const pending = isSigned ? 0 : totalQuoted;
+      // Cost outlayed is labour (wages and direct overhead, each shift from the moment it is clocked
+      // out) plus the materials figure above; null when the person's role is not shown costs.
+      // Left to invoice: a quoted job is signed minus invoiced; a do and charge job is the work not
+      // yet invoiced at sell price (js/left-to-invoice.js), null until it lands or when not shown.
+      const buildRows = (facts, labour, left) => (projects || []).map(p => {
+        const signed = (p.cost_centres || []).reduce((s, c) => s + (Number(c.quoted_amount) || 0), 0);
         const invoiced = (p.cost_centres || []).reduce((s, c) => s + (Number(c.invoiced_amount) || 0), 0);
-        const costOutlayed = (materialCostByProject[p.id] || 0) + (labourCostByProject[p.id] || 0);
-        const costInclOverheads = costOutlayed + (indirectByProject[p.id] || 0);
-        return { ...p, totalQuoted, signed, pending, invoiced, costOutlayed, costInclOverheads, isSigned };
+        const f = facts[p.id] || null;
+        const labourCost = labour.labour[p.id], materials = f ? f.materials_cost : null;
+        const costOutlayed = labourCost == null && materials == null ? null : (Number(labourCost) || 0) + (Number(materials) || 0);
+        const isDnc = p.proposal_template === 'direct_job';
+        const leftToInvoice = isDnc ? (left && left[p.id] != null ? left[p.id] : null) : Math.max(0, signed - invoiced);
+        return { ...p, facts: f, signed, invoiced, costOutlayed, costInclOverheads: costOutlayed == null ? null : costOutlayed + (labour.indirect[p.id] || 0), hours: labour.hours[p.id], isDnc, leftToInvoice };
       });
 
-      // The list paints as soon as the jobs land; costs fill in after.
-      costsLoaded = !(projects && projects.length);
-      allRows = buildRows({}, {}, {});
+      // The list paints as soon as the jobs land; dates, costs and do and charge figures fill in after.
+      const none = { labour: {}, indirect: {}, hours: {} };
+      const empty = !(projects && projects.length);
+      costsLoaded = factsLoaded = leftLoaded = empty;
+      allRows = buildRows({}, none, null);
       renderProjects();
-      if (!projects || !projects.length) return;
+      if (empty) return;
 
       const ids = projects.map(p => p.id);
-      const [materialCostByProject, { labour, indirect }] = await Promise.all([loadMaterialCosts(ids), loadLabourCosts(ids)]);
-      if (seq !== loadSeq) return;
-      costsLoaded = true;
-      allRows = buildRows(materialCostByProject, labour, indirect);
-      renderProjects();
+      let facts = {}, labour = none, left = null;
+      const repaint = () => { if (seq !== loadSeq) return; allRows = buildRows(facts, labour, left); renderProjects(); };
+      const factsDone = loadFacts(ids).then(f => { facts = f; factsLoaded = true; });
+      const labourDone = loadLabourCosts(ids).then(l => { labour = l; });
+      factsDone.then(repaint);
+      Promise.all([factsDone, labourDone]).then(() => { costsLoaded = true; repaint(); });
+      fetchLeftToInvoice(projects.filter(p => p.proposal_template === 'direct_job').map(p => p.id)).then(l => { left = l; leftLoaded = true; repaint(); });
     }
 
     function renderProjects() {
@@ -185,17 +204,18 @@
 
       const folderRows = allRows.filter(p => inFolder(p, currentFolder));
       const filtered = q
-        ? folderRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
+        ? folderRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || (p.client_address || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))
         : folderRows;
 
       const totals = filtered.reduce((acc, p) => ({
-        signed: acc.signed + p.signed, cost: acc.cost + p.costOutlayed, costIncl: acc.costIncl + p.costInclOverheads, invoiced: acc.invoiced + p.invoiced, pending: acc.pending + p.pending,
-      }), { signed: 0, cost: 0, costIncl: 0, invoiced: 0, pending: 0 });
+        signed: acc.signed + p.signed, cost: acc.cost + (p.costOutlayed || 0), costIncl: acc.costIncl + (p.costInclOverheads || 0), invoiced: acc.invoiced + p.invoiced, left: acc.left + (p.leftToInvoice || 0),
+      }), { signed: 0, cost: 0, costIncl: 0, invoiced: 0, left: 0 });
+      const costShown = filtered.some(p => p.costOutlayed != null);
       document.getElementById('stat-signed').textContent = money(totals.signed);
-      document.getElementById('stat-cost').textContent = costsLoaded ? money(totals.cost) : '...';
-      document.getElementById('stat-cost-incl').textContent = costsLoaded ? `incl. overheads ${money(totals.costIncl)}` : '';
+      document.getElementById('stat-cost').textContent = !costsLoaded ? '...' : costShown ? money(totals.cost) : '-';
+      document.getElementById('stat-cost-incl').textContent = costsLoaded && costShown ? `incl. overheads ${money(totals.costIncl)}` : '';
       document.getElementById('stat-invoiced').textContent = money(totals.invoiced);
-      document.getElementById('stat-pending').textContent = money(totals.pending);
+      document.getElementById('stat-left').textContent = leftLoaded ? money(totals.left) : '...';
 
       if (!filtered.length) { listEl.innerHTML = `<p class="subtitle">${allRows.length ? (q ? 'No jobs match.' : 'No jobs in this folder.') : 'No jobs yet.'}</p>`; return; }
 
@@ -203,23 +223,8 @@
       document.getElementById('bulk-delete-projects-controls').style.display = devMode ? 'flex' : 'none';
       document.getElementById('bulk-delete-projects-hint').style.display = devMode ? 'none' : 'block';
 
-      listEl.innerHTML = `
-        <table class="responsive-stack">
-          <thead><tr>${devMode ? '<th></th>' : ''}<th>#</th><th>Name</th><th>Client</th><th class="num">Signed</th><th class="num">Pending</th><th class="num">Cost outlayed</th><th class="num">Partial invoiced</th></tr></thead>
-          <tbody>
-            ${filtered.map(p => `
-              <tr class="project-row-link" style="cursor:pointer;">
-                ${devMode ? `<td data-label=""><input type="checkbox" class="project-select" data-id="${escapeHtml(p.id)}" style="width:auto;" /></td>` : ''}
-                <td data-label="#"><a class="project-link" href="/project.html?id=${encodeURIComponent(p.id)}" style="color:inherit; text-decoration:none;">${escapeHtml(p.job_number ? 'J' + p.job_number : (p.quote_number ? 'Q' + p.quote_number : '-'))}</a></td>
-                <td data-label="Name"><a href="/project.html?id=${encodeURIComponent(p.id)}" style="color:inherit; text-decoration:none;">${escapeHtml(p.name || '')}</a></td>
-                <td data-label="Client">${escapeHtml(p.client_name || '-')}</td>
-                <td class="num" data-label="Signed">${p.isSigned ? money(p.signed) : '<span class="subtitle">Not signed</span>'}</td>
-                <td class="num" data-label="Pending">${p.isSigned ? '<span class="subtitle">-</span>' : money(p.pending)}</td>
-                <td class="num" data-label="Cost outlayed">${!costsLoaded ? '<span class="subtitle">...</span>' : money(p.costOutlayed)}${costsLoaded && p.costInclOverheads > p.costOutlayed ? `<div class="subtitle" style="font-size:11px;">incl. overheads ${money(p.costInclOverheads)}</div>` : ''}</td>
-                <td class="num" data-label="Partial invoiced">${money(p.invoiced)}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>`;
+      listEl.innerHTML = (factsError ? `<div class="error-box" style="margin:0 0 8px;">The dates, counts and materials costs could not be loaded: ${escapeHtml(factsError)}</div>` : '')
+        + jobsTableHtml(filtered, jobCols, { today: sydneyDateKey(new Date()), costsLoaded, factsLoaded, leftLoaded }, devMode);
 
       // The number and name are real links (long-press, new tab, copy); a
       // click anywhere else on the row follows them, except the Dev Mode tick box.
@@ -385,6 +390,11 @@
       document.getElementById('new-job-btn').addEventListener('click', () => {
         openQuickJobPanel((project) => { window.location.href = `/project.html?id=${project.id}`; });
       });
+      document.getElementById('jobs-columns-btn').addEventListener('click', () => {
+        openJobsColumnsPanel(jobCols, (keys) => { jobCols = keys; renderProjects(); });
+      });
+      // the columns saved on the profile (another device may have changed them) replace the device's copy
+      loadJobsColumns().then((keys) => { if (keys && keys.join() !== jobCols.join()) { jobCols = keys; renderProjects(); } });
       document.getElementById('logout-link').addEventListener('click', async (e) => {
         e.preventDefault();
         await supabaseClient.auth.signOut();
