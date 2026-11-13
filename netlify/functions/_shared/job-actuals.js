@@ -16,6 +16,12 @@
 //         centres: [{ costCentreId, name, markupPercent, actualHours, actualLabourSell, materialCost,
 //           materialSell, invoicedAmount, labourLines, materialLines }], rateTiers, rateCard, rules,
 //         invoice, openInvoices }
+//
+// priceActuals(data) -> { labour, materials, labourOpen, materialsOpen, notInvoiced, agreementOff, leftToInvoice }
+//   The same lines at the price a do and charge invoice carries by default (the panel's
+//   "As per Schedule of Rates"), so "work not yet invoiced" is one figure everywhere: the
+//   portal's Work so far (portal-data.js) and Left to invoice on the Jobs list and the job page
+//   (jobs-left-to-invoice.js). No reads.
 
 const { entryHours, entryCentreIds } = require('./compute-labour-cost');
 const { shiftBands, RULES } = require('./labour-bands');
@@ -182,4 +188,54 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
   };
 }
 
-module.exports = { jobActuals };
+// Prices jobActuals' lines. Labour: each billable shift at its bands' multipliers; a person's
+// day under the minimum is rounded up on their first not yet invoiced line of that day, at that
+// line's first band rate (the panel's applyMinimum in js/project-invoice-actuals.js). Materials:
+// each billable line at cost plus its stage's markup. A line already on an invoice keeps its place
+// (the portal lists it) but only open lines count in the totals. A not billable line that was never
+// invoiced is left out. agreementOff is the commercial agreement's percent off the open labour,
+// the minus line create-invoice.js adds; leftToInvoice is what the next invoice would come to.
+function priceActuals(d) {
+  const bandOrder = Object.keys(RULES.bands);
+  const labour = [];
+  d.centres.forEach((c) => c.labourLines.forEach((l) => {
+    if (!l.billable && !l.invoiced) return;
+    const parts = Object.entries(l.bands).filter(([, h]) => h > 0);
+    const amount = parts.reduce((s, [band, h]) => s + h * l.rate * (RULES.bands[band]?.multiplier || 1), 0);
+    labour.push({
+      line: l, parts, hours: r2(l.hours), amount: r2(amount), minimumApplied: false,
+      // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
+      firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
+    });
+  }));
+  labour.sort((a, b) => a.line.dateKey.localeCompare(b.line.dateKey));
+  const min = Number(RULES.minimumHours) || 0;
+  const byDay = new Map();
+  labour.filter((x) => !x.line.invoiced).forEach((x) => {
+    const k = `${x.line.staffId}|${x.line.dateKey}`;
+    if (!byDay.has(k)) byDay.set(k, { total: 0, first: x });
+    byDay.get(k).total += x.hours;
+  });
+  byDay.forEach(({ total, first }) => {
+    if (min && total > 0 && total < min) {
+      first.amount = r2(first.amount + (min - total) * first.firstBandRate);
+      first.minimumApplied = true;
+    }
+  });
+  const materials = [];
+  d.centres.forEach((c) => c.materialLines.forEach((m) => {
+    if (!m.billable && !m.invoiced) return;
+    materials.push({ line: m, amount: r2(m.quantity * m.unitPrice) });
+  }));
+  const labourOpen = r2(labour.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
+  const materialsOpen = r2(materials.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
+  const agreementOff = d.rateCard && d.rateCard.percentOff > 0 ? r2(labourOpen * d.rateCard.percentOff / 100) : 0;
+  return {
+    labour, materials, labourOpen, materialsOpen,
+    notInvoiced: r2(labourOpen + materialsOpen),
+    agreementOff,
+    leftToInvoice: r2(labourOpen - agreementOff + materialsOpen),
+  };
+}
+
+module.exports = { jobActuals, priceActuals };

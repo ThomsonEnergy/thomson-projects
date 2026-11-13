@@ -15,7 +15,7 @@
 // names only. Prices are the client's prices (labour at the Schedule of Rates with their
 // agreement, materials at cost plus the stage's markup): our cost price never leaves here.
 
-const { jobActuals } = require('./job-actuals');
+const { jobActuals, priceActuals } = require('./job-actuals');
 const { RULES } = require('./labour-bands');
 const { firstName, listNames, sydneyToday, jobRef, fmtDay, fmtTime } = require('./schedule-emails');
 const { localDateKey } = require('./compute-labour-cost');
@@ -256,47 +256,19 @@ async function portalWork(admin, p) {
   }
   const d = actuals.data;
   const bandLabel = (band) => band === 'standard' ? 'standard' : (RULES.bands[band]?.label || band);
-  const bandOrder = Object.keys(RULES.bands);
-  // each line priced at the Schedule of Rates; staffId and the first band's rate stay out of the row the client gets
-  const priced = [];
-  d.centres.forEach((c) => c.labourLines.forEach((l) => {
-    if (!l.billable && !l.invoiced) return;
-    const parts = Object.entries(l.bands).filter(([, h]) => h > 0);
-    const amount = parts.reduce((s, [band, h]) => s + h * l.rate * (RULES.bands[band]?.multiplier || 1), 0);
-    priced.push({
-      staffId: l.staffId,
-      // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
-      firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
-      row: {
-        dateKey: l.dateKey, day: fmtDay(l.dateKey), who: firstName(l.staffName), start: l.start, end: l.end,
-        hours: r2(l.hours), bands: parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', '),
-        rate: r2(l.rate), amount: r2(amount), invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
-      },
-    });
-  }));
-  priced.sort((a, b) => a.row.dateKey.localeCompare(b.row.dateKey));
-  // The minimum per person per day (the panel's applyMinimum in js/project-invoice-actuals.js): a
-  // short day not yet invoiced is rounded up on that person's first line of the day, at the rate
-  // of that line's first band, so the figure here is the figure the invoice will carry.
-  const min = Number(RULES.minimumHours) || 0;
-  const byDay = new Map();
-  priced.filter((x) => !x.row.invoiced).forEach((x) => {
-    const k = `${x.staffId}|${x.row.dateKey}`;
-    if (!byDay.has(k)) byDay.set(k, { total: 0, first: x });
-    byDay.get(k).total += x.row.hours;
+  // each line at the price the invoice carries (priceActuals, the one copy); staffId and the rates stay out of the row the client gets
+  const priced = priceActuals(d);
+  const labour = priced.labour.map(({ line: l, parts, hours, amount, minimumApplied }) => {
+    const bands = parts.map(([band, h]) => `${r2(h)} h ${bandLabel(band)}`.replace(/ standard$/, '')).join(', ');
+    return {
+      dateKey: l.dateKey, day: fmtDay(l.dateKey), who: firstName(l.staffName), start: l.start, end: l.end,
+      hours, bands: minimumApplied ? `${bands || `${hours} h`} (min. ${RULES.minimumHours} hrs)` : bands,
+      rate: r2(l.rate), amount, invoiced: l.invoiced, invoiceNumber: l.invoiceNumber,
+    };
   });
-  byDay.forEach(({ total, first }) => {
-    if (min && total > 0 && total < min) {
-      first.row.amount = r2(first.row.amount + (min - total) * first.firstBandRate);
-      first.row.bands = `${first.row.bands || `${first.row.hours} h`} (min. ${min} hrs)`;
-    }
-  });
-  const labour = priced.map((x) => x.row);
-  const materials = [];
-  d.centres.forEach((c) => c.materialLines.forEach((m) => {
-    if (!m.billable && !m.invoiced) return;
-    materials.push({ description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount: r2(m.quantity * m.unitPrice), invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' });
-  }));
+  const materials = priced.materials.map(({ line: m, amount }) => (
+    { description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount, invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' }
+  ));
   const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0]).markupPercent;
   const purchaseOrders = (pos || []).map((po) => {
     const m = 1 + markupOf(po.cost_centre_id) / 100;
@@ -309,11 +281,9 @@ async function portalWork(admin, p) {
       total: r2(lines.reduce((s, l) => s + l.amount, 0)), lines,
     };
   });
-  const labourOpen = r2(labour.filter((l) => !l.invoiced).reduce((s, l) => s + l.amount, 0));
-  const materialsOpen = r2(materials.filter((m) => !m.invoiced).reduce((s, m) => s + m.amount, 0));
   return {
     labour, materials, purchaseOrders,
-    labourOpen, materialsOpen, notInvoiced: r2(labourOpen + materialsOpen),
+    labourOpen: priced.labourOpen, materialsOpen: priced.materialsOpen, notInvoiced: priced.notInvoiced,
     rules: WORK_RULES,
     agreement: d.rateCard.percentOff > 0 ? { name: d.rateCard.name, percentOff: d.rateCard.percentOff } : null,
   };
