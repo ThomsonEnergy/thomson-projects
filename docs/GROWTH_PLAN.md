@@ -1,124 +1,143 @@
 # Growth Plan
 
-Last updated 13 Nov 2026. Ways to grow Thomson Energy Australia, worst-value ideas left out. Owner adds a dated line here when an idea is tried, kept or dropped. Business facts the ideas rely on are in `docs/BUSINESS_FACTS.md`.
+Last updated 13 Nov 2026. The order of attack for growing Thomson Energy Australia, set by the owner on 13 Nov 2026: cash flow first, then something to stand on, then the products that scale, then remote and national (a branch in each of WA, QLD and NSW, maybe NT). Owner adds a dated line under "What was tried" when an idea is tried, kept or dropped. Business facts the ideas rely on are in `docs/BUSINESS_FACTS.md`.
+
+## The rule
+
+Nothing in stage 3 or 4 is paid for until stage 1 is bringing the cash in. A branch opens off booked work, never off hope.
 
 ## Where we start from
 
-- Based at Fernvale (Tweed Valley), licensed electrical contractor in NSW, QLD and WA, solar and battery design and install (GCPV and GCBS accreditation, valid to 30 Apr 2027; no SAPS accreditation yet).
+- Fernvale (Tweed Valley). Electrical contractor licences already held in NSW, QLD and WA. Solar and battery accreditation GCPV and GCBS (valid to 30 Apr 2027), no SAPS yet.
 - Work today: residential and commercial solar and battery, general electrical, off-grid. Brands: Sigenergy, Victron, Fronius, Sungrow, WINAICO.
 - RAPTOR: the transportable off-grid skid (10.9 kW fold-out Winaico, Sigenergy inverter to 60 kW, 90 kWh storage).
-- Tools that help growth: TEops (leads, quotes, jobs, Twilio SMS, Gmail), the website with service area pages, Google Business Profile.
-- Growth has to fit the crew. Every idea below is rated by cost and by how much extra labour it needs, so the order of attack keeps the van full without over-promising.
+- Tools that help: TEops (leads, quotes, deposits, claims, interest, stock, Twilio SMS, Gmail), the website with service area pages, Google Business Profile.
 
-## 1. Remote NSW and government work
+## Stage 1: cash in the next 90 days
 
-Asked on 13 Nov 2026: is Sydney Build worth a visit to meet builders and win remote community work?
+Easiest first, biggest yield first. None of these need a new person or new gear.
 
-### Sydney Build Expo (ICC Sydney, 28 and 29 April 2027)
+### 1.1 Get paid faster on the work we already do (week 1, costs nothing)
 
-- About 700 exhibitors and 24,000 to 28,000 visitors, co-located with Digital Construction Australia. Visitor entry is normally free. The crowd is Sydney metro builders, suppliers and architects.
-- The useful part is the Government Hub: Homes NSW, Building Commission NSW, Transport for NSW and NSW Public Works (Regional NSW) have exhibited or spoken there, and visitors can register interest in upcoming projects. Nothing in the programme is specific to remote or Aboriginal community work.
-- **Verdict:** go only if it costs a flight and a night, book Government Hub conversations in advance, sit in the Homes NSW and Regional NSW sessions. Treat it as research, not lead generation. Builders met on the floor are building in Sydney.
+Often the fastest cash in a trade business is not new work, it is the money already owed.
 
-### Where remote NSW contracts actually come from
+- **Deposit on every signed quote**, before the job is booked. The T&Cs already say it (clause 5); make it the habit, and TEops should not let a job be scheduled until the deposit is in (backlog candidate).
+- **Invoice the day the job finishes**, from the van, not at the end of the week. Final payment before commissioning or handover, as the T&Cs say.
+- **Progress claims** on anything longer than a week: a claim at rough-in, a claim at fit-off, final at commissioning.
+- **Chase overdue every Monday** and charge the interest TEops already supports (item 66). A reminder that quotes 21% interest gets paid.
+- **Assign STCs the week of the install** so Formbay's batch lands sooner. Credit the customer $35 and sell at $39.25, as now.
+- **Pay suppliers on their terms, not early**, and keep van and warehouse stock low. Every dollar on a shelf is cash out.
+- **Watch three numbers weekly:** cash in bank, debtor days, deposits taken this week.
 
-Every remote solar and electrical package found (AHO programs of 970, 1,402 and up to 2,600 rooftops, the Murdi Paaki electrical and maintenance package) was tendered by an agency and won by a firm on its contractor panel. The path is:
+### 1.2 Battery upgrades for past solar customers (weeks 1 to 2)
 
-1. **Register on buy.nsw and NSW eTendering** with the ABN, both electrical licences and the SAA accreditation. Set alerts for Aboriginal Housing Office (AHO), Homes NSW, Murdi Paaki and Regional NSW. AHO solar and electrical tenders come around most years.
-2. **Write to AHO and Homes NSW procurement** and ask to join their solar and electrical contractor panels for the Northern Rivers, New England and far north coast. Regional contractors who will travel are what they are short of.
-3. **Local Aboriginal Land Councils** in our own area (Tweed Byron, Jali, Casino Boolangle, Bogal) and the NSW Aboriginal Land Council. They own housing and community buildings and are an easier first contract than a state tender.
-4. **Sell RAPTOR to the people who buy off-grid power:** Essential Energy's stand-alone power systems program (replacing long rural lines in remote NSW with solar and batteries; check their current supplier process), mining and pastoral companies, far west councils. A direct sales job, not an expo job.
-5. **Head contractors:** the NSW Aboriginal Procurement Policy makes big builders look for regional subcontractors on government housing jobs. Watch tender results, then approach the winners by name.
-6. **Get SAPS accreditation.** Off-grid jobs that want STCs need a SAPS accredited designer and installer. Without it RAPTOR and remote off-grid work leave money on the table.
+- The federal Cheaper Home Batteries discount makes a battery add-on the easiest sale in the business, and we hold GCBS. Deposit on signing, a day's install, STCs on top.
+- Pull every past solar job without a battery (ServiceM8 and TEops), send one SMS and one email: what a battery costs them after the discount, one tap to book a quote. TEops can send it in batches from the Jobs list (backlog candidate: a battery upgrade campaign list that writes the lead when they reply).
+- Cost: nothing. Labour: one day each, fills gaps between bigger jobs.
 
-Cost: registrations are free, the time is a day or two of paperwork. Labour: none until a tender is won, then a lot, so bid on packages the crew can actually deliver with travel.
+### 1.3 Prepaid annual maintenance plan (weeks 2 to 4)
 
-## 2. Growing local work in the Northern Rivers
+- Solar health check, panel clean, inverter and battery check, switchboard test, one fixed price paid up front for the year. Offer it at every handover and to every past customer in the same message as 1.2.
+- Cash arrives before the work, and the yearly visit finds the next upgrade (old inverter, battery, EV charger). TEops creates the yearly job and sends the reminder by itself (backlog candidate).
+- Cost: nothing. Labour: half days clustered by suburb in quiet weeks.
 
-The local patch is the Tweed Valley (Murwillumbah, Uki, Tyalgum, Kingscliff, Tweed Heads), Byron and Ballina, Lismore and Kyogle, and the Gold Coast fringe over the border. What is particular about it: lots of acreage and rural properties, a long tail of flood recovery and raised houses, frequent blackouts on the Essential Energy network, farms and packing sheds (sugar cane, bananas, macadamias, avocados), holiday lets and caravan parks, and retirees with cash and a solar system that is ten years old.
+### 1.4 Property managers and small electrical (weeks 3 to 6)
 
-Ideas, in the order to try them. Each has what to do, why it suits here, cost and labour.
+- Tweed and Byron rental pools: electrical safety checks, smoke alarm compliance, repairs. Low value each, paid within days, recurring, and the landlord often wants solar next. Visit five property managers with a one-page price list.
+- Level 2 ASP work is scarce locally: tell every electrician in the Tweed and Byron we take Level 2 and solar subcontract work. Quick invoices, no selling.
+- Cost: a morning of visits. Labour: small jobs that fill gaps.
 
-### 2.1 Battery upgrades for past solar customers (do first)
+### 1.5 Reviews and referrals, automatic (weeks 3 to 4)
 
-- The federal Cheaper Home Batteries discount makes a battery add-on the easiest sale in the business right now, and we hold GCBS.
-- Pull every past solar job (ServiceM8 and TEops) with no battery, and send a short SMS and email: what a battery would cost them after the discount, one tap to book a quote. TEops can send it in batches from the Leads or Jobs list (idea for the backlog: a "battery upgrade" campaign list that writes the lead by itself when they reply).
-- Cost: nothing. Labour: battery installs are a day each, good filler between bigger jobs.
+- The job closes in TEops, a Twilio SMS goes next morning with the Google review link, and two weeks later a referral offer ($200 off the referrer's next job, or cash, per signed job). A review QR card in the van and on the handover sheet.
+- Local work is won on Google reviews and word of mouth; fifty reviews a year beats any advertising. Backlog candidate: automatic review and referral SMS.
+- Cost: the referral credit. Labour: none.
 
-### 2.2 Blackout and flood resilience package
+### 1.6 Be visible at every job (weeks 2 to 4)
 
-- Northern Rivers properties lose power often, and houses raised or rebuilt after 2022 are still being rewired. Pitch one named package: battery backup circuit, generator changeover switch, raised switchboard, surge protection, with a plain price range.
-- Put it on the website as a page and on Google Business Profile as a service. Mention it in every solar quote as an option.
-- Partners: the Resilient Homes Program builders doing raises and rebuilds in Lismore and the Tweed, and the Northern Rivers Reconstruction Corporation contractor lists.
-- Cost: a page and a flyer. Labour: moderate, mostly electrical days.
+- A corflute sign at every install for two weeks ("Solar and battery by Thomson Energy, 0455 415 464"), a card to the twenty nearest letterboxes, van signage on every vehicle, the finished job photographed onto Google Business Profile and the website within the week.
+- Fix the third-party listings (Google Business Profile, LinkedIn, Birdeye, directories) that still carry the old Wix-era name and licence numbers.
+- Cost: a few hundred dollars. Labour: none.
 
-### 2.3 Reviews and referrals, made automatic
+## Stage 2: something to stand on (months 3 to 9)
 
-- The job closes in TEops, then a Twilio SMS goes to the customer the next morning with the Google review link, and a second message two weeks later offering a referral credit (for example $200 off the referrer's next job, or cash, for every signed job). A review QR card in the van and on the handover sheet.
-- Why: local work is won on Google reviews and word of mouth. Fifty steady reviews a year beats any advertising.
-- Cost: the referral credit. Labour: none. Backlog item: automatic review and referral SMS after job completion.
+Bigger average jobs, still local, still the same crew.
 
-### 2.4 Builders, plumbers and property managers
+- **Blackout and flood resilience package:** battery backup circuit, generator changeover, raised switchboard, surge protection, one name and a price range. A page on the website, an option on every solar quote. Partners: Resilient Homes Program builders raising and rebuilding houses in Lismore and the Tweed.
+- **Builders and plumbers:** a fixed-price new build solar and electrical schedule that Murwillumbah, Kingscliff and Pottsville builders drop into their own quotes; be the sparky the plumbers call for heat pump hot water.
+- **EV chargers:** holiday lets, cafes and Kingscliff and Byron strata. Fixed price single charger, strata assessment, listed on the charger brands' installer finders.
+- **Clubs, schools and council buildings:** surf, bowls and RSL clubs, council halls and depots, schools, many with a grant to spend by a deadline. Free energy walk-through, one-page proposal. Sponsor one junior club in Fernvale or Murwillumbah, not many.
+- **Farms and packing sheds:** macadamia and avocado packers, banana sheds, cold rooms, irrigation pumps use power all day, which suits solar without a battery. Approach the growers' groups and stand at Primex (Casino field days, May or June) with RAPTOR on a trailer.
 
-- Builders in Murwillumbah, Kingscliff and Pottsville building new homes and sheds need electrical, solar and EV charger rough-in. Offer a fixed-price "new build solar and electrical" schedule they can drop into their own quotes.
-- Plumbers: hot water heat pumps and solar hot water need a sparky; be the one they call.
-- Real estate property managers (Tweed and Byron rental pools): electrical safety checks, smoke alarm compliance, repairs. Low value each, high volume, recurring, and the landlord often wants solar next.
-- Cost: a morning of visits and a one-page price schedule. Labour: steady small jobs that fill gaps.
+## Stage 3: products that scale (months 6 to 18)
 
-### 2.5 Annual maintenance plan (recurring revenue)
+These need stage 1 cash behind them because they tie money up in stock, travel and tender paperwork.
 
-- Solar health check, panel clean, inverter and battery check, switchboard test, one fixed price a year. Offer it at every handover and to every past customer.
-- TEops schedules the yearly visit by itself and sends the reminder SMS, so nobody has to remember (backlog item: maintenance plan with an automatic yearly job).
-- Why: keeps the customer, finds the upgrade (old inverter, battery, EV charger), gives the crew work in the quiet months.
-- Cost: nothing. Labour: half-day jobs that can be clustered by suburb.
+### 3.1 RAPTOR as a product, sold and hired
 
-### 2.6 Farms and packing sheds
+- Fixed configurations and a price list (steel feet, concrete skid, trailer; 30, 60 kW; 90, 180 kWh), built in batches in the shed, so each one is a product with a margin, not a custom job.
+- **Hire** as well as sell: construction sites, events, councils, disaster response and mines pay weekly to replace a diesel generator, and a hire fleet is recurring cash. Partner with an equipment hire company for the fleet and the logistics before buying trucks.
+- A demonstration unit on a trailer that goes to Primex, mining supplier days and council depots.
+- Get **SAPS accreditation** first: off-grid jobs that want STCs need a SAPS accredited designer and installer.
 
-- Macadamia and avocado packers, banana sheds, cold rooms, irrigation pumps and the Condong sugar mill area use power all day, which suits solar without a battery. Also pump electrification and three-phase upgrades.
-- Approach the growers' groups (Australian Macadamia Society Northern Rivers, Tweed Banana Growers) and turn up at Primex (Casino field days, May or June) with RAPTOR on a trailer. A working off-grid skid on a field day stand sells itself to farmers and contractors.
-- Cost: a Primex stand and a weekend. Labour: commercial jobs of a week or more, so one at a time.
+### 3.2 Commercial solar and batteries
 
-### 2.7 Clubs, schools and council buildings
+- Packing sheds, mills, clubs, schools and depots from stage 2, quoted in Pylon, 50 kW to 500 kW. Progress claims and deposits keep the cash right on jobs that run for weeks.
 
-- Surf clubs, bowls and RSL clubs, Tweed and Byron council halls and depots, sports clubs and the Catholic and independent schools around Murwillumbah and Tweed Heads. Many have a sustainability grant or a NSW Community Building Partnership grant to spend by a deadline.
-- Offer a free energy walk-through with a one-page proposal. Sponsor one junior sports club in Fernvale or Murwillumbah (sign on the fence, kit) rather than many small sponsorships.
-- Cost: sponsorship under $2k a year. Labour: commercial jobs, planned ahead.
+### 3.3 Government panels and tenders
 
-### 2.8 EV chargers for holiday lets, cafes and strata
+- Register on buy.nsw and NSW eTendering, QTenders (QLD), Tenders WA and the NT tenders portal, with the ABN, the three licences and the accreditations. Set alerts for Aboriginal Housing Office (AHO), Homes NSW, Murdi Paaki, Regional NSW, and the remote housing programs in each state.
+- Write to AHO and Homes NSW procurement to join the solar and electrical contractor panels; every remote NSW solar package found (970, 1,402 and 2,600 rooftops; the Murdi Paaki electrical and maintenance package) went to a firm already on the panel.
+- Local Aboriginal Land Councils (Tweed Byron, Jali, Casino Boolangle, Bogal) and the NSW Aboriginal Land Council are the easier first contract.
+- Watch who wins the big housing packages and approach them as a regional subcontractor; the NSW Aboriginal Procurement Policy pushes head contractors to look for us.
+- **Sydney Build Expo** (ICC Sydney, 28 and 29 April 2027): research only. Go for a flight and a night, book Government Hub conversations in advance, sit in the Homes NSW and Regional NSW sessions. Builders on the floor are building in Sydney.
 
-- Tweed and Byron tourism means holiday lets and cafes want a charger on the booking page. Kingscliff and Byron strata blocks need load-managed shared charging.
-- A fixed-price single charger install and a strata assessment. List on the charger brands' installer finders (Tesla, Ocular, Zappi) and on Plugshare.
-- Cost: nothing. Labour: half-day jobs.
+## Stage 4: remote and national (months 12 onward)
 
-### 2.9 Level 2 ASP and overflow from other sparkies
+The owner wants a branch in WA, QLD and NSW, maybe NT, and to go national. The realistic order, by how much is already in place:
 
-- Level 2 work (consumer mains, service connections, metering) is scarce locally. Tell every electrician in the Tweed and Byron that we take Level 2 and solar subcontract work, and take their overflow in return.
-- Cost: nothing. Labour: adds work only when we have the capacity.
+| Order | State | Why this order | How it starts | When it becomes a branch |
+|---|---|---|---|---|
+| 1 | QLD | Licence held. The Gold Coast and Scenic Rim are under an hour from Fernvale on the Energex network. | A service area, not a branch: Gold Coast suburbs on the website, the same crew, QLD jobs booked between NSW ones. | When QLD is half the work: a Gold Coast depot, one van based there. |
+| 2 | WA | Licence held. The biggest market for RAPTOR and off-grid: mines, pastoral stations, remote Aboriginal communities, Horizon Power's stand-alone power systems. | Fly-in projects quoted from Fernvale: RAPTOR units shipped and commissioned by our crew, tenders through Tenders WA and the mining supplier portals. | After six months of booked WA work and a WA-licensed nominee hired: a Perth or Pilbara base. |
+| 3 | NSW | Home base already. Remote NSW (Murdi Paaki, far west) comes off the government panels in 3.3. | Fly or drive in from Fernvale for panel work. | A second NSW base (Dubbo or Sydney) only if panel work makes it the cheaper option. |
+| 4 | NT | No licence yet (NT Electrical Workers and Contractors Licensing Board). Remote community housing and Power and Water off-grid are a strong RAPTOR market, but the furthest away. | Get the NT licence once WA is running; first jobs as RAPTOR shipments with a fly-in crew. | After six months of booked NT work and an NT nominee: a Darwin base. |
 
-### 2.10 Be visible at every job
+### What every branch needs before it opens
 
-- A corflute sign at every install for two weeks ("Solar and battery by Thomson Energy, 0455 415 464"), a letterbox card to the twenty nearest houses, van signage on all vehicles, a photo of the finished job on Google Business Profile and the website projects page within the week.
-- Fix the third-party listings (Google Business Profile, LinkedIn, Birdeye, directories) that still carry the old Wix-era name and licence numbers, so the name, address, phone and ABN match everywhere. Keep service area pages current (Murwillumbah, Tweed Heads, Byron, Lismore, Kyogle, Gold Coast).
-- Cost: signs and cards, a few hundred dollars. Labour: none.
+- A nominee electrician licensed in that state (NSW qualified supervisor, QLD qualified technical person, WA nominee, NT licence) and a supervisor who runs the day.
+- Two vans, starting stock, and three months of that crew's wages and vehicles in the bank before it earns.
+- TEops running the branch the same way as Fernvale: same quotes, jobs, deposits, stock, timesheets, with a branch on every job and report so each state's cash and margin show on their own (backlog candidate: branches in TEops).
+- One phone number, one website with a page per state showing that state's licence number, one brand.
 
-### Ideas left out, and why
+### The national model
 
-- Paid Google or Facebook ads: expensive per lead against national solar retailers; try only after the reviews and referral loop is running.
-- Door knocking and cold calling: poor fit for a licensed contractor's reputation locally.
-- Buying leads from solar comparison sites: low margin, price-shopped customers.
+Hub and spoke. Fernvale is head office: sales, design, purchasing, bookkeeping, TEops. Each branch is a crew with a nominee and a supervisor. Remote and interstate work is done as fly-in projects first and a branch second, so the cash from the projects pays for the branch. RAPTOR is the product that travels: a skid built in Fernvale sells the same in the Pilbara, the Barkly and the far west, and it is what makes the national brand different from every local sparky.
 
-## 3. First 90 days
+## First twelve months
 
-| When | Do | Owner's time |
-|---|---|---|
-| Weeks 1 to 2 | Battery upgrade campaign to past solar customers (2.1). Register on buy.nsw and eTendering, set tender alerts (1). Fix the directory listings (2.10). | 2 days |
-| Weeks 3 to 4 | Resilience package page and flyer (2.2). Review and referral SMS set up in TEops (2.3). Signs and letterbox cards printed. | 1 day plus a TEops build |
-| Weeks 5 to 8 | Visit ten builders, plumbers and property managers with the price schedule (2.4). Write to AHO, Homes NSW and the local land councils (1). Offer the maintenance plan to every past customer (2.5). | 3 days |
-| Weeks 9 to 12 | Book Primex (2.6). Free walk-throughs for three clubs or schools (2.7). List on EV charger installer finders (2.8). Start SAPS accreditation (1). | 2 days |
+| When | Do |
+|---|---|
+| Month 1 | 1.1 cash habits in place. 1.2 battery campaign sent. 1.6 directory listings fixed, signs and cards ordered. Register on all four tender portals (3.3). |
+| Month 2 | 1.3 maintenance plan offered to every past customer. 1.5 review and referral SMS running. 1.4 property managers and local sparkies visited. |
+| Month 3 | Stage 2 resilience page and builder schedule out. Write to AHO, Homes NSW and the local land councils. Start SAPS accreditation. |
+| Months 4 to 6 | Gold Coast service area live (4, QLD). Primex booked. EV charger listings. Three club or school walk-throughs. RAPTOR price list and hire partner conversations. |
+| Months 7 to 12 | RAPTOR demonstration unit built. First WA tender or mining quote. First commercial job over 50 kW. Sydney Build in April if cheap. Decide on the Gold Coast depot from the numbers. |
 
-## 4. How to know it is working
+## How to know it is working
 
-Track in TEops, by lead source, every month: leads in, quotes sent, quotes signed, average job value, reviews gained. Keep the sources that produce signed jobs, drop the rest after three months. A monthly line in this file saying what was tried and what it produced.
+Weekly: cash in bank, debtor days, deposits taken. Monthly, by lead source in TEops: leads in, quotes sent, quotes signed, average job value, reviews gained, and per state once stage 4 starts: signed work and margin. Keep the sources that produce signed jobs, drop the rest after three months.
+
+## What was tried
+
+- 13 Nov 2026: plan written. Nothing tried yet.
+
+## Left out, and why
+
+- Paid Google or Facebook ads: dear per lead against national solar retailers; only after the review and referral loop is running.
+- Door knocking and cold calling: poor fit for a licensed contractor's local reputation.
+- Buying leads from comparison sites: low margin, price-shopped customers.
+- Opening a branch before the work is booked: it burns the stage 1 cash.
 
 ## Sources (13 Nov 2026)
 
