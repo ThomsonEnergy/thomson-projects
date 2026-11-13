@@ -87,7 +87,7 @@ async function enqueue(admin, { extractAttachments }) {
     const msg = await gmailRequest(`messages/${m.id}?format=full`);
     const files = extractAttachments(msg.payload).filter(a => !a.inline && (READABLE.includes((a.mime || '').toLowerCase()) || /\.pdf$/i.test(a.name || '')));
     if (!files.length) continue;
-    const { data: email } = await admin.from('emails').select('id, email_threads!inner(mailbox_id)').eq('gmail_message_id', m.id).eq('email_threads.mailbox_id', await sharedMailboxId(admin)).maybeSingle();
+    const { data: email } = await admin.from('emails').select('id, email_threads!emails_thread_id_fkey!inner(mailbox_id)').eq('gmail_message_id', m.id).eq('email_threads.mailbox_id', await sharedMailboxId(admin)).maybeSingle();
     for (const f of files) {
       await add({ email_id: email?.id || null, gmail_message_id: m.id, attachment_part_id: String(f.part_id), file_name: f.name, email_from: headerValue(msg.payload?.headers, 'From') });
     }

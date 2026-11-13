@@ -645,7 +645,7 @@
           baseThreads().ilike('subject', like).order('last_message_at', { ascending: false, nullsFirst: false }).limit(100),
           supabaseClient.from('clients').select('id').ilike('name', like).limit(50)
             .then((r) => (r.error ? r : r.data.length ? baseThreads().in('client_id', r.data.map(c => c.id)).order('last_message_at', { ascending: false, nullsFirst: false }).limit(100) : { data: [] })),
-          q.length < 3 ? { data: [] } : supabaseClient.from('emails').select('thread_id, email_threads!inner(mailbox_id, is_supplier_bill)').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
+          q.length < 3 ? { data: [] } : supabaseClient.from('emails').select('thread_id, email_threads!emails_thread_id_fkey!inner(mailbox_id, is_supplier_bill)').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
             .or(`from_address.ilike.${like},body_text.ilike.${like}`).order('sent_at', { ascending: false }).limit(150)
             .then((r) => { if (r.error) return r; const ids = [...new Set(r.data.map(e => e.thread_id))]; return ids.length ? baseThreads().in('id', ids).limit(150) : { data: [] }; }),
         ]);
@@ -678,7 +678,7 @@
         threads = jobGroups.flatMap(g => g.threads);
       } else if (S.view === 'sent') {
         const { data, error } = await supabaseClient.from('emails')
-          .select('id, thread_id, to_addresses, sent_at, email_threads!inner(id, subject, mailbox_id, is_supplier_bill, clients(name))')
+          .select('id, thread_id, to_addresses, sent_at, email_threads!emails_thread_id_fkey!inner(id, subject, mailbox_id, is_supplier_bill, clients(name))')
           .eq('direction', 'outbound').eq('email_threads.mailbox_id', m.id).eq('email_threads.is_supplier_bill', false)
           .order('sent_at', { ascending: false }).limit(150);
         if (seq !== S.listSeq) return;
