@@ -47,9 +47,13 @@ const normCode = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 // RFQ plus the quote's number (also on the job it became), or the J number: the same rule as
 // supplier_quote_rfq_number in the database and rfqNumber in js/supplier-quotes.js.
 async function projectRfq(admin, projectId) {
-  const { data: p } = await admin.from('projects').select('id, name, quote_number, job_number, source_quote_id, source_quote:projects!source_quote_id(quote_number)').eq('id', projectId).maybeSingle();
+  const { data: p } = await admin.from('projects').select('id, name, quote_number, job_number, source_quote_id').eq('id', projectId).maybeSingle();
   if (!p) return null;
-  return { ...p, rfq: 'RFQ' + (p.quote_number || (p.source_quote && p.source_quote.quote_number) || p.job_number || ''), ref: p.job_number ? `J${p.job_number}` : (p.quote_number ? `Q${p.quote_number}` : p.name) };
+  // The quote a job was made from, read by its id: an embed (projects!source_quote_id) on a table
+  // that points at itself returns the jobs made from a row, not the quote it came from (item 86).
+  const { data: sourceQuote } = !p.quote_number && p.source_quote_id
+    ? await admin.from('projects').select('quote_number').eq('id', p.source_quote_id).maybeSingle() : { data: null };
+  return { ...p, rfq: 'RFQ' + (p.quote_number || (sourceQuote && sourceQuote.quote_number) || p.job_number || ''), ref: p.job_number ? `J${p.job_number}` : (p.quote_number ? `Q${p.quote_number}` : p.name) };
 }
 
 // ---------- the sweep ----------
