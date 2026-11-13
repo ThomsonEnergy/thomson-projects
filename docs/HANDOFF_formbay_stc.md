@@ -1,12 +1,14 @@
 # Handoff: Formbay + STCs (STC page, job STC tab, Formbay job creation)
 
+> Written before the staging and migrations rules of October 2026. Phases 2 to 4 are still the plan, but build them under `CLAUDE.md` (branch, `supabase/migrations/`, staging first), not the migration steps written here.
+
 Written for a fresh chat to pick up. Read `README.md`, `PROJECT_SPEC.md`, `SOLAR_QUOTE_COMPLIANCE_REQUIREMENTS.md` too.
 Decided in a long conversation with the owner (Jasper). Phase 0 and Phase 1 are built (see "Progress" at the end); Phases 2 to 4 are still a plan.
 
 ## Ground rules (apply to everything)
 - Hard rule from the owner: never use em dashes anywhere (chat, code, comments, docs).
 - Work in your git worktree, then `git fetch origin && git rebase origin/main && git push origin HEAD:main`. Other chats push to main too.
-- Migrations: next free number is above 147 (re-check `ls Migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` in `Migrations/`, add a row to `Migrations/migration_audit_diagnostic.sql`.
+- Migrations: next free number is above 147 (re-check `ls docs/archive/old-migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` in `docs/archive/old-migrations/`, add a row to `docs/archive/old-migrations/migration_audit_diagnostic.sql`.
 - Check JavaScript with `node --check` (for pages, extract the inline `<script>` first). No test suite.
 - Pages load `/js/supabase-client.js?v=NN` (currently 66) and `/css/style.css?v=NN` (15). Bump on every page when you change those files.
 - Never enter credentials for the owner and do not ask for passwords in chat. Do not download files without asking. Ask before production data changes. Tax rules are for the owner's accountant, not for you to decide.
