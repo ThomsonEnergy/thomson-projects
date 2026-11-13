@@ -8,7 +8,7 @@ Internal operations app for Thomson Energy Australia (electrical and solar contr
 
 **Credentials:** integration keys live in the Supabase `api_keys` table, edited in Settings > API Keys, and are read server-side with `getIntegrationKey()` (`netlify/functions/_shared/get-integration-key.js`; it falls back to a `<NAME>_API_KEY` env var only if no row exists). Keys in use: anthropic, assemblyai, abr_guid, airwallex_client_id / api_key / webhook_secret, xero_client_id / client_secret / webhook_key, google_client_id / client_secret / refresh_token, pylon, formbay, formbay_webhook_secret, vapid_public_key / private_key, servicem8 (import only). Only platform secrets stay as Netlify env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DEV_MODE_PASSWORD`, `GITHUB_TOKEN` (bugs sync), `CLAUDE_AGENT_KEY` (agent comments), `PDF_KEEP_BROWSER` (optional).
 
-**Deployment:** edit in the local GitHub clone, commit and push, Netlify auto-deploys. **Run Supabase migrations before or alongside the deploy.** Bump the `?v=` on any edited JS/CSS (10 minute cache). Latest migration: 155 in the old `Migrations/` numbering; new ones live in `supabase/migrations/` (latest 20261018120000).
+**Deployment:** edit in the local GitHub clone, commit and push, Netlify auto-deploys. **Run Supabase migrations before or alongside the deploy.** Bump the `?v=` on any edited JS/CSS (10 minute cache). Latest migration: 155 in the old `docs/archive/old-migrations/` numbering; new ones live in `supabase/migrations/` (latest 20261018120000).
 
 **Ordering:** Roadmap and Part 0 (priorities) first, Part A is everything live, later parts are what is still missing.
 
