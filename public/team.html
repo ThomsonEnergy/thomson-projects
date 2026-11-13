@@ -11,17 +11,17 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
-  .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
-  .team-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+  .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .team-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; text-align: center; }
   .team-card.clickable { cursor: pointer; transition: border-color 0.15s; }
   .team-card.clickable:hover { border-color: var(--accent); }
-  .team-avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--surface-1); margin: 0 auto 10px; display: block; }
+  .team-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: var(--surface-1); margin: 0 auto 6px; display: block; }
   .team-avatar-fallback {
-    width: 64px; height: 64px; border-radius: 50%; background: var(--accent-dim); color: var(--accent);
-    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 18px; margin: 0 auto 10px;
+    width: 48px; height: 48px; border-radius: 50%; background: var(--accent-dim); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; margin: 0 auto 6px;
   }
 </style>
 </head>
@@ -37,54 +37,61 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Team</h1>
-    <p class="subtitle">Everyone at Thomson Energy. Rates, allowances, employment details and contracts are edited on each person's profile (click their card). Licences are shown on each person below, and insurance and licensing (company and employee) is managed at the bottom of this page.</p>
-    <p class="subtitle" id="hr-hint" style="display:none;">Click anyone to open their profile: documents, photos, letters, incidents and KPIs. <a href="/incidents.html">Incident register &rarr;</a></p>
-
-    <div id="clocked-in-now"></div>
-
-    <div class="card">
-      <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Team</h1>
+        <p class="subtitle">Everyone at Thomson Energy. Rates, allowances, employment details and contracts are edited on each person's profile (click their card). Licences are shown on each person below, and insurance and licensing (company and employee) is managed on the right of this page.</p>
+        <p class="subtitle" id="hr-hint" style="display:none;">Click anyone to open their profile: documents, photos, letters, incidents and KPIs. <a href="/incidents.html">Incident register &rarr;</a></p>
+      </div>
     </div>
-
-    <div id="insurance-section" style="display:none;">
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-          <h2 style="margin:0;">Company insurance &amp; licences</h2>
-          <button type="button" id="add-credential-btn" class="secondary">+ Add</button>
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:3">
+        <div id="clocked-in-now"></div>
+        <div class="card">
+          <div id="team-list" class="team-grid"><p class="subtitle">Loading...</p></div>
         </div>
-        <p class="subtitle" style="margin-bottom:14px;">Upload a Certificate of Currency or licence document and it reads the type, reference number, and expiry date automatically - review before saving.</p>
-        <div id="credentials-list"><p class="subtitle">Loading...</p></div>
       </div>
+      <div class="page-col" style="flex-grow:2">
+        <div id="insurance-section" style="display:none;">
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <h2 style="margin:0;">Company insurance &amp; licences</h2>
+              <button type="button" id="add-credential-btn" class="secondary">+ Add</button>
+            </div>
+            <p class="subtitle" style="margin-bottom:14px;">Upload a Certificate of Currency or licence document and it reads the type, reference number, and expiry date automatically - review before saving.</p>
+            <div id="credentials-list"><p class="subtitle">Loading...</p></div>
+          </div>
 
-      <div class="card">
-        <h2>Employee licences</h2>
-        <p class="subtitle" style="margin-bottom:14px;">Also shown on each person's card above and on their profile - it's the same record either way.</p>
-        <div id="employee-licences-list"><p class="subtitle">Loading...</p></div>
-      </div>
+          <div class="card">
+            <h2>Employee licences</h2>
+            <p class="subtitle" style="margin-bottom:14px;">Also shown on each person's card above and on their profile - it's the same record either way.</p>
+            <div id="employee-licences-list"><p class="subtitle">Loading...</p></div>
+          </div>
 
-      <div class="card" id="share-card">
-        <h2>Share licences &amp; insurance</h2>
-        <p class="subtitle" style="margin-bottom:14px;">Tick the company insurance and licences, and the employee licences, you want to send (for a tender, a site induction or a client). Then download them as a zip, or make a link that always shows the latest versions and can be switched off.</p>
-        <div id="share-picker"><p class="subtitle">Loading...</p></div>
-        <div class="grid cols-2" style="margin-top:14px;">
-          <div><label style="margin-top:0;">Who is it for? (optional, shown on the page)</label><input id="share-label" placeholder="e.g. Acme Builders site induction" /></div>
-          <div><label style="margin-top:0;">Live link works for</label>
-            <select id="share-expiry"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="">No expiry</option></select></div>
+          <div class="card" id="share-card">
+            <h2>Share licences &amp; insurance</h2>
+            <p class="subtitle" style="margin-bottom:14px;">Tick the company insurance and licences, and the employee licences, you want to send (for a tender, a site induction or a client). Then download them as a zip, or make a link that always shows the latest versions and can be switched off.</p>
+            <div id="share-picker"><p class="subtitle">Loading...</p></div>
+            <div class="grid cols-2" style="margin-top:14px;">
+              <div><label style="margin-top:0;">Who is it for? (optional, shown on the page)</label><input id="share-label" placeholder="e.g. Acme Builders site induction" /></div>
+              <div><label style="margin-top:0;">Live link works for</label>
+                <select id="share-expiry"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="">No expiry</option></select></div>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" id="share-zip-btn" class="secondary">Download as zip</button>
+              <button type="button" id="share-link-btn">Create live link</button>
+            </div>
+            <div id="share-msg" style="margin-top:10px;"></div>
+            <h3 style="margin:20px 0 8px; font-size:15px;">Live links</h3>
+            <div id="share-links"><p class="subtitle">Loading...</p></div>
+          </div>
         </div>
-        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" id="share-zip-btn" class="secondary">Download as zip</button>
-          <button type="button" id="share-link-btn">Create live link</button>
-        </div>
-        <div id="share-msg" style="margin-top:10px;"></div>
-        <h3 style="margin:20px 0 8px; font-size:15px;">Live links</h3>
-        <div id="share-links"><p class="subtitle">Loading...</p></div>
       </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/licence-share.js?v=1"></script>
   <script>

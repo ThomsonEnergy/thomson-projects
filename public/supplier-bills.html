@@ -11,13 +11,13 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .sb-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
   .sb-filters button { font-size:13px; padding:6px 14px; border-radius:20px; }
   .sb-filters button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .sb-item { padding:14px 0; border-top:1px solid var(--border); }
+  .sb-item { border-top:1px solid var(--border); }
   .sb-item:first-child { border-top:none; }
   .sb-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
   .sb-title { font-weight:600; }
@@ -33,6 +33,23 @@
   .sb-actions button { font-size:13px; padding:6px 12px; }
   .sb-chip { font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
   .sb-lines { font-size:12px; color:var(--muted); margin-top:6px; }
+  /* whole screen (item 77): the cards on the left, the file open on the right, each scrolling on its own */
+  .sb-app { --sb-top:var(--top-h); display:grid; grid-template-columns:minmax(380px, 42%) minmax(0, 1fr); height:calc(100dvh - var(--sb-top)); background:var(--bg); }
+  .sb-list-pane, .sb-view { min-height:0; min-width:0; display:flex; flex-direction:column; }
+  .sb-list-pane { border-right:1px solid var(--border); background:var(--surface); overflow-y:auto; padding:10px 12px; }
+  .sb-list-pane h1 { font-size:18px; margin:0 0 4px; }
+  .sb-list-pane .subtitle { font-size:12px; }
+  .sb-view { background:var(--surface-2, var(--surface)); }
+  .sb-view-head { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border); font-size:13px; min-height:40px; }
+  .sb-view-body { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:13px; }
+  .sb-view-body iframe, .sb-view-body img { width:100%; height:100%; border:0; object-fit:contain; background:#fff; }
+  .sb-item { padding:10px 8px; border-radius:8px; cursor:pointer; }
+  .sb-item.is-open { background:var(--accent-dim, rgba(68,146,205,0.12)); }
+  @media (max-width: 900px) {
+    .sb-app { display:block; height:auto; }
+    .sb-view { display:none; }
+    .sb-list-pane { border-right:0; }
+  }
 </style>
 </head>
 <body>
@@ -47,11 +64,10 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Emailed bills</h1>
-    <p class="subtitle">Bills suppliers send to invoice@thomsonenergy.com.au. TEops reads each one, works out the supplier and the PO, and lists it here to check. A bill whose PO is not sure also shows on that supplier's open POs, where "This bill is for PO2009" saves it in one tap. Packing slips are filed with their invoice, never saved as bills. Nothing is approved for payment or sent to Xero from here.</p>
-
-    <div class="card">
+  <div class="sb-app" id="sb-app">
+    <div class="sb-list-pane">
+      <h1>Emailed bills</h1>
+      <p class="subtitle" style="margin-bottom:8px;">Sent to invoice@thomsonenergy.com.au. Tap a card to see the file beside it. A bill whose PO is not sure also shows on that supplier's open POs ("This bill is for PO2009" saves it there). Packing slips are filed with their invoice, never saved as bills. Nothing is approved or sent to Xero from here.</p>
       <div class="sb-filters" id="sb-filters">
         <button type="button" class="secondary active" data-f="check">To check</button>
         <button type="button" class="secondary" data-f="waiting">Being read</button>
@@ -61,9 +77,13 @@
       </div>
       <div id="sb-list"><p class="subtitle">Loading...</p></div>
     </div>
+    <div class="sb-view">
+      <div class="sb-view-head"><span id="sb-view-title" class="subtitle" style="margin:0;">Tap a card to see its file here</span><button type="button" class="secondary btn-sm" id="sb-view-open" style="display:none;">Open in a new tab</button></div>
+      <div class="sb-view-body" id="sb-view-body">The invoice, credit note or packing slip shows here.</div>
+    </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const FILTERS = {
@@ -88,12 +108,12 @@
       return data;
     }
 
-    function poOptions(item) {
+    function poOptions(item, isCredit = false) {
       const cands = item.po_candidates || [];
       const candIds = new Set(cands.map(c => c.po_id));
       const others = openPOs.filter(po => po.supplier_id === item.supplier_id && !candIds.has(po.id));
       const picked = item.po_id || '';
-      return (picked ? '' : `<option value="" selected>Pick the PO...</option>`) + `<option value="__none__">No PO for this bill</option>`
+      return (picked ? '' : `<option value="" selected>Pick the PO...</option>`) + `<option value="__none__">${isCredit ? 'No PO: a credit on the account' : 'No PO for this bill'}</option>`
         + (cands.length ? `<optgroup label="Suggested">${cands.map(c => `<option value="${c.po_id}" ${c.po_id === picked ? 'selected' : ''}>${esc(c.label)} (${esc(c.reason)})</option>`).join('')}</optgroup>` : '')
         + (others.length ? `<optgroup label="Other open POs for this supplier">${others.map(po => `<option value="${po.id}">${esc(poRef(po))}</option>`).join('')}</optgroup>` : '');
     }
@@ -115,7 +135,25 @@
       const guessSupplierId = ((item.po_candidates || [])[0] || {}).supplier_id || '';
 
       const docket = (ex.document_type || 'invoice') === 'delivery_docket';
-      if (docket && item.status !== 'deleted') {
+      const credit = (ex.document_type || 'invoice') === 'credit_note';
+      if (credit && item.status === 'to_check') {
+        // a credit note (item 82): saved as a bill with a minus in front; the lines show what Save will do on the PO picked
+        const readable = item.attachment_part_id !== 'none' && item.extracted && ex.bill_number !== undefined;
+        body += !supplier && readable ? `
+          <div class="sb-row">
+            <select class="sb-supplier"><option value="">Pick the supplier...</option>${suppliers.map(s => `<option value="${s.id}" ${s.id === guessSupplierId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+            <button type="button" class="secondary sb-set-supplier">Use this supplier</button>
+          </div>` : '';
+        body += supplier && readable ? `<div class="sb-row"><select class="sb-po">${poOptions(item, true)}</select></div><div class="sb-plan sb-lines">Pick the PO to see what each line will do.</div>` : '';
+        body += `<div class="sb-actions">
+            ${supplier && readable ? `<button type="button" class="sb-save">Save credit note</button>` : ''}
+            ${readable && supplier ? `<button type="button" class="secondary sb-review">Review in full</button>` : ''}
+            ${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}
+            <button type="button" class="secondary sb-not-bill">Not a credit note</button>
+            ${deleteBtn}
+          </div>
+          <div class="sb-meta">Saved as a credit: it nets off ${esc(supplier ? supplier.name + "'s" : 'the supplier\'s')} next bills in Pay bills due. Goods that went back come off the PO (and out of Stock or off the job if received); a price credit drops the PO line's price. Refunded on the supplier page is for money that comes back instead.</div>`;
+      } else if (docket && item.status !== 'deleted') {
         // a packing slip: nothing to pay, filed with its invoice (same email or same number) when that is saved
         body += `<div class="sb-actions">${item.file_path ? `<button type="button" class="secondary sb-open">Open file</button>` : ''}${item.bill_id && item.supplier_id ? `<a class="btn secondary" style="display:inline-flex;" href="/supplier-detail.html?id=${item.supplier_id}">Open supplier</a>` : ''}${!item.bill_id ? `<button type="button" class="secondary sb-is-bill">It is a bill</button>` : ''}${!item.bill_id ? deleteBtn : ''}</div>`;
       } else if (item.status === 'to_check') {
@@ -148,8 +186,8 @@
 
       return `<div class="sb-item" data-id="${item.id}">
         <div class="sb-head">
-          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${docket ? (item.bill_id ? 'Packing slip, filed with the bill' : 'Packing slip') : esc(STATUS_TEXT[item.status] || item.status)}</span></div>
-          ${ex.total != null ? `<div class="sb-total">${money(ex.total)}</div>` : ''}
+          <div><span class="sb-title">${esc(title)}</span> ${ex.bill_number ? `<span class="subtitle" style="margin:0;">Bill ${esc(ex.bill_number)}</span>` : ''} <span class="sb-chip">${docket ? (item.bill_id ? 'Packing slip, filed with the bill' : 'Packing slip') : credit ? 'Credit note' + (item.status === 'saved' ? ', saved' : item.status === 'duplicate' ? ', duplicate' : '') : esc(STATUS_TEXT[item.status] || item.status)}</span></div>
+          ${ex.total != null ? `<div class="sb-total" ${credit ? 'style="color:var(--green);"' : ''}>${credit ? 'Credit ' : ''}${money(Math.abs(ex.total))}</div>` : ''}
         </div>
         <div class="sb-meta">${ex.bill_date ? 'Dated ' + dateText(ex.bill_date) + ' · ' : ''}${ex.our_order_reference ? 'Our ref on bill: ' + esc(ex.our_order_reference) + ' · ' : ''}Emailed ${dateText(item.received_at || item.created_at)} by ${esc(item.email_from || 'unknown')}${item.file_name ? ' · ' + esc(item.file_name) : ''}</div>
         ${item.email_subject ? `<div class="sb-meta">Subject: ${esc(item.email_subject)}</div>` : ''}
@@ -178,9 +216,30 @@
       }
       listEl.innerHTML = rows.map(itemHtml).join('');
       listEl.querySelectorAll('.sb-item').forEach(el => wire(el, all.find(i => i.id === el.dataset.id)));
+      if (openId && rows.some(i => i.id === openId)) listEl.querySelector(`.sb-item[data-id="${openId}"]`)?.classList.add('is-open');
+    }
+
+    // the file beside the cards (item 83): tap a card and its PDF or photo opens on the right
+    let openId = null;
+    async function showFile(item) {
+      openId = item.id;
+      document.querySelectorAll('.sb-item').forEach(x => x.classList.toggle('is-open', x.dataset.id === item.id));
+      const ex = item.extracted || {};
+      const title = document.getElementById('sb-view-title'), body = document.getElementById('sb-view-body'), openBtn = document.getElementById('sb-view-open');
+      title.textContent = `${ex.supplier || item.email_from || ''}${ex.bill_number ? ' · ' + ex.bill_number : ''}${item.file_name ? ' · ' + item.file_name : ''}`;
+      if (!item.file_path) { body.textContent = 'No file on this one.'; openBtn.style.display = 'none'; return; }
+      body.textContent = 'Loading...';
+      try {
+        const url = await getSignedDocUrl(item.file_path);
+        const isPdf = /\.pdf$/i.test(item.file_name || '') || (item.mime_type || '').includes('pdf');
+        body.innerHTML = isPdf ? `<iframe src="${esc(url)}#toolbar=0" title="File"></iframe>` : `<img src="${esc(url)}" alt="File" />`;
+        openBtn.style.display = '';
+        openBtn.onclick = () => window.open(url, '_blank');
+      } catch (err) { body.textContent = err.message; openBtn.style.display = 'none'; }
     }
 
     function wire(el, item) {
+      el.addEventListener('click', (e) => { if (!e.target.closest('button, select, input, a, label')) showFile(item); });
       const msg = el.querySelector('.sb-msg');
       const showErr = (err) => { msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; };
       const run = async (btn, body, busyText, reloadOnError = false) => {
@@ -195,18 +254,42 @@
         }
       };
       // the PO picked and the total read off the bill, confirmed (or corrected) by a person before it is saved (M4)
+      const isCredit = ((item.extracted || {}).document_type || 'invoice') === 'credit_note';
       const askPoAndTotal = () => {
         const pickedPo = el.querySelector('.sb-po')?.value || '';
-        if (el.querySelector('.sb-po') && !pickedPo) { showErr(new Error('Pick the PO this bill is for (or "No PO for this bill").')); return null; }
+        if (el.querySelector('.sb-po') && !pickedPo) { showErr(new Error(isCredit ? 'Pick the PO this credit is for (or "No PO: a credit on the account").' : 'Pick the PO this bill is for (or "No PO for this bill").')); return null; }
         const po_id = pickedPo === '__none__' ? null : pickedPo || null;
-        if (!po_id && !confirm('Save this bill with no PO?')) return null;
+        if (!po_id && !isCredit && !confirm('Save this bill with no PO?')) return null;
         const ex = item.extracted || {};
-        const raw = prompt(`Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
+        const total = ex.total != null ? Math.abs(Number(ex.total)) : null;
+        const raw = prompt(`${isCredit ? 'Credit amount' : 'Bill total'} inc GST, as printed${total != null ? ` (read as ${money(total)})` : ' (no total was read)'}:`, total != null ? String(total) : '');
         if (raw === null) return null;
         const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-        if (!(amount > 0)) { showErr(new Error('Enter the bill total as a number, more than zero.')); return null; }
-        return { po_id, amount };
+        if (!(amount > 0)) { showErr(new Error('Enter the amount as a number, more than zero.')); return null; }
+        const out = { po_id, amount };
+        if (isCredit) {
+          // what each line does on the PO, as shown on the card (a tick switched by the person wins)
+          const overrides = {};
+          el.querySelectorAll('.sb-returned').forEach(cb => { overrides[cb.dataset.i] = cb.checked; });
+          out.overrides = overrides;
+        }
+        return out;
       };
+      // a credit note: the plan for the PO picked (which PO line each credit line is for, goods back or a price credit)
+      const showPlan = async () => {
+        const planEl = el.querySelector('.sb-plan');
+        if (!planEl) return;
+        const pickedPo = el.querySelector('.sb-po')?.value || '';
+        if (!pickedPo) { planEl.textContent = 'Pick the PO to see what each line will do.'; return; }
+        planEl.textContent = 'Working out the lines...';
+        try {
+          const d = await callInbox({ action: 'credit_plan', id: item.id, po_id: pickedPo === '__none__' ? null : pickedPo });
+          planEl.innerHTML = (d.lines || []).map(l => `<div style="padding:3px 0;">${esc(l.description)} &middot; ${l.quantity} &times; ${money(l.unit_cost)}: ${l.po_line_item_id
+            ? `<label style="display:inline-flex; align-items:center; gap:4px; font-weight:400; margin:0;"><input type="checkbox" class="sb-returned" data-i="${l.index}" ${l.goods_returned ? 'checked' : ''} style="width:auto;" /> goods went back</label> <span class="subtitle" style="font-size:11px;">(on the PO as "${esc(l.po_line_description)}" at ${money(l.po_line_unit_cost)}${l.goods_returned ? '' : ': a price credit as it stands'})</span>`
+            : '<span class="subtitle" style="font-size:11px;">not on this PO: money only</span>'}</div>`).join('') || 'No lines read: money only.';
+        } catch (err) { planEl.textContent = err.message; }
+      };
+      if (isCredit) { el.querySelector('.sb-po')?.addEventListener('change', showPlan); showPlan(); }
 
       el.querySelector('.sb-open')?.addEventListener('click', async () => {
         const win = window.open('', '_blank');
@@ -263,7 +346,7 @@
             const poRaw = el.querySelector('.sb-po')?.value || '';
             const poId = poRaw && poRaw !== '__none__' ? poRaw : null;
             sessionStorage.setItem('pending_upload', JSON.stringify({
-              ...extra, type: 'bill', extracted: item.extracted, filePath: await uploadPrivateFile(file, 'ai-extraction-uploads'), fileName: file.name, fileType: file.type, preselectedPoId: poId,
+              ...extra, type: 'bill', extracted: item.extracted, filePath: item.file_path, fileName: file.name, fileType: file.type, preselectedPoId: poId,
             }));
             window.location.href = `/supplier-detail.html?id=${item.supplier_id}&resume_upload=1`;
           } else {

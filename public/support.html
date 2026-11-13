@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .support-card { border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; }
@@ -32,25 +32,33 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Tech Support</h1>
-    <p class="subtitle">Tech support phone numbers for our suppliers and manufacturers (inverters, batteries, meters, software). Tap a number to call. Anyone can add or fix an entry, so keep it current.</p>
-    <p class="subtitle" style="margin-top:-6px;">Something wrong with this app? <a class="link-quiet" href="/bugs.html">Report it in Updates and ideas</a>.</p>
-
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-        <h2 style="margin:0;">Support numbers</h2>
-        <button id="add-support-btn">+ Add number</button>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 480px;">
+        <h1>Tech Support</h1>
+        <p class="subtitle">Tech support phone numbers for our suppliers and manufacturers (inverters, batteries, meters, software). Tap a number to call. Anyone can add or fix an entry, so keep it current.</p>
+        <p class="subtitle">Something wrong with this app? <a class="link-quiet" href="/bugs.html">Report it in Updates and ideas</a>.</p>
       </div>
-      <div class="grid cols-2" style="margin-bottom:12px;">
+      <div class="grid cols-2" style="flex:1 1 480px; max-width:640px;">
         <input id="support-search" placeholder="Search by name, product, category or notes..." autocomplete="off" />
         <select id="support-category-filter"><option value="">All categories</option></select>
       </div>
-      <div id="support-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+            <h2 style="margin:0;">Support numbers</h2>
+            <button id="add-support-btn">+ Add number</button>
+          </div>
+          <div id="support-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const CATEGORY_SUGGESTIONS = ['Inverters', 'Batteries', 'Solar panels', 'Monitoring', 'EV chargers', 'Switchgear', 'Generators', 'Networks / DNSP', 'Software', 'Suppliers', 'Other'];

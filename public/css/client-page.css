@@ -1,0 +1,35 @@
+/* Loaded after style.css by the pages clients, suppliers and the public see: login, the
+   portal, pick a time, licence share, review, and the proposal, invoice, supplier PO and
+   rates documents (their PDFs are printed from the page). They keep the sizes they had
+   before item 77 made the staff app compact. :where() keeps the plain rules' specificity,
+   so each page's own styles still win as before. A new outside page loads this file and
+   puts class="client-page" on <body>. */
+:where(body.client-page) { --top-h: 76px; }
+@media (max-width: 700px) { :where(body.client-page) { --top-h: 64px; } }
+:where(body.client-page) .topbar { padding: 0 24px; }
+:where(body.client-page) .topbar-logo img { height: 56px; }
+@media (max-width: 700px) {
+  :where(body.client-page) .topbar { padding: 0 14px; }
+  :where(body.client-page) .topbar-logo img { height: 42px; }
+}
+:where(body.client-page) .wrap { max-width: 1100px; padding: 32px 24px 80px; }
+:where(body.client-page) h1 { font-size: 22px; }
+:where(body.client-page) h2 { font-size: 17px; margin: 0 0 12px; }
+:where(body.client-page) .subtitle { font-size: 14px; margin: 0 0 28px; }
+:where(body.client-page) .card { padding: 22px; margin-bottom: 20px; }
+:where(body.client-page) .grid { gap: 16px; }
+:where(body.client-page) .stat { padding: 16px; }
+:where(body.client-page) .stat .label { font-size: 13px; }
+:where(body.client-page) .stat .value { font-size: 24px; margin-top: 4px; }
+:where(body.client-page) label { font-size: 14px; margin: 14px 0 6px; }
+:where(body.client-page) :is(input, textarea, select) { padding: 10px 12px; min-height: 0; }
+:where(body.client-page) textarea { min-height: 70px; }
+:where(body.client-page) :is(button, .btn) { padding: 10px 18px; }
+:where(body.client-page) :is(button.btn-sm, .btn.btn-sm) { padding: 6px 12px; }
+:where(body.client-page) table { font-size: 14px; }
+:where(body.client-page) :is(th, td) { padding: 10px 8px; }
+:where(body.client-page) th { font-size: 13px; }
+:where(body.client-page) .empty-state { padding: 60px 20px; }
+@media (max-width: 700px) {
+  :where(body.client-page) :is(th, td) { padding: 8px 5px; }
+}

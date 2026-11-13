@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,8 +26,8 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+  <div class="wrap fill">
+    <div class="page-head">
       <div>
         <h1>Purchase Orders</h1>
         <p class="subtitle">One line per order. Tap it to open the PO.</p>
@@ -36,31 +36,36 @@
         <button id="create-po-btn">+ Create purchase order</button>
         <button type="button" class="secondary" id="po-tour-btn" title="A short tour of this page">Show me how</button>
       </div>
-    </div>
-
-    <div class="grid cols-3" id="po-tiles">
-      <div class="stat po-tile" data-tab="waiting" role="button" tabindex="0" title="Ordered, not all in yet"><div class="label">Waiting on delivery</div><div class="value" id="stat-waiting">-</div></div>
-      <div class="stat po-tile" data-tab="ready" role="button" tabindex="0" title="Every line received: close them to approve their bills"><div class="label">Ready to close</div><div class="value" id="stat-ready">-</div></div>
-      <div class="stat po-tile" data-tab="bills" role="button" tabindex="0" title="A bill line not on the PO or charged more"><div class="label">Bills needing a decision</div><div class="value" id="stat-bills">-</div></div>
-      <div class="stat po-tile" data-tab="match" role="button" tabindex="0" title="An emailed bill with no PO number on it: say which PO it is for" style="display:none;"><div class="label">Bills to match</div><div class="value" id="stat-match">-</div></div>
-    </div>
-
-    <div class="card">
-      <div class="po-tabs" id="po-tabs">
-        <button type="button" class="settings-tab active" data-tab="open">Open</button>
-        <button type="button" class="settings-tab" data-tab="waiting">Waiting on delivery</button>
-        <button type="button" class="settings-tab" data-tab="ready">Ready to close</button>
-        <button type="button" class="settings-tab" data-tab="bills" id="po-tab-bills" style="display:none;">Bills needing a decision</button>
-        <button type="button" class="settings-tab" data-tab="match" id="po-tab-match" style="display:none;">Bills to match</button>
-        <button type="button" class="settings-tab" data-tab="closed">Closed</button>
+      <div class="grid cols-4" id="po-tiles" style="flex:1 1 560px; max-width:840px;">
+        <div class="stat po-tile" data-tab="waiting" role="button" tabindex="0" title="Ordered, not all in yet"><div class="label">Waiting on delivery</div><div class="value" id="stat-waiting">-</div></div>
+        <div class="stat po-tile" data-tab="ready" role="button" tabindex="0" title="Every line received: close them to approve their bills"><div class="label">Ready to close</div><div class="value" id="stat-ready">-</div></div>
+        <div class="stat po-tile" data-tab="bills" role="button" tabindex="0" title="A bill line not on the PO or charged more"><div class="label">Bills needing a decision</div><div class="value" id="stat-bills">-</div></div>
+        <div class="stat po-tile" data-tab="match" role="button" tabindex="0" title="An emailed bill with no PO number on it: say which PO it is for" style="display:none;"><div class="label">Bills to match</div><div class="value" id="stat-match">-</div></div>
       </div>
-      <input id="po-search" placeholder="Search by PO number, supplier, job or vehicle..." style="max-width:380px; margin-bottom:12px;" />
-      <div id="po-full-list"><p class="subtitle">Loading...</p></div>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; flex:1 1 100%;">
+        <div class="po-tabs" id="po-tabs" style="margin:0;">
+          <button type="button" class="settings-tab active" data-tab="open">Open</button>
+          <button type="button" class="settings-tab" data-tab="waiting">Waiting on delivery</button>
+          <button type="button" class="settings-tab" data-tab="ready">Ready to close</button>
+          <button type="button" class="settings-tab" data-tab="bills" id="po-tab-bills" style="display:none;">Bills needing a decision</button>
+          <button type="button" class="settings-tab" data-tab="match" id="po-tab-match" style="display:none;">Bills to match</button>
+          <button type="button" class="settings-tab" data-tab="closed">Closed</button>
+        </div>
+        <input id="po-search" placeholder="Search by PO number, supplier, job or vehicle..." style="max-width:380px; margin:0;" />
+      </div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="po-full-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
-  <script src="/js/email-compose.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/email-compose.js?v=13"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>

@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .oh-grid { display:grid; gap:12px; grid-template-columns: repeat(4, 1fr); margin-bottom:14px; }
@@ -33,6 +33,10 @@
   .oh-people input[type=number] { width:62px; margin:0; padding:5px 6px; }
   .oh-people input.oh-wide { width:84px; }
   .oh-people .oh-calc { background:var(--surface-2); }
+  /* Item 77: two short sections side by side on a laptop, in reading order on a phone */
+  .oh-pair { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:12px; }
+  .oh-pair > .card { margin:0; }
+  @media (max-width: 900px) { .oh-pair { display:block; margin:0; } .oh-pair > .card { margin-bottom:12px; } }
   .oh-warn { background:var(--surface-2); border-left:3px solid #eab308; padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:14px; }
   @media (max-width: 640px) { .oh-line { grid-template-columns: 1fr 120px auto; } .oh-acc { grid-template-columns: 1fr 100px; } .oh-acc select { grid-column: 1 / -1; } }
 </style>
@@ -86,6 +90,7 @@
       <p class="subtitle" style="margin:8px 0 0; font-size:12px;">Subcontractors get no leave, public holidays, training or on-costs, but their billable hours still carry the indirect and company overheads. Other costs are anything for one person only (their phone, tools, licences), per year.</p>
     </div>
 
+    <div class="oh-pair">
     <div class="card">
       <h2>2. Employee on-costs</h2>
       <p class="subtitle" style="margin-bottom:10px;">Percentages of each employee's wages. Part of each billable person's direct overhead (and of the indirect overhead for office and admin staff).</p>
@@ -106,7 +111,9 @@
       <p class="subtitle" style="margin-bottom:8px;">Worked out for you from section 1: every non-billable wage hour.</p>
       <div id="oh-indirect"></div>
     </div>
+    </div>
 
+    <div class="oh-pair">
     <div class="card">
       <h2>4. Company costs</h2>
       <p class="subtitle" style="margin-bottom:8px;">Non-wage costs of running the business, per year: insurance, vehicles and fuel, rent, accounting, software, marketing, phones and internet. No wages here (they are all in sections 1 to 3) and no job materials.</p>
@@ -123,6 +130,7 @@
         <button type="button" class="secondary" id="oh-save-base">Save</button>
       </div>
       <p class="subtitle" id="oh-pct-line" style="margin:10px 0 0;"></p>
+    </div>
     </div>
 
     <div class="card">
@@ -145,7 +153,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const fmt0 = (n) => new Intl.NumberFormat('en-AU', { maximumFractionDigits: 0 }).format(n || 0);

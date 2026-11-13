@@ -11,8 +11,12 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  /* laptop: Library on the left, the editor on the right; a phone keeps the editor first */
+  @media (min-width: 901px) { .pb-lib-col { order: -1; } }
+</style>
 </head>
 <body>
   <div class="topbar">
@@ -26,20 +30,28 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Prebuilds</h1>
-    <p class="subtitle">Reusable supply-and-install packages. Staff pick these on a quote and set a quantity - every component scales automatically.</p>
-
-    <div class="card" id="pb-form-root"></div>
-
-    <div class="card">
-      <h2>Library</h2>
-      <input id="pb-search" placeholder="Search by name or category..." style="margin-bottom:12px; max-width:320px;" autocomplete="off" />
-      <div id="pb-list"><p class="subtitle">Loading...</p></div>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Prebuilds</h1>
+        <p class="subtitle">Reusable supply-and-install packages. Staff pick these on a quote and set a quantity - every component scales automatically.</p>
+      </div>
+    </div>
+    <div class="page-cols">
+      <div class="page-col" style="flex-grow:2; padding-bottom:72px;">
+        <div class="card" id="pb-form-root"></div>
+      </div>
+      <div class="page-col pb-lib-col">
+        <div class="card">
+          <h2>Library</h2>
+          <input id="pb-search" placeholder="Search by name or category..." style="margin-bottom:12px; max-width:320px;" autocomplete="off" />
+          <div id="pb-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/prebuild-form.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -69,7 +81,7 @@
         : allPrebuilds;
 
       if (!allPrebuilds.length) {
-        listEl.innerHTML = `<p class="subtitle">No prebuilds yet - add your first one above.</p>`;
+        listEl.innerHTML = `<p class="subtitle">No prebuilds yet - add your first one in the editor.</p>`;
         return;
       }
       if (!data.length) {
@@ -95,7 +107,7 @@
         btn.addEventListener('click', () => {
           const pb = allPrebuilds.find(p => p.id === btn.dataset.id);
           prebuildForm.loadForEdit(pb);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          document.getElementById('pb-form-root').scrollIntoView({ block: 'start', behavior: 'smooth' });
         });
       });
       listEl.querySelectorAll('.pb-delete-btn').forEach(btn => {

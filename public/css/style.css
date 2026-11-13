@@ -54,6 +54,10 @@ html[data-theme="navy"] {
 
 * { box-sizing: border-box; }
 
+/* Top bar height for every page, the menu under it and the whole-screen pages */
+:root { --top-h: 60px; }
+@media (max-width: 700px) { :root { --top-h: 64px; } }
+
 /* Plain links had no colour, so browsers showed their default dark blue (purple once
    visited), which is hard to read on the black theme. Classes still set their own. */
 a, a:visited { color: var(--link); }
@@ -86,18 +90,14 @@ body {
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-/* ===================================================================
-   Topbar / navigation
-   Logo sits top right; module tabs run left of it, each with a
-   placeholder total. Wraps to a scrollable row on narrow screens.
-   =================================================================== */
+/* Top bar: module tabs left, logo right; fitTopbar() folds tabs into the menu */
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 0 24px;
-  height: 76px;
+  padding: 0 20px;
+  height: var(--top-h);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: relative;
@@ -119,7 +119,7 @@ body {
   align-items: center;
   gap: 2px;
   padding: 0 14px;
-  height: 76px;
+  height: var(--top-h);
   text-decoration: none;
   color: var(--muted);
   font-size: 13px;
@@ -181,7 +181,7 @@ body {
 .topbar-icon-link:hover { color: var(--text); background: var(--surface-2); }
 
 .topbar-logo { display: flex; align-items: center; text-decoration: none; }
-.topbar-logo img { height: 56px; width: auto; display: block; }
+.topbar-logo img { height: 42px; width: auto; display: block; }
 
 /* Simple text brand mark, used on the client-facing quote.html topbar
    which doesn't carry the full internal nav. */
@@ -308,7 +308,7 @@ body {
 .nav-group-btn.has-active { color: var(--text); }
 @media (min-width: 701px) {
   .mobile-menu-dropdown {
-    top: 76px;
+    top: var(--top-h);
     left: var(--more-left, 24px);
     right: auto;
     width: 260px;
@@ -337,8 +337,8 @@ body {
 .topbar-icon-link.active { color: var(--accent); }
 
 @media (max-width: 700px) {
-  .topbar { padding: 0 14px; gap: 10px; height: 64px; }
-  .topbar-tab { padding: 0 10px; font-size: 12px; height: 64px; }
+  .topbar { padding: 0 14px; gap: 10px; }
+  .topbar-tab { padding: 0 10px; font-size: 12px; }
   .topbar-logo img { height: 42px; }
   .topbar-tabs { display: none; }
   .mobile-menu-btn { display: flex; }
@@ -466,29 +466,57 @@ body {
 }
 
 .wrap {
-  max-width: 1100px;
   margin: 0 auto;
-  padding: 32px 24px 80px;
+  padding: 14px 20px 72px; /* the bottom clears the floating Ask AI button */
 }
-.wrap.wide { max-width: 1400px; }
+/* Item 77: no width cap, every page uses the whole screen; .narrow for reading pages */
+.wrap.narrow { max-width: 760px; }
 
-h1 { font-size: 22px; margin: 0 0 4px; }
-h2 { font-size: 17px; margin: 0 0 12px; }
-.subtitle { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+/* Whole-screen frame (item 77), like Chat and Inbox: .wrap.fill is the window under the
+   bar, a .page-head line, then .page-cols whose .page-col columns sit side by side and
+   scroll on their own (equal widths; a column sets its own with style="flex: 0 0 320px"
+   or "flex-grow: 2"). A column whose cards are all hidden drops out. 900px and under they stack. */
+.wrap.fill {
+  height: calc(100vh - var(--top-h));
+  height: calc(100dvh - var(--top-h));
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; flex-shrink: 0; }
+.page-head h1, .page-head .subtitle { margin: 0; }
+.page-cols { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.page-col { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
+.page-col:last-child { padding-bottom: 72px; } /* the floating Ask AI button sits over the last column */
+.page-col > .card:last-child { margin-bottom: 0; }
+.page-col:not(:has(> :not([style*="display: none"]):not([style*="display:none"]))) { display: none; }
+@media (max-width: 900px) {
+  .wrap.fill { height: auto; overflow: visible; display: block; padding-bottom: 72px; }
+  .page-cols { display: block; }
+  .page-col { overflow: visible; padding-bottom: 0; }
+  .page-col > .card:last-child { margin-bottom: 12px; }
+}
+
+h1 { font-size: 20px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+.subtitle { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 22px;
-  margin-bottom: 20px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
 }
 
-.grid { display: grid; gap: 16px; }
+.grid { display: grid; gap: 12px; }
 .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
 @media (max-width: 800px) {
   .grid.cols-4, .grid.cols-3 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-2 { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .grid.cols-3 { grid-template-columns: 1fr; }
@@ -500,10 +528,10 @@ h2 { font-size: 17px; margin: 0 0 12px; }
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 9px 12px;
 }
-.stat .label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
-.stat .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+.stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
 .stat .value.positive { color: var(--green); }
 .stat .value.negative { color: var(--red); }
 .stat .value.placeholder { color: var(--muted); }
@@ -511,18 +539,18 @@ h2 { font-size: 17px; margin: 0 0 12px; }
   .stat .label { font-size: 12px; } /* two-column stat grids: uppercase labels keep to one or two lines */
 }
 
-label { display: block; font-size: 14px; color: var(--text); margin: 14px 0 6px; }
+label { display: block; font-size: 13px; color: var(--text); margin: 10px 0 4px; }
 input, textarea, select {
   width: 100%;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 7px 10px;
   font-size: 14px;
   font-family: inherit;
 }
-textarea { min-height: 70px; resize: vertical; }
+textarea { min-height: 64px; resize: vertical; }
 /* Placeholders use the readable grey; typed values stay var(--text), so the two never look alike */
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 
@@ -530,6 +558,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
    Touch screens only (pointer: coarse), so laptops keep 14px. */
 @media (pointer: coarse) {
   input, textarea, select { font-size: 16px !important; }
+  input:not([type=checkbox]):not([type=radio]), select { min-height: 42px; } /* finger sized on a touch screen */
 }
 
 button, .btn {
@@ -540,7 +569,7 @@ button, .btn {
   color: var(--accent-contrast);
   border: none;
   border-radius: 8px;
-  padding: 10px 18px;
+  padding: 7px 14px;
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
@@ -555,10 +584,8 @@ button.danger { background: var(--red); color: #ffffff; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Compact buttons for dense rows (PO lines, list rows). Laptops stay compact;
    touch screens still get the 40px height from the rule below. */
-button.btn-sm, .btn.btn-sm { font-size: 13px; padding: 6px 12px; }
-/* Touch screens: every button is at least finger height. Task row buttons
-   (Tasks page) get the full 44px. The small round controls (photo thumbnail
-   x, markup colour dots, photo viewer close) keep their fixed size. */
+button.btn-sm, .btn.btn-sm { font-size: 13px; padding: 4px 10px; }
+/* Touch screens: buttons at least 40px (task rows 44px); small round controls keep their size */
 @media (pointer: coarse) {
   button, .btn { min-height: 40px; }
   .task-actions button { min-height: 44px; }
@@ -569,9 +596,9 @@ button.btn-sm, .btn.btn-sm { font-size: 13px; padding: 6px 12px; }
   .task-actions button { flex: 1; justify-content: center; }
 }
 
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
-th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 td.num, th.num { text-align: right; }
 
 .badge {
@@ -606,7 +633,7 @@ td.num, th.num { text-align: right; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
   text-decoration: none;
   color: var(--text);
@@ -647,7 +674,7 @@ td.num, th.num { text-align: right; }
   .cc-row-costs { grid-template-columns: 1fr 1fr; }
 }
 
-.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-state { text-align: center; padding: 28px 16px; color: var(--muted); }
 .empty-state .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.6; }
 .empty-state h2 { margin-bottom: 6px; }
 
@@ -710,16 +737,27 @@ html[data-theme="navy"] .success-box {
   background: transparent;
   border: none;
   color: var(--muted);
-  padding: 10px 14px;
+  padding: 7px 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
+.settings-tabs:empty { display: none; }
 .settings-tab:hover { background: var(--surface-2); color: var(--text); }
 .settings-tab.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
 .settings-panel { display: none; }
 .settings-panel.active { display: block; }
+/* On a whole-screen page the tab rail and the open panel scroll on their own (item 77), and
+   a panel of several cards (.two-up) lays them two across on a laptop. */
+.wrap.fill > .settings-layout { flex: 1; min-height: 0; align-items: stretch; }
+.wrap.fill > .settings-layout > * { min-height: 0; overflow-y: auto; padding-bottom: 72px; }
+@media (min-width: 901px) {
+  .settings-panel.active.two-up { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: start; }
+  .settings-panel.two-up > .card { margin: 0; }
+  .settings-panel.two-up > :not(.card) { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) { .wrap.fill > .settings-layout > * { overflow: visible; padding-bottom: 0; } }
 @media (max-width: 800px) {
   .settings-layout { grid-template-columns: 1fr; }
   .settings-tabs {
@@ -731,27 +769,11 @@ html[data-theme="navy"] .success-box {
   .settings-tab { white-space: nowrap; }
 }
 
-.job-tab-layout { display: flex; gap: 20px; align-items: flex-start; }
-.job-tab-main { flex: 1; min-width: 0; }
-.job-activity-sidebar { width: 320px; flex-shrink: 0; position: sticky; top: 20px; }
-.job-activity-sidebar .card { margin-bottom: 0; }
 /* Activity log: fits the screen and scrolls inside its own box */
 .activity-log-scroll { max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; }
-.activity-entry { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.activity-entry { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .activity-entry .subtitle { font-size: 12px; margin: 2px 0 0; }
-@media (max-width: 900px) {
-  .job-tab-layout { flex-direction: column; align-items: stretch; }
-  .job-activity-sidebar { width: 100%; position: static; }
-  .activity-log-scroll { max-height: 60vh; }
-}
-
-/* Job tab cards sit side by side like the Team and Home pages: 2 across on
-   a laptop, 1 on a phone. Stat rows and other grids take the full width. */
-.settings-panel.active.job-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 20px; align-items: start; margin-bottom: 20px; }
-.job-card-grid > * { min-width: 0; }
-.job-card-grid > :empty { display: none; }
-.job-card-grid > .card, .job-card-grid > div > .card { margin: 0 !important; }
-.job-card-grid > .grid { grid-column: 1 / -1; }
+@media (max-width: 900px) { .activity-log-scroll { max-height: 60vh; } }
 
 .theme-options {
   display: grid;
@@ -805,7 +827,7 @@ html[data-theme="navy"] .success-box {
   padding-bottom: 16px;
 }
 .pipeline-column {
-  flex: 0 0 260px;
+  flex: 0 0 240px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -813,6 +835,10 @@ html[data-theme="navy"] .success-box {
   flex-direction: column;
   max-height: calc(100vh - 220px);
 }
+/* On the whole-screen Pipeline page (item 77) the board fills the window and each column runs its full height */
+.pipeline-board.fill-board { flex: 1; min-height: 0; padding-bottom: 12px; }
+.fill-board .pipeline-column { max-height: none; }
+@media (max-width: 900px) { .fill-board .pipeline-column { max-height: calc(100vh - 220px); } }
 .pipeline-column-header {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
@@ -869,11 +895,7 @@ html[data-theme="navy"] .success-box {
   .pipeline-column { flex-basis: 220px; }
 }
 
-/* ===================================================================
-   Responsive tables: stack into cards on narrow screens instead of
-   overflowing horizontally. Opt-in via class="responsive-stack" plus
-   data-label on each <td> (JS supplies the label per row).
-   =================================================================== */
+/* table.responsive-stack: a card per row on a phone, labels from each td's data-label */
 @media (max-width: 700px) {
   table.responsive-stack, table.responsive-stack thead, table.responsive-stack tbody,
   table.responsive-stack th, table.responsive-stack td, table.responsive-stack tr {
@@ -907,10 +929,7 @@ html[data-theme="navy"] .success-box {
   table.responsive-stack td.num { text-align: right; }
 }
 
-/* Floating "Ask AI" chat widget - see renderAIChatWidget() in
-   js/supabase-client.js. Sizing lives here rather than inline so it can
-   actually be responsive - a position:fixed panel with a hardcoded pixel
-   width doesn't reflow on its own like normal page content does. */
+/* Floating "Ask AI" widget (renderAIChatWidget in supabase-client.js) */
 #ai-chat-toggle {
   position: fixed;
   bottom: 20px;
@@ -960,11 +979,7 @@ html[data-theme="navy"] .success-box {
 #ai-chat-input-row input { flex: 1; margin: 0; }
 #ai-chat-input-row button { margin: 0; padding: 8px 14px; font-size: 13px; }
 
-/* Below this, the panel goes near-fullscreen instead of a small floating
-   box - and the input stays at 16px so iOS Safari doesn't auto-zoom the
-   whole fixed-position layout on focus, which is what actually made it
-   look broken on a phone (everything past the zoomed-in edges was simply
-   off-screen). */
+/* Phones: the panel goes near full screen; the input stays 16px so iOS does not zoom. */
 @media (max-width: 560px) {
   #ai-chat-toggle { bottom: 14px; right: 14px; }
   #ai-chat-panel {
@@ -993,15 +1008,8 @@ html[data-theme="navy"] .success-box {
 .insp-photo-btn { display: flex; justify-content: center; width: 100%; min-height: 44px; margin: 8px 0; cursor: pointer; }
 .insp-child { margin-left: 20px; border-left: 2px solid var(--accent-dim); padding-left: 14px; }
 
-/* ---------------------------------------------------------------------
-   Quote / job line items on a phone. On a wide screen a line is one row
-   (description, type, qty, rate, total, remove). On a phone that was too
-   cramped to read, so each line becomes its own card with a label above
-   every box and big touch-friendly fields: description, then type and
-   quantity side by side, then the rate, then the line total.
-   The labels (.li-lbl) are added by decorateLineItemRow() in
-   supabase-client.js and are hidden on a wide screen.
-   --------------------------------------------------------------------- */
+/* Quote / job line items: one row on a wide screen, a card per line on a phone with a
+   label above each box (.li-lbl, added by decorateLineItemRow in supabase-client.js). */
 .li-row .li-lbl { display: none; }
 @media (max-width: 720px) {
   .li-row {
@@ -1036,10 +1044,7 @@ html[data-theme="navy"] .success-box {
   .prebuild-add, .li-add-btn { padding: 12px 16px !important; font-size: 14px !important; }
 }
 
-/* PO line rows (buildMaterialSearchRow in supabase-client.js): same phone
-   card as .li-row above. Item search full width, then Qty and Unit cost side
-   by side with labels above. The labels (.pml-lbl) are hidden on a wide
-   screen, where the inline 4-column grid stays as it is. */
+/* PO line rows (buildMaterialSearchRow): the same phone card as .li-row above */
 .po-material-line .pml-lbl { display: none; }
 @media (max-width: 720px) {
   .po-material-line {

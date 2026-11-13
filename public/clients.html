@@ -11,9 +11,22 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <style>
+    /* item 77: on a laptop the client list stays on the left and the open client (or the
+       import) fills the right; each scrolls on its own. A phone keeps the tabs as before. */
+    @media (min-width: 901px) {
+      .clients-layout { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0; }
+      .wrap.fill > .clients-layout > .settings-tabs { flex-direction: row; position: static; margin-bottom: 10px; padding-bottom: 0; overflow: visible; }
+      .wrap.fill > .clients-layout > .settings-content { flex: 1; min-height: 0; display: flex; gap: 12px; padding-bottom: 0; overflow: hidden; }
+      .clients-layout .settings-panel { min-height: 0; overflow-y: auto; padding-bottom: 72px; }
+      .clients-layout #panel-list { display: block; flex: 0 0 440px; }
+      .clients-layout #panel-edit.active, .clients-layout #panel-import.active { display: block; flex: 1; min-width: 0; }
+      .clients-layout > .settings-content:not(:has(#panel-edit.active, #panel-import.active))::after { content: 'Pick a client on the left, or + New client.'; flex: 1; color: var(--muted); font-size: 13px; padding: 16px; border: 1px dashed var(--border); border-radius: var(--radius); align-self: flex-start; }
+    }
+  </style>
 </head>
 <body>
   <div class="topbar">
@@ -27,11 +40,13 @@
     </div>
   </div>
 
-  <div class="wrap wide">
+  <div class="wrap fill">
+    <div class="page-head"><div>
     <h1>Clients</h1>
     <p class="subtitle">Every client, their contacts, and payment terms. Selected right from the quote builder too.</p>
+    </div></div>
 
-    <div class="settings-layout">
+    <div class="settings-layout clients-layout">
       <div class="settings-tabs">
         <button class="settings-tab active" data-panel="list">All Clients</button>
         <button class="settings-tab" data-panel="edit" id="edit-tab-btn" style="display:none;">Add / Edit Client</button>
@@ -180,9 +195,9 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/rate-cards.js?v=2"></script>
-  <script src="/js/clients-agreement.js?v=3"></script>
+  <script src="/js/clients-agreement.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];

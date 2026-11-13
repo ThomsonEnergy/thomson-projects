@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,14 +26,16 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <p style="margin:0 0 10px;"><a href="/purchase-orders.html" class="link-quiet">&larr; All purchase orders</a></p>
-    <div id="po-page"><p class="subtitle">Loading...</p></div>
+  <div class="wrap fill">
+    <p style="margin:0 0 10px; flex-shrink:0;"><a href="/purchase-orders.html" class="link-quiet">&larr; All purchase orders</a></p>
+    <div id="po-page" class="page-cols"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
-  <script src="/js/email-compose.js?v=12"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/email-compose.js?v=13"></script>
+  <script src="/js/po-bills.js?v=1"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
+  <script src="/js/supplier-bill-actions.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // One purchase order, one page: the next step at the top, the lines with a tick box each
@@ -75,14 +77,15 @@
       const pricing = isPricingRole(myRole);
       const supplierName = po.suppliers?.name || po.supplier_name || 'Unknown supplier';
       const genericDesc = /^(PO for |Stock purchase order$|PO for vehicle$|Pulled from Warehouse stock$|Purchased for vehicle$|Tools and equipment$|Perishables \(tools register\)$)/.test(po.description || '');
-      const decideCount = bills.filter(b => !b.paid && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l).red)).length;
+      const decideCount = bills.filter(b => !b.paid && b.kind !== 'credit_note' && (b.supplier_bill_line_items || []).some(l => l.resolution !== 'denied' && billLineState(l, b).red)).length;
       const billsSummary = toMatch.length ? `${toMatch.length} to match`
         : !bills.length ? 'No bills on this PO yet'
         : decideCount ? `${decideCount} bill${decideCount === 1 ? '' : 's'} need${decideCount === 1 ? 's' : ''} a decision`
-        : `${bills.length} bill${bills.length === 1 ? '' : 's'}, ${bills.every(b => b.paid) ? 'paid' : bills.some(b => b.approved_for_payment) ? 'approved for payment' : 'matched'}`;
+        : `${bills.length} bill${bills.length === 1 ? '' : 's'}${bills.some(b => b.kind === 'credit_note') ? ' (a credit among them)' : ''}, ${bills.every(b => b.paid) ? 'paid' : bills.some(b => b.approved_for_payment) ? 'approved for payment' : 'matched'}`;
       const budgetPercent = po.budget_cap ? Math.round((poTotalAmount(po) / Number(po.budget_cap)) * 100) : null;
 
-      pageEl.innerHTML = `
+      keepColumnScroll(pageEl, () => { pageEl.innerHTML = `
+        <div class="page-col" style="flex-grow:2; padding-bottom:0;">
         <div class="card" id="po-head">
           <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
             <div style="min-width:0;">
@@ -127,7 +130,9 @@
               <div style="background:var(--surface-2); border-radius:999px; height:8px; overflow:hidden;"><div style="background:${budgetPercent > 100 ? 'var(--red)' : 'var(--green)'}; width:${Math.min(100, budgetPercent)}%; height:100%;"></div></div>
             </div>` : ''}
         </div>
+        </div>
 
+        <div class="page-col">
         ${po.supplier_notes || po.internal_notes || po.file_path ? `
         <div class="card" id="po-notes-card">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;"><h2 style="margin:0;">Notes</h2><button type="button" class="secondary btn-sm" id="po-notes-btn">Edit</button></div>
@@ -148,7 +153,8 @@
           <summary>Log <span class="subtitle" style="font-weight:400; font-size:13px; margin-left:auto;">who did what, when</span></summary>
           <div id="po-log-body" style="margin-top:8px;"></div>
         </details>
-        <div id="po-msg"></div>`;
+        <div id="po-msg"></div>
+        </div>`; });
 
       // the next step
       const nextBtn = document.getElementById('po-next-btn');
@@ -185,7 +191,7 @@
         role: myRole, onComplete: load,
         bar: document.getElementById('po-receive-bar'), selectAll: document.getElementById('po-select-all'),
       });
-      wirePoBillButtons(pageEl, load);
+      wirePoBillButtons(pageEl, load, bills);
       wireBillsToMatch(pageEl, toMatch, po, load);
       const logEl = document.getElementById('po-log');
       logEl.addEventListener('toggle', () => { if (logEl.open && !logEl.dataset.loaded) { logEl.dataset.loaded = '1'; renderActivityLog('purchase_order', po.id, 'po-log-body'); } });

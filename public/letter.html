@@ -10,11 +10,16 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
-<link rel="stylesheet" href="/css/hr.css?v=2" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/hr.css?v=3" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 <style>
   .letter-frame { width: 100%; height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+  /* laptop: the letter fills its column top to bottom, the sign card sits beside it */
+  @media (min-width: 901px) {
+    .letter-col { display: flex; flex-direction: column; }
+    .letter-col .letter-frame { flex: 1 1 auto; height: auto; min-height: 300px; }
+  }
 </style>
 </head>
 <body>
@@ -29,11 +34,9 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <div id="content"><p class="subtitle">Loading...</p></div>
-  </div>
+  <div class="wrap fill" id="content"><p class="subtitle">Loading...</p></div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script src="/js/hr-templates.js?v=3"></script>
   <script>
@@ -65,11 +68,17 @@
       const signed = !!w.employee_signed_at;
 
       el.innerHTML = `
+        <div class="page-head"><div>
         <h1>${escapeHtml(letterTitle(w))}</h1>
         <p class="subtitle">From ${escapeHtml(w.issued_by_name || 'management')}, ${hrDate(w.issued_date)}. Private: only you, admin and finance can see this.</p>
+        </div></div>
+        <div class="page-cols">
+        <div class="page-col letter-col">
         ${w.status === 'resolved' ? `<div class="callout"><strong>Resolved ${hrDate(w.resolved_at)}.</strong> ${escapeHtml(w.resolved_note || 'This matter is closed.')} <button type="button" class="secondary" id="res-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;">Read the resolution letter</button></div>` : ''}
         <iframe class="letter-frame" id="letter-frame" title="Letter"></iframe>
         <p style="margin:8px 0 18px;"><button type="button" class="secondary" id="print-btn" style="font-size:12px; padding:6px 10px;">Print / save a copy</button></p>
+        </div>
+        <div class="page-col" style="flex: 0 0 380px;">
         <div class="card" id="sign-card">
           ${signed ? `<h2>Signed</h2><p>You signed this on ${hrDateTime(w.employee_signed_at)}.${w.employee_comments ? ' Your comments are on the letter.' : ''}</p>`
           : !isMine ? '<p class="subtitle">Waiting for the employee to sign.</p>'
@@ -80,6 +89,8 @@
             <label>Your signature</label><div id="pad"></div>
             <button type="button" id="sign-btn" style="margin-top:14px;">Sign</button>
             <div id="msg"></div>`}
+        </div>
+        </div>
         </div>`;
       const frame = document.getElementById('letter-frame');
       const docHtml = writtenWarningHtml(w, person, company);

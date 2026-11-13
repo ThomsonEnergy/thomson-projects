@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,28 +26,35 @@
     </div>
   </div>
 
-  <div class="wrap">
-    <h1>Invoices</h1>
-    <p class="subtitle">Every invoice raised from a job. Invoices are made on the job; from here you send them, chase them, push them to Xero and correct them. Click a row to see its history and what to do next.</p>
-
-    <div class="grid cols-4">
-      <div class="stat"><div class="label">Total (inc GST)</div><div class="value" id="stat-total">-</div></div>
-      <div class="stat"><div class="label">This month (inc GST)</div><div class="value" id="stat-month">-</div></div>
-      <div class="stat"><div class="label">Outstanding (inc GST)</div><div class="value" id="stat-outstanding">-</div></div>
-      <div class="stat"><div class="label">Overdue (inc GST)</div><div class="value" id="stat-overdue">-</div></div>
-    </div>
-
-    <div class="card">
-      <div class="settings-tabs" id="invoice-filters" style="flex-direction:row; position:static; border-bottom:1px solid var(--border); margin-bottom:12px; overflow-x:auto;"></div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-        <input id="invoice-search" placeholder="Search by invoice, job number, job or client..." style="max-width:340px;" />
+  <div class="wrap fill">
+    <div class="page-head">
+      <div style="flex:1 1 320px;">
+        <h1>Invoices</h1>
+        <p class="subtitle">Every invoice raised from a job. Invoices are made on the job; from here you send them, chase them, push them to Xero and correct them. Click a row to see its history and what to do next.</p>
+      </div>
+      <div class="grid cols-4" style="flex:1 1 560px; max-width:760px;">
+        <div class="stat"><div class="label">Total (inc GST)</div><div class="value" id="stat-total">-</div></div>
+        <div class="stat"><div class="label">This month (inc GST)</div><div class="value" id="stat-month">-</div></div>
+        <div class="stat"><div class="label">Outstanding (inc GST)</div><div class="value" id="stat-outstanding">-</div></div>
+        <div class="stat"><div class="label">Overdue (inc GST)</div><div class="value" id="stat-overdue">-</div></div>
+      </div>
+      <div class="settings-tabs" id="invoice-filters" style="flex:1 1 480px; flex-direction:row; position:static; border-bottom:1px solid var(--border); overflow-x:auto;"></div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; flex:0 1 480px;">
+        <input id="invoice-search" placeholder="Search by invoice, job number, job or client..." style="max-width:340px; margin:0;" />
         <span class="subtitle" id="invoice-count" style="margin:0; font-size:12px;"></span>
       </div>
-      <div id="invoices-list"><p class="subtitle">Loading...</p></div>
+    </div>
+
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <div id="invoices-list"><p class="subtitle">Loading...</p></div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // The accounts desk (item 61): this page decides what shows and in what order; the status words are

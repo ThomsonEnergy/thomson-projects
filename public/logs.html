@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,39 +26,47 @@
     </div>
   </div>
 
-  <div class="wrap wide">
-    <h1>Logs</h1>
-    <p class="subtitle">Admin only - who signed in and when, plus every logged create/edit/delete across the app.</p>
-
-    <div class="card">
-      <h2>Recent logins</h2>
-      <div id="login-list"><p class="subtitle">Loading...</p></div>
-      <button type="button" class="secondary" id="login-load-more-btn" style="margin-top:10px; display:none;">Load more</button>
+  <div class="wrap fill">
+    <div class="page-head">
+      <div>
+        <h1>Logs</h1>
+        <p class="subtitle">Admin only - who signed in and when, plus every logged create/edit/delete across the app.</p>
+      </div>
     </div>
-
-    <div class="card">
-      <h2>Activity feed</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Every create/edit/delete logged anywhere in the app - jobs, quotes, invoices, POs, stock, clients, suppliers, tasks and more.</p>
-      <div class="grid cols-3">
-        <div>
-          <label style="margin-top:0">Staff</label>
-          <select id="log-staff-filter"><option value="">All staff</option></select>
-        </div>
-        <div>
-          <label style="margin-top:0">Type</label>
-          <select id="log-type-filter"><option value="">All types</option></select>
-        </div>
-        <div>
-          <label style="margin-top:0">Search</label>
-          <input id="log-search" placeholder="Search descriptions..." autocomplete="off" />
+    <div class="page-cols">
+      <div class="page-col">
+        <div class="card">
+          <h2>Recent logins</h2>
+          <div id="login-list"><p class="subtitle">Loading...</p></div>
+          <button type="button" class="secondary" id="login-load-more-btn" style="margin-top:10px; display:none;">Load more</button>
         </div>
       </div>
-      <div id="activity-list" style="margin-top:14px;"><p class="subtitle">Loading...</p></div>
-      <button type="button" class="secondary" id="activity-load-more-btn" style="margin-top:10px; display:none;">Load more</button>
+      <div class="page-col" style="flex-grow:2">
+        <div class="card">
+          <h2>Activity feed</h2>
+          <p class="subtitle" style="margin-bottom:10px;">Every create/edit/delete logged anywhere in the app - jobs, quotes, invoices, POs, stock, clients, suppliers, tasks and more.</p>
+          <div class="grid cols-3">
+            <div>
+              <label style="margin-top:0">Staff</label>
+              <select id="log-staff-filter"><option value="">All staff</option></select>
+            </div>
+            <div>
+              <label style="margin-top:0">Type</label>
+              <select id="log-type-filter"><option value="">All types</option></select>
+            </div>
+            <div>
+              <label style="margin-top:0">Search</label>
+              <input id="log-search" placeholder="Search descriptions..." autocomplete="off" />
+            </div>
+          </div>
+          <div id="activity-list" style="margin-top:14px;"><p class="subtitle">Loading...</p></div>
+          <button type="button" class="secondary" id="activity-load-more-btn" style="margin-top:10px; display:none;">Load more</button>
+        </div>
+      </div>
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const PAGE_SIZE = 50;

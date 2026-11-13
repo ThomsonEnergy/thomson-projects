@@ -11,7 +11,7 @@
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#12161c" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="stylesheet" href="/css/style.css?v=24" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
 <script src="/js/vendor/supabase-2.js?v=1"></script>
 </head>
 <body>
@@ -26,13 +26,16 @@
     </div>
   </div>
 
-  <div class="wrap wide">
+  <div class="wrap fill">
+    <div class="page-head">
+    <div>
     <h1>Settings</h1>
     <p class="subtitle">Anything that could change without a code change lives here, so a detail update doesn't need a redeploy.</p>
+    </div>
 
-    <div class="card" id="dev-mode-card" style="display:none;">
-      <h2>Dev Mode</h2>
-      <p class="subtitle" style="margin-bottom:10px;">Unlocks Company Details, Xero Mapping, and API Keys below, plus bulk-delete on Quotes/Projects/Timesheets, for 20 minutes.</p>
+    <div class="card" id="dev-mode-card" style="display:none; margin:0; padding:8px 12px; max-width:560px;">
+      <h2 style="font-size:14px; margin:0 0 2px;">Dev Mode</h2>
+      <p class="subtitle" style="margin-bottom:6px; font-size:12px;">Unlocks Company Details, Xero Mapping, and API Keys below, plus bulk-delete on Quotes/Projects/Timesheets, for 20 minutes.</p>
       <div id="dev-mode-locked">
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <input type="password" id="dev-mode-password" placeholder="Dev mode password" style="max-width:220px; margin:0;" />
@@ -44,6 +47,7 @@
         <p style="margin:0;">Dev Mode active - <span id="dev-mode-remaining"></span> remaining.</p>
         <button type="button" class="secondary" id="dev-mode-lock-btn" style="margin-top:8px;">Turn off now</button>
       </div>
+    </div>
     </div>
 
     <div class="settings-layout">
@@ -68,7 +72,7 @@
       <div class="settings-content">
 
         <!-- Company Details -->
-        <div class="settings-panel" id="panel-company" data-admin-only="1" data-dev-only="1">
+        <div class="settings-panel two-up" id="panel-company" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Logo and branding</h2>
             <p class="subtitle" style="margin-bottom:10px;">Your logo appears on the client proposal cover page.</p>
@@ -158,7 +162,7 @@
         </div>
 
         <!-- Xero Mapping -->
-        <div class="settings-panel" id="panel-xero" data-admin-only="1" data-dev-only="1">
+        <div class="settings-panel two-up" id="panel-xero" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Xero account mapping</h2>
             <p class="subtitle" style="margin-bottom:14px;">
@@ -277,7 +281,7 @@
         </div>
 
         <!-- My Profile - self-service, every role -->
-        <div class="settings-panel active" id="panel-my-profile">
+        <div class="settings-panel two-up active" id="panel-my-profile">
           <div class="card">
             <h2>My profile</h2>
             <div style="display:flex; gap:16px; align-items:start; margin-bottom:10px;">
@@ -415,7 +419,7 @@
         </div>
 
         <!-- Email agent: writing style (mailboxes.writing_style, migration 20261103020000) and auto replies (company_settings.routing_reply_mode, migration 20261103010000) -->
-        <div class="settings-panel" id="panel-auto-replies">
+        <div class="settings-panel two-up" id="panel-auto-replies">
           <div class="card">
             <h2>Writing style</h2>
             <p class="subtitle" style="margin-bottom:10px;">Postie drafts replies in the <b>company voice</b> (one person's learned style, set by an admin) unless a mailbox is switched to its own. <b>Learn</b> reads the replies already sent from a mailbox (the ones TEops holds), writes a short guide and keeps up to 8 real replies as examples. Edit the guide any time ("never say reach out", "always give a price range"): Learn again keeps your edits and refreshes the examples, and it refreshes by itself every 30 days. Other mailboxes using the company voice get the guide and the writer's own words from the examples, never the emails they were answering. Drafts answer what was asked instead of repeating the sender's email back.</p>
@@ -464,7 +468,7 @@
         </div>
 
         <!-- Billable Rates -->
-        <div class="settings-panel" id="panel-billable-rates">
+        <div class="settings-panel two-up" id="panel-billable-rates">
           <div class="card">
             <h2>Rate tiers</h2>
             <p class="subtitle" style="margin-bottom:10px;">Sell rates only - what's charged to clients for labour. Used when "Labour" is picked as a quote line item. Each employee's own cost rate is set on their profile under Users & Roles, since actual wages don't map cleanly to these tiers.</p>
@@ -544,7 +548,7 @@
         </div>
 
         <!-- Payment Terms & T&Cs -->
-        <div class="settings-panel" id="panel-terms" data-admin-only="1">
+        <div class="settings-panel two-up" id="panel-terms" data-admin-only="1">
           <div class="card">
             <h2>Default terms and conditions</h2>
             <p class="subtitle" style="margin-bottom:10px;">Shown at the bottom of every proposal. You can still edit it per quote if a job needs different terms.</p>
@@ -592,7 +596,7 @@
         </div>
 
         <!-- Users & Roles -->
-        <div class="settings-panel" id="panel-users">
+        <div class="settings-panel two-up" id="panel-users">
           <div class="card">
             <h2>Add a staff member</h2>
             <div class="grid cols-3">
@@ -688,7 +692,7 @@
         </div>
 
         <!-- API Keys -->
-        <div class="settings-panel" id="panel-apikeys" data-admin-only="1" data-dev-only="1">
+        <div class="settings-panel two-up" id="panel-apikeys" data-admin-only="1" data-dev-only="1">
           <div class="card">
             <h2>Integration keys</h2>
             <p class="subtitle" style="margin-bottom:10px;">
@@ -831,7 +835,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=134"></script>
+  <script src="/js/supabase-client.js?v=137"></script>
   <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
