@@ -37,6 +37,7 @@
   <script src="/js/solar-roi-staff.js?v=3"></script>
   <script src="/js/solar-sizing.js?v=3"></script>
   <script src="/js/quote-plan-list.js?v=2"></script>
+  <script src="/js/left-to-invoice.js?v=1"></script>
   <style>
     /* the estimate's charts on white paper, as they print on the proposal */
     .roi-preview .roi-charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:8px 0 10px; padding:12px; background:#fff; color:#0a0a0a; border-radius:8px; }
@@ -128,21 +129,18 @@
       const isJob = !!project.job_number;
       const rows = (query) => query.then(({ data }) => data || null);
       // Everything below only needs the job row, so it all runs at once (item 96):
-      // - Real material cost accrued so far: only PO lines actually received count, so a
-      //   PO that's just been placed doesn't inflate "accrued" before anything's landed
-      //   (every PO line received to this job, whichever PO it is on).
-      // - The same spend per stage: job_material_usage is the authoritative "what actually
-      //   got used against this cost centre" record (stock draws + PO receipts landed
-      //   straight on a job). Each row has exactly one cost_centre_id, so summing here is safe.
+      // - Real material cost accrued so far, in total and per stage: job_material_usage is the
+      //   record of what was costed to the job, a row for every PO line received to it (whichever
+      //   PO it is on, written the moment it is ticked received, so a PO just placed adds nothing)
+      //   and for every item taken from the warehouse or a van (the moment it is used). The Jobs
+      //   list adds up the same rows (jobs_list_facts), so the two pages agree (item 85).
       // - A quote never becomes the job in place: approval spins up a separate project row
       //   (create-job-from-quote.js), so an approved quote looks up that job for "Go to job".
       // - A warranty job pulls just enough of the original job (ref + scope of works) for the
       //   reference card on the Summary tab.
       // - A job with warranty jobs against it pulls those, for the net warranty cost below.
-      const [accrued, liRows, usageRows, resultingJob, original, warrantyJobs] = await Promise.all([
+      const [accrued, usageRows, resultingJob, original, warrantyJobs] = await Promise.all([
         accruedPromise,
-        isJob ? rows(supabaseClient.from('purchase_order_line_items').select('quantity, unit_cost')
-          .eq('received', true).eq('destination_type', 'job').eq('destination_job_id', projectId)) : null,
         isJob ? rows(supabaseClient.from('job_material_usage').select('cost_centre_id, quantity, unit_cost').eq('project_id', projectId)) : null,
         !isJob && project.status === 'approved'
           ? rows(supabaseClient.from('projects').select('id, job_number').eq('source_quote_id', project.id).maybeSingle()) : undefined,
@@ -179,11 +177,12 @@
           .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
       }
 
-      project.accrued_material_cost = (liRows || []).reduce((s, li) => s + Number(li.quantity) * Number(li.unit_cost), 0);
+      project.accrued_material_cost = 0;
       const materialByCentre = {};
       for (const row of usageRows || []) {
-        if (!row.cost_centre_id) continue;
-        materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + Number(row.quantity) * Number(row.unit_cost);
+        const cost = Number(row.quantity) * Number(row.unit_cost);
+        project.accrued_material_cost += cost;
+        if (row.cost_centre_id) materialByCentre[row.cost_centre_id] = (materialByCentre[row.cost_centre_id] || 0) + cost;
       }
       for (const centre of project.cost_centres || []) {
         centre.actual_material_cost = materialByCentre[centre.id] || 0;
@@ -203,14 +202,13 @@
       project.net_warranty_cost = 0;
       if (warrantyJobs && warrantyJobs.length) {
         const warrantyIds = warrantyJobs.map(w => w.id);
-        const [accruedLabourByProject, warrantyLiRows] = await Promise.all([
+        const [accruedLabourByProject, warrantyUsage] = await Promise.all([
           fetchAccruedLabourCost(warrantyIds).catch(err => { console.error('Warranty accrued labour fetch failed:', err.message); return {}; }),
-          rows(supabaseClient.from('purchase_order_line_items').select('destination_job_id, quantity, unit_cost')
-            .eq('received', true).eq('destination_type', 'job').in('destination_job_id', warrantyIds)),
+          rows(supabaseClient.from('job_material_usage').select('project_id, quantity, unit_cost').in('project_id', warrantyIds)),
         ]);
         const materialByProject = {};
-        (warrantyLiRows || []).forEach(li => {
-          materialByProject[li.destination_job_id] = (materialByProject[li.destination_job_id] || 0) + Number(li.quantity) * Number(li.unit_cost);
+        (warrantyUsage || []).forEach(u => {
+          materialByProject[u.project_id] = (materialByProject[u.project_id] || 0) + Number(u.quantity) * Number(u.unit_cost);
         });
 
         project.warranty_jobs = warrantyJobs.map(w => {
@@ -4027,11 +4025,13 @@
         ${pricingVisible ? `<div class="job-money">${isQuoteFree ? `
                   <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${invoiced}" data-oh-profit="${invoiced - accruedTotal}"><div class="label">Actual cost so far</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
+                  <div class="stat" title="Work done and not yet on an invoice, at the price the next invoice would carry"><div class="label">Left to invoice</div><div class="value" id="job-left-to-invoice">...</div></div>
         ` : `
                   <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
                   <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
                   <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
-                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>` : ''}
+                  ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
+                  <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(Math.max(0, quoted - invoiced))}</div></div>` : ''}
           ${project.job_number ? `
                   <div class="stat" data-oh-cost="${accruedTotal}" data-oh-indirect="${actualIndirectTotal}" data-oh-actual="1" data-oh-price="${quoted}" data-oh-profit="${accruedProfit}"><div class="label">Actual cost</div><div class="value">${money(accruedTotal)}</div></div>
                   <div class="stat"><div class="label">Actual profit</div><div class="value ${accruedProfit >= 0 ? 'positive' : 'negative'}">${money(accruedProfit)}</div></div>` : ''}
@@ -4111,7 +4111,7 @@
                   <div style="background:var(--surface-2); border-radius:999px; height:10px; overflow:hidden;">
                     <div style="background:${accruedOverEstimate ? 'var(--red)' : 'var(--green)'}; width:${accruedBarPct}%; height:100%; border-radius:999px;"></div>
                   </div>
-                  <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets + received purchase order line items. Click the accrued figure to see the timesheets behind it.</p>
+                  <p class="subtitle" style="margin-top:8px;">Accrued = actual labour cost from timesheets (each shift once it is clocked out) + purchase order lines received to the job + stock used on it. Click the accrued figure to see the timesheets behind it.</p>
                 </div>
                 ` : ''}
               ` : ''}
@@ -4807,6 +4807,9 @@
       if (document.getElementById('assets-card')) loadAssetsCard(project);
       if (document.getElementById('meetings-card')) loadMeetingsCard(project);
       applyOverheadsToCosts(project);
+      // do and charge: the money strip's Left to invoice (js/left-to-invoice.js), read again on every redraw so a new invoice shows
+      const leftEl = document.getElementById('job-left-to-invoice');
+      if (leftEl) fetchLeftToInvoice([project.id]).then((left) => { if (leftEl.isConnected) leftEl.textContent = left && left[project.id] != null ? money(left[project.id]) : '-'; });
       const feedTab = document.querySelector('#job-tabs .settings-tab[data-panel="feed"]');
       if (feedTab) {
         let feedLoaded = false;
