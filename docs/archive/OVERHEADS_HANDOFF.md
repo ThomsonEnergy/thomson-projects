@@ -33,7 +33,7 @@ Reworked from Jasper's simPRO overhead and employment cost calculator. Where thi
 
 ## Database (already applied live)
 - Migration 141 (`overheads`): tables `overhead_lines` (bucket employee|company, name, annual_amount, source manual|xero, xero_account_id), `overhead_xero_map` (account_id, bucket employee|company|ignore), `overhead_settings` (single row). Finance-only RLS (`is_finance_role()`).
-- Migration 142 (`overheads_v2_people_and_monthly`, file `Migrations/migration_142_overheads_v2.sql`): per-person table `overhead_people`, settings columns `company_basis`, `expected_annual_base`, `default_hours_per_person` (1600), and functions:
+- Migration 142 (`overheads_v2_people_and_monthly`, file `docs/archive/old-migrations/migration_142_overheads_v2.sql`): per-person table `overhead_people`, settings columns `company_basis`, `expected_annual_base`, `default_hours_per_person` (1600), and functions:
   - `overhead_people_basis(mode)` and `compute_overhead_rates()`: internal, no caller check, not granted to anyone (the nightly job uses them).
   - `get_overhead_rates()`, `get_overhead_people(mode)`, `get_monthly_net_summary(months)`: finance-only wrappers the pages call. Anyone else gets no rows.
 - Migration 141's original hours functions were dropped by 142.

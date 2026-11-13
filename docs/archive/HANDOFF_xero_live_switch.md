@@ -6,7 +6,7 @@ This was decided in a long conversation with the owner (Jasper). Nothing in this
 ## Ground rules (apply to everything)
 - Hard rule from the owner: never use em dashes anywhere (chat, code, comments, docs).
 - Work in your git worktree, then `git fetch origin && git rebase origin/main && git push origin HEAD:main`. Other chats push to main too.
-- Migrations: next free number is above 145 (re-check `ls Migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` file in `Migrations/`, and add a row to `Migrations/migration_audit_diagnostic.sql`.
+- Migrations: next free number is above 145 (re-check `ls docs/archive/old-migrations` after fetching). Apply with the Supabase MCP (`apply_migration`, project id `ziakpklnzkbbjjnqgkmz`), save the `.sql` file in `docs/archive/old-migrations/`, and add a row to `docs/archive/old-migrations/migration_audit_diagnostic.sql`.
 - Check JavaScript with `node --check` (for pages, extract the inline `<script>` first). There is no test suite.
 - Pages load `/js/supabase-client.js?v=NN` (currently 64) and `/css/style.css?v=NN` (14). Bump the number on every page when you change those files.
 - Never enter credentials for the owner. Ask before any destructive or production data change. Do not guess at tax rules: flag them for the owner's accountant.

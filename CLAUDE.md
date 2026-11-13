@@ -110,7 +110,7 @@ Every plan now includes a **Done means** list (3 to 6 checks as clicks a person 
 
 ## Migrations
 
-1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old `Migrations/` archive).
+1. `supabase migration new <name>` (files go in `supabase/migrations/`, never the old archive in `docs/archive/old-migrations/`).
 2. Write the SQL, run `npm run check`.
 3. Show the owner the SQL and wait for "yes".
 4. Apply to staging: merging the feature PR into `staging` runs it on the staging database by itself (or `supabase db push` linked to staging to test earlier on the PR preview). Test there.
@@ -122,3 +122,5 @@ Full detail in `docs/STAGING.md`.
 ## Docs
 
 Update `docs/PROJECT_SPEC.md`, `docs/IDEAS_BACKLOG.md` and `docs/AI_AGENTS_PLAN.md` in the same change whenever a decision changes or a feature ships. Do not edit `BUGS_AND_UPDATES.md` by hand (it is written by `sync-bugs-to-repo.js`).
+
+**Keep the read-every-time files short (owner's rule from 13 Nov 2026).** `CLAUDE.md`, `docs/DECISIONS.md` and `docs/IDEAS_BACKLOG.md` are read at the start of most chats, so they hold only what is open or recent; history lives in `docs/archive/` and is read only when needed. In practice: when an item ships, its write-up moves from the backlog to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same number) in the same PR, leaving any owner step in the to-do list at the top of the backlog; when a month ends, its `DECISIONS.md` entries roll into `docs/archive/DECISIONS_<yyyy-mm>.md`; finished reviews and handoffs go to `docs/archive/` unless code comments point at them.
