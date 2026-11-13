@@ -108,7 +108,6 @@
       const { data: project, error } = await supabaseClient
         .from('projects')
         .select(`*, cost_centres(${centreCols}, invoices(*), invoice_claims(*, invoices(id, invoice_number, invoice_token, sent_at, created_at, paid_at, xero_invoice_id)), credit_note_claims(*), cost_centre_line_items(${liCols}, rate_tier_id, prebuild_group_id, prebuild_client_description, prebuild_base_quantity), cost_centre_photo_groups(*)),
-          source_quote:projects!source_quote_id(id, quote_token, quote_number),
           payment_milestones(*)`)
         .eq('id', projectId)
         .single();
@@ -136,12 +135,17 @@
       //   list adds up the same rows (jobs_list_facts), so the two pages agree (item 85).
       // - A quote never becomes the job in place: approval spins up a separate project row
       //   (create-job-from-quote.js), so an approved quote looks up that job for "Go to job".
+      // - A job made from a quote reads that quote by its id (its number and link, for Go to quote,
+      //   the email subject and RFQ numbers). Not as an embed: on a table that points at itself,
+      //   projects!source_quote_id returns the jobs made FROM a row, not the quote it came from,
+      //   which left source_quote empty on every job (item 86).
       // - A warranty job pulls just enough of the original job (ref + scope of works) for the
       //   reference card on the Summary tab.
       // - A job with warranty jobs against it pulls those, for the net warranty cost below.
-      const [accrued, usageRows, resultingJob, original, warrantyJobs] = await Promise.all([
+      const [accrued, usageRows, sourceQuote, resultingJob, original, warrantyJobs] = await Promise.all([
         accruedPromise,
         isJob ? rows(supabaseClient.from('job_material_usage').select('cost_centre_id, quantity, unit_cost').eq('project_id', projectId)) : null,
+        project.source_quote_id ? rows(supabaseClient.from('projects').select('id, quote_token, quote_number').eq('id', project.source_quote_id).maybeSingle()) : null,
         !isJob && project.status === 'approved'
           ? rows(supabaseClient.from('projects').select('id, job_number').eq('source_quote_id', project.id).maybeSingle()) : undefined,
         project.warranty_of_project_id
@@ -188,6 +192,7 @@
         centre.actual_material_cost = materialByCentre[centre.id] || 0;
       }
 
+      project.source_quote = sourceQuote || null;
       if (resultingJob !== undefined) project.resulting_job = resultingJob || null;
       if (original !== undefined) project.warranty_original = original || null;
 
