@@ -56,7 +56,8 @@ function openJobsColumnsPanel(visible, onChange) {
   // Drag with a mouse; the arrows do the same job on a touch screen.
   let dragFrom = null;
   const rowOf = (e) => (e.target.nodeType === 1 ? e.target : e.target.parentElement)?.closest('.jc-row'); // Firefox can name a text node as the target
-  const mark = (row) => list.querySelectorAll('.jc-row').forEach((r) => { r.style.boxShadow = r === row ? 'inset 0 2px 0 var(--accent)' : ''; });
+  // the line shows where the row will land: under the row it is dropped on when dragged down, above it when dragged up
+  const mark = (row) => list.querySelectorAll('.jc-row').forEach((r) => { r.style.boxShadow = r !== row ? '' : `inset 0 ${Number(r.dataset.i) > dragFrom ? '-2px' : '2px'} 0 var(--accent)`; });
   list.addEventListener('dragstart', (e) => {
     const row = rowOf(e);
     if (!row) return;

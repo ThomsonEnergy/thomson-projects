@@ -216,11 +216,12 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
 // each billable line at cost plus its stage's markup. A line already on an invoice keeps its place
 // (the portal lists it) but only open lines count in the totals. A not billable line that was never
 // invoiced is left out. agreementOff is the commercial agreement's percent off the open labour,
-// the minus line create-invoice.js adds. lumpInvoiced is what the job has been invoiced as plain
+// the minus line create-invoice.js adds. lumpInvoiced is what a stage has been invoiced as plain
 // amounts, tied to no shift or material line (a ServiceM8 import's invoices, materials billed in
-// Bulk): the panel takes it off its Bulk materials figure the same way. leftToInvoice is the open
-// work less the agreement and less that lump, never under zero: on a job invoiced line by line
-// it is what the next invoice would come to.
+// Bulk, a fixed-price claim): the panel takes it off its Bulk materials figure the same way.
+// leftToInvoice is, stage by stage, the open work less the agreement and less that stage's lump,
+// never under zero: on a job invoiced line by line it is what the next invoice would come to; where
+// a lump was invoiced it is the best figure the records give, not a line by line match.
 function priceActuals(d) {
   const bandOrder = Object.keys(RULES.bands);
   const labour = [];
@@ -229,7 +230,7 @@ function priceActuals(d) {
     const parts = Object.entries(l.bands).filter(([, h]) => h > 0);
     const amount = parts.reduce((s, [band, h]) => s + h * l.rate * (RULES.bands[band]?.multiplier || 1), 0);
     labour.push({
-      line: l, parts, hours: r2(l.hours), amount: r2(amount), minimumApplied: false,
+      line: l, centreId: c.costCentreId, parts, hours: r2(l.hours), amount: r2(amount), minimumApplied: false,
       // the panel's first row of the day is the first band with hours, so a top-up is at that band's rate
       firstBandRate: l.rate * (RULES.bands[bandOrder.find((b) => l.bands[b] > 0)]?.multiplier || 1),
     });
@@ -251,17 +252,25 @@ function priceActuals(d) {
   const materials = [];
   d.centres.forEach((c) => c.materialLines.forEach((m) => {
     if (!m.billable && !m.invoiced) return;
-    materials.push({ line: m, amount: r2(m.quantity * m.unitPrice) });
+    materials.push({ line: m, centreId: c.costCentreId, amount: r2(m.quantity * m.unitPrice) });
   }));
   const labourOpen = r2(labour.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const materialsOpen = r2(materials.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
-  const agreementOff = d.rateCard && d.rateCard.percentOff > 0 ? r2(labourOpen * d.rateCard.percentOff / 100) : 0;
-  const lumpInvoiced = r2(d.invoicedAmount);
+  const percentOff = d.rateCard && d.rateCard.percentOff > 0 ? d.rateCard.percentOff : 0;
+  const openIn = (list, centreId) => r2(list.filter((x) => !x.line.invoiced && x.centreId === centreId).reduce((s, x) => s + x.amount, 0));
+  let agreementOff = 0, lumpInvoiced = 0, leftToInvoice = 0;
+  d.centres.forEach((c) => {
+    const stageLabour = openIn(labour, c.costCentreId);
+    const off = percentOff ? r2(stageLabour * percentOff / 100) : 0;
+    const lump = r2(c.invoicedAmount);
+    agreementOff += off;
+    lumpInvoiced += lump;
+    leftToInvoice += Math.max(0, stageLabour - off + openIn(materials, c.costCentreId) - lump);
+  });
   return {
     labour, materials, labourOpen, materialsOpen,
     notInvoiced: r2(labourOpen + materialsOpen),
-    agreementOff, lumpInvoiced,
-    leftToInvoice: r2(Math.max(0, labourOpen - agreementOff + materialsOpen - lumpInvoiced)),
+    agreementOff: r2(agreementOff), lumpInvoiced: r2(lumpInvoiced), leftToInvoice: r2(leftToInvoice),
   };
 }
 

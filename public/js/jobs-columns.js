@@ -111,6 +111,9 @@ async function loadJobsColumns() {
   if (mine && dev.d) { saveJobsColumns(mine); return mine; }
   let saved = null;
   try { saved = jobsColumnsClean((await jobsUiPrefs(userId)).jobs_columns); } catch (err) { console.error('Jobs columns not read from the profile:', err.message); }
+  // a change made in the panel while the profile was being read is newer than its answer
+  const now = jobsColumnsDevice();
+  if (now && now.u === userId && now.d) return jobsColumnsClean(now.k);
   const keys = saved || mine || jobsColumnsDefault();
   jobsColumnsCache(userId, keys, false);
   return keys;

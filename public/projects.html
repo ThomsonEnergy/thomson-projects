@@ -139,6 +139,7 @@
     // the archived ones the first time the Archived folder is opened (most old jobs end up there).
     let leftLoaded = false, leftArchivedLoaded = false;
     let loadArchivedLeft = () => {};
+    let loadQuoteNumbers = () => {}; // read when the Quote column is switched on
     async function loadProjects() {
       const seq = ++loadSeq;
       const live = () => seq === loadSeq;
@@ -172,21 +173,28 @@
       const empty = !(projects && projects.length);
       costsLoaded = factsLoaded = leftLoaded = leftArchivedLoaded = empty;
       factsError = '';
-      loadArchivedLeft = () => {};
+      loadArchivedLeft = loadQuoteNumbers = () => {};
       listReady = true;
       repaint();
       if (empty) return;
 
       const ids = projects.map(p => p.id);
-      // A job made from a quote has no quote number of its own: read its quote's (the Quote column).
-      const quoteIds = [...new Set(projects.map(p => p.source_quote_id).filter(Boolean))];
-      if (quoteIds.length) {
-        supabaseClient.from('projects').select('id, quote_number').in('id', quoteIds).then(({ data }) => {
-          if (!live()) return;
-          (data || []).forEach(q => { quoteNumbers[q.id] = q.quote_number; });
-          repaint();
-        });
-      }
+      // A job made from a quote has no quote number of its own: its quote's is read the first time
+      // the Quote column shows, 100 ids a request so the address stays short.
+      let quotesAsked = false;
+      loadQuoteNumbers = () => {
+        if (quotesAsked) return;
+        quotesAsked = true;
+        const quoteIds = [...new Set(projects.map(p => p.source_quote_id).filter(Boolean))];
+        for (let i = 0; i < quoteIds.length; i += 100) {
+          supabaseClient.from('projects').select('id, quote_number').in('id', quoteIds.slice(i, i + 100)).then(({ data, error: quoteErr }) => {
+            if (quoteErr) { console.error('Quote numbers fetch failed:', quoteErr.message); return; }
+            if (!live()) return;
+            (data || []).forEach(q => { quoteNumbers[q.id] = q.quote_number; });
+            repaint();
+          });
+        }
+      };
       const factsDone = loadFacts(ids).then(r => { if (!live()) return; facts = r.facts; factsError = r.error; factsLoaded = true; });
       const labourDone = loadLabourCosts(ids).then(l => { if (live()) labour = l; });
       factsDone.then(repaint);
@@ -228,6 +236,7 @@
 
       const folderRows = allRows.filter(p => inFolder(p, currentFolder));
       if (currentFolder === 'archived') loadArchivedLeft();
+      if (jobCols.includes('quote')) loadQuoteNumbers();
       const leftNow = currentFolder === 'archived' ? leftArchivedLoaded : leftLoaded;
       const filtered = q
         ? folderRows.filter(p => (p.name || '').toLowerCase().includes(q) || (p.client_name || '').toLowerCase().includes(q) || (p.client_address || '').toLowerCase().includes(q) || String(p.job_number || '').includes(q) || String(p.quote_number || '').includes(q))

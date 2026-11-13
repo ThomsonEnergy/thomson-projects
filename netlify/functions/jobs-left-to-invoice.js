@@ -11,7 +11,8 @@
 // (a ServiceM8 import's invoices, materials billed in Bulk). The maths is _shared/job-actuals.js
 // (jobActuals and priceActuals), the same copy the do and charge invoice panel and the portal's
 // Work so far read. A quoted job is not answered here: its figure is signed minus invoiced, which
-// the page has.
+// the page has. A warranty job answers zero: it is made as a do and charge job, but it is billed,
+// if at all, by its close-out (Absorbed, Manufacturer, Client), never as do and charge work.
 //
 // Returns { ok, byProject: { [id]: { leftToInvoice, labour, materials, agreementOff, lumpInvoiced } } }
 // with one entry per do and charge job asked for (zeros when nothing is open). A failed read fails
@@ -41,17 +42,20 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: `projectIds (1 to ${MAX_JOBS} job ids) is required` }) };
     }
 
-    const { data: jobs, error } = await supabaseAdmin.from('projects').select('id').in('id', projectIds).eq('proposal_template', 'direct_job');
+    const { data: jobs, error } = await supabaseAdmin.from('projects').select('id, warranty_of_project_id').in('id', projectIds).eq('proposal_template', 'direct_job');
     if (error) throw error;
 
+    const NOTHING = { leftToInvoice: 0, labour: 0, materials: 0, agreementOff: 0, lumpInvoiced: 0 };
     const byProject = {};
-    const queue = (jobs || []).map((j) => j.id);
+    (jobs || []).filter((j) => j.warranty_of_project_id).forEach((j) => { byProject[j.id] = { ...NOTHING }; });
+    const queue = (jobs || []).filter((j) => !j.warranty_of_project_id).map((j) => j.id);
     const shared = queue.length ? await loadActualsShared(supabaseAdmin) : null; // read once, not once per job
     const worker = async () => {
       for (let id = queue.shift(); id; id = queue.shift()) {
         const actuals = await jobActuals(supabaseAdmin, id, { shared });
         // a job with no cost centre yet has nothing clocked or received against a stage: nothing to invoice
-        const priced = actuals.ok ? priceActuals(actuals.data) : { leftToInvoice: 0, labourOpen: 0, materialsOpen: 0, agreementOff: 0, lumpInvoiced: 0 };
+        if (!actuals.ok) { byProject[id] = { ...NOTHING }; continue; }
+        const priced = priceActuals(actuals.data);
         byProject[id] = { leftToInvoice: priced.leftToInvoice, labour: priced.labourOpen, materials: priced.materialsOpen, agreementOff: priced.agreementOff, lumpInvoiced: priced.lumpInvoiced };
       }
     };
