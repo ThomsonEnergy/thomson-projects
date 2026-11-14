@@ -4754,7 +4754,7 @@
 
       if (project.job_number) loadPurchaseOrders(project.id, centres);
       // Supplier quotes (item 81): its own file, loaded when the tab opens
-      if (document.getElementById('supplier-quotes-root')) tabLoaders['supplier-quotes'] = () => loadJsOnce('/js/supplier-quotes.js?v=1', () => typeof mountSupplierQuotes === 'function')
+      if (document.getElementById('supplier-quotes-root')) tabLoaders['supplier-quotes'] = () => loadJsOnce('/js/supplier-quotes.js?v=2', () => typeof mountSupplierQuotes === 'function')
         .then(() => mountSupplierQuotes({ el: document.getElementById('supplier-quotes-root'), project, centres, onPoMade: () => { if (project.job_number) loadPurchaseOrders(project.id, centres); } }))
         .catch(err => { document.getElementById('supplier-quotes-root').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; });
       if (document.getElementById('job-invoices-list')) tabLoaders.invoices = () => { loadJobInvoices(project); loadSm8Invoices(project.id); };
