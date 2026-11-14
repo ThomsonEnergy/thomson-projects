@@ -1,10 +1,11 @@
 // The Bills fold on the PO page (purchase-order.html only, item 31; moved out of supabase-client.js
 // 13 Nov 2026 to keep every page under its weight budget). The bills and credit notes on one PO
 // with their lines (green on the PO, red to decide: Accept or Deny charge), Open invoice and Open
-// docket, Move and Remove (js/supplier-bill-actions.js), Query supplier, and the PO's next step
-// (poNextStep). Decisions go through supplier_bill_line_resolve; the bill check runs again on the
-// server (supplier-checks check_bill). Needs supabase-client.js (openSupplierEmail, money,
-// escapeHtml, poLineCounts, isPricingRole).
+// docket, Move and Remove (js/supplier-bill-actions.js), Query supplier, the PO's next step
+// (poNextStep), and Delete on a PO line that no bill charges for (item 88). Decisions go through
+// supplier_bill_line_resolve and po_line_delete; the bill check runs again on the server
+// (supplier-checks check_bill). Needs supabase-client.js (openSupplierEmail, money, escapeHtml,
+// poLineCounts, poLinePlace, poQty, isPricingRole).
 
 function billStatusChip(b) {
   if (b.kind === 'credit_note') {
@@ -140,4 +141,62 @@ function poNextStep(po, bills, { emailed, role } = {}) {
   if (c.toReceive) return { key: 'receive', label: 'Receive what arrived', hint: 'Tick the lines that came in, then press Receive.' };
   if (c.backordered) return { key: 'close', label: `Waiting on ${c.backordered} back ordered line${c.backordered === 1 ? '' : 's'}`, hint: 'Wait for it, or close now and it is cancelled off the PO.', secondary: true };
   return { key: 'close', label: 'Close PO' };
+}
+
+// ---------- Delete a PO line that no bill charges for (item 88, migration 20261204000000) ----------
+// A line typed in by hand that the supplier's bill did not match, or one added by mistake. The
+// database does it in one step (po_line_delete): a received line comes back off the job's costs,
+// the stock count or the Tools register first, then the line goes. It refuses a line a bill or
+// credit note charges for, goods already invoiced to the client, and a closed PO.
+
+// The PO lines a bill or credit note on this PO points at.
+function poLinesOnBills(bills) {
+  const ids = new Set();
+  (bills || []).forEach(b => (b.supplier_bill_line_items || []).forEach(l => { if (l.po_line_item_id) ids.add(l.po_line_item_id); }));
+  return ids;
+}
+function canDeletePoLine(li, po, bills, role) {
+  return isPricingRole(role) && !po.closed_at && !poLinesOnBills(bills).has(li.id);
+}
+// What deleting this line does, said before it happens.
+function poLineDeleteEffect(li, po) {
+  const amount = money(Number(li.quantity) * Number(li.unit_cost));
+  if (!li.received) return `The PO total drops by ${amount}.`;
+  if (li.destination_type === 'job') return `It is received to ${poLinePlace(li)}, so ${amount} comes off that job's costs${po.stock_source ? ' and the stock goes back where it was pulled from' : ''}.`;
+  if (li.destination_type === 'tools') return 'It is received to the Tools register, so it comes out of there.';
+  return `It is received to ${poLinePlace(li)}, so ${poQty(li.quantity)} comes off that stock count.`;
+}
+async function deletePoLine(li, po, bills, onComplete) {
+  if (!confirm(`Delete "${li.description}" (${poQty(li.quantity)} x ${money(li.unit_cost)}) from ${po.po_number || 'this PO'}? ${poLineDeleteEffect(li, po)}`)) return;
+  const { error } = await supabaseClient.rpc('po_line_delete', { p_line_id: li.id });
+  if (error) { alert(friendlyError(error)); return; }
+  // the PO's total changed, so its unpaid bills are checked against it again
+  await Promise.all((bills || []).filter(b => !b.paid).map(b => recheckBill(b.id)));
+  showToast(`${li.description} deleted from ${po.po_number || 'the PO'}`);
+  if (onComplete) await onComplete();
+}
+// The line's "..." menu on the PO page: Delete, when no bill charges for the line.
+function poLineDeleteMenu(li, po, bills, role, onComplete) {
+  if (!canDeletePoLine(li, po, bills, role)) return [];
+  return [{ label: 'Delete this line', hint: li.received ? 'Takes it back off where it was received, then off the PO' : 'Not ordered after all, or typed in by mistake', danger: true, onPick: () => deletePoLine(li, po, bills, onComplete) }];
+}
+// Once the PO has a bill, every line the bill does not charge for is marked on the row, with
+// Delete beside it (the line typed in by hand that the bill came in under another name).
+function markPoLinesNotOnBill(containerEl, po, bills, role, onComplete) {
+  if (!(bills || []).some(b => b.kind !== 'credit_note')) return;
+  (po.purchase_order_line_items || []).filter(li => canDeletePoLine(li, po, bills, role)).forEach(li => {
+    const row = [...containerEl.querySelectorAll('.po-line')].find(r => r.dataset.lineId === li.id);
+    if (!row) return;
+    row.querySelector('.po-line-desc').insertAdjacentHTML('beforeend', ' <span class="badge draft" title="No bill on this PO charges for this line">Not on a bill</span>');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary btn-sm po-line-delete';
+    btn.style.cssText = 'color:var(--red); flex-shrink:0;';
+    btn.textContent = 'Delete';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await deletePoLine(li, po, bills, onComplete); } finally { btn.disabled = false; }
+    });
+    row.insertBefore(btn, row.querySelector('.po-line-more'));
+  });
 }

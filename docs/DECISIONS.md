@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 14 Nov 2026
+
+- Built (owner's "Yes build and put straight to main", 14 Nov 2026; PR_REF into `main`; migration 20261204000000, one new function, money and stock): item 88, delete a PO line that no bill charges for. On the PO page (Admin, Finance, Sales; open PO): **Delete this line** under the line's ... menu, and once the PO has a bill every line the bill does not charge for is tagged **Not on a bill** with Delete on the row. One confirm says what happens; a received line comes off the job's costs, the stock count or the Tools register first (`po_line_delete`, which runs the same step as Undo received), then the line goes and the PO's state is worked out again. Refused when a bill or credit note charges for the line, the goods are already invoiced to the client, or the PO is closed. Proved on a local copy of the database (37 checks, every migration loaded) and the PO page in the offline browser. PO2020: delete the five typed lines, Tick all, Receive. Detail: `docs/archive/IDEAS_BACKLOG_BUILT.md` item 88, `docs/PROJECT_SPEC.md` A10.
+
 ## 13 Nov 2026
 
 - Planned (waiting on yes): item 88, delete a PO line that no bill charges for (owner's ask, 13 Nov 2026). The PO page has no delete today. Plan: Delete on the line for pricing roles on an open PO, a "Not on a bill" tag once the PO has a bill, one database function over the existing take-back step (a received line's cost comes off the job, its stock comes back out). With it PO2020 is fixed in six taps; item 87's automatic pairing still waits on its own yes. Detail: `docs/IDEAS_BACKLOG.md` item 88.

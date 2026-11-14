@@ -31,9 +31,9 @@
     <div id="po-page" class="page-cols"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=137"></script>
+  <script src="/js/supabase-client.js?v=138"></script>
   <script src="/js/email-compose.js?v=13"></script>
-  <script src="/js/po-bills.js?v=1"></script>
+  <script src="/js/po-bills.js?v=2"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/supplier-bill-actions.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -190,7 +190,9 @@
       wirePoTickLines(document.getElementById('po-lines'), po, {
         role: myRole, onComplete: load,
         bar: document.getElementById('po-receive-bar'), selectAll: document.getElementById('po-select-all'),
+        lineMenuMore: (li) => poLineDeleteMenu(li, po, bills, myRole, load),
       });
+      markPoLinesNotOnBill(document.getElementById('po-lines'), po, bills, myRole, load);
       wirePoBillButtons(pageEl, load, bills);
       wireBillsToMatch(pageEl, toMatch, po, load);
       const logEl = document.getElementById('po-log');
@@ -210,7 +212,7 @@
         { target: '#po-next', title: 'The next step is always here', text: 'This button is the one thing to do next on this PO: email it, receive what arrived, decide on a bill, or close it. Press it and it takes you there.' },
         { target: () => document.querySelector('.po-line-cb') || document.querySelector('.po-line') || document.getElementById('po-lines'), title: 'Tick what arrived', text: 'Each line has a tick box. When the gear turns up, tick the lines that came in. Tick all does every line at once.' },
         { before: () => setTick(true), target: '#po-receive-bar', title: 'Then press Receive', text: `One button receives every ticked line to ${where}: it goes on the job's costs or into that stock count. "Somewhere else" is for the odd line that went to the Warehouse or a van instead.` },
-        { before: () => setTick(false), target: () => document.querySelector('.po-line-more'), title: 'Anything else for a line', text: 'Back ordered, move it to another job or stock, undo a tick, add it to Stock, or mark it as a tool: all under this button.' },
+        { before: () => setTick(false), target: () => document.querySelector('.po-line-more'), title: 'Anything else for a line', text: 'Back ordered, move it to another job or stock, undo a tick, add it to Stock, mark it as a tool, or delete a line no bill charges for: all under this button.' },
         { target: '#po-more-btn', title: 'Everything else is under More', text: 'Add an item, edit the lines, email the PO, view the PDF, notes, prices on the PO, upload the invoice, close or reopen, and the log.' },
         { target: '#po-bills', title: 'Bills', text: "The supplier's invoices for this PO. Green lines match the PO; a red line is not on the PO or costs more, and needs Accept or Deny. Closing the PO approves its bills for payment." },
         { target: '#po-where', title: 'Where it is going', text: 'Tap the job, vehicle or Stock name to go there. Back to the list with the arrow at the top.' },
