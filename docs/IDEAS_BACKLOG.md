@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 13 Nov 2026 (items 85 and 86 released and moved to the built file; items 84, 87 and 88 waiting on yes)
+Last updated 14 Nov 2026 (item 89 added as an idea; items 84, 87 and 88 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -18,6 +18,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 84 | Supplier bills with fewer taps: confident bills and credit notes save themselves, Accept all on a bill, no total prompt when the reader got it, uploads through the same path as emails, the Stock match default leaves junk out, Sales get the bills-to-match push | Reviewed 13 Nov 2026, waiting on yes | N | Turn `supplier_bill_auto_save` on with it |
 | 87 | A bill line that is the same item as a hand-typed PO line takes that line over instead of adding another (PO2020 doubled: the bill's five lines were added beside the five typed ones); the reader pairs by quantity and price when wording and part number do not, a Same as... choice for the rest, PO2020 repaired | Found 13 Nov 2026, planned, waiting on yes | Y (one function, one column) | None |
 | 88 | Delete a PO line that no bill charges for: a Delete on the line (pricing roles, open PO), a "Not on a bill" tag on those lines once the PO has a bill; a received line's cost comes back off the job or its stock back out | Planned 13 Nov 2026, waiting on yes | Y (one function) | None |
+| 89 | Sparky marks up a plan: reads a PDF in the job's Documents, answers questions about it, and drafts markup (outlets, symbols, cable paths, a schedule) into the existing plan editor for a person to adjust and save | Idea 14 Nov 2026, not asked for yet | N | None |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
@@ -709,3 +710,24 @@ Touches: `netlify/functions/_shared/supplier-bill-intake.js` (`matchPoLine`, the
 
 Touches: `public/js/supabase-client.js` (`openPoLineMenu`, `renderPoTickLines`: the tag and the button; `?v=` on every page), `public/purchase-order.html` (passes the bills to the lines), one migration (`po_line_delete(uuid)`, security definer, `set search_path = public`, pricing roles, `revoke ... from public, anon`, `grant` to `authenticated`), `docs/PROJECT_SPEC.md` A10, `docs/DECISIONS.md`. Overlaps: item 87 (waiting on yes) touches `po-bills.js` and the bill reader, not these functions; item 84 (waiting on yes) the same; no unmerged branch or open PR on these files (PR 34 is the old email workers branch). Kind: feature (into `staging`); migration yes (one new function, nothing existing changed); money yes and stock yes (a deleted received line takes its cost off the job or its stock back out, through the existing step), RLS no new table, payroll no; a backup before the production migration is not needed for the migration itself (additions only). Size: small to medium (two to three hours). Test on staging: sales@staging.test, PO 9002's page, the six Done means; then staff@staging.test for (6). No key needed. Simpler: a wrong or doubled line is one tap to remove instead of living on the PO for good, and the lines a bill does not cover are pointed out; the confirm stays because a delete of a received line moves money and stock and cannot be guessed. Best model: Fable 5.2 (this chat), effort high, because it is one small database function over an existing, tested step plus a little page code, and it moves stock and job cost.
 
+## 89. Sparky marks up a plan (idea, 14 Nov 2026, from the 70 Riverview St duct plan done in a cloud chat)
+
+**Why.** The owner asked whether Sparky could have drawn the ducted aircon plan for J7040 inside the app. Today it cannot: Sparky's tools are `query_database` (read-only), the Knowledge Base search and reader, a calculator and web search. It cannot open a file in a job's Documents, cannot see a picture, and cannot write anything to a job. The drawing side already exists: the plan markup editor (`openPdfViewer` in `supabase-client.js`, spec A-list "Plan markup", 21 Oct 2026) draws symbols, cable paths, boxes, labels and a schedule over a PDF page and saves it as a new document or replaces the old one.
+
+**Plan.**
+1. `read_job_document` tool in `_shared/sparky-tools.js`: given a document id (or a job and a file name) it returns the pages of a PDF the same way `read_knowledge_entry` does (text layer, or the page as a picture for a drawing), under the asker's own access. Half a day; reuses the Knowledge Base page reader.
+2. `draft_plan_markup` tool: Sparky returns markup objects in the editor's own format (`{ type: 'symbol' | 'text' | 'box' | 'cable' | 'label', x, y, ... }` in page coordinates, the shapes `openPdfViewer` already saves) for one page, with a short schedule. Nothing is written to the job: the job page opens the editor on that page with the draft loaded as unsaved marks, and the person moves, deletes or adds before tapping Save markup (the existing Replace / Save as new step). Human in the loop by design, so no AI consent or new permission is needed and a wrong draft costs nothing.
+3. A "Draft markup with Sparky" button on a PDF page in the viewer (next to Mark up this page), with a one-line brief ("ducted aircon, 14 kW, upstairs only"). The prompt for aircon, lighting and power layouts lives in `agents/prompts/plan-markup.js` with the sizing rules used on 14 Nov 2026 (W/m² by construction, outlet sizes by L/s, raked ceilings, return air placement).
+4. Model: this needs a picture-reading model with room to reason; the Ask AI widget runs Sonnet 5.5 today, so the markup call goes to Opus 5.5 on its own background function (`plan-markup-background.js`), about 20 to 60 seconds a page, cents to a dollar a run.
+
+**Done means.** Open J7040 > Documents > the Rev 2 plan > first floor page > Draft markup with Sparky > "ducted aircon upstairs" > the editor opens with outlets, a return and labels placed in the rooms > drag one, Save as new > the new PDF opens with the marks in place. Ask Sparky in chat "what size is Bed 2 on the J7040 plan" and get the answer from the drawing.
+
+**Not in scope.** Sparky saving a document by itself; markup on photos; anything on a client's portal.
+
+- Touches: `netlify/functions/_shared/sparky-tools.js`, new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`, `public/js/supabase-client.js` (the viewer button and loading a draft into the editor), `public/js/ai-chat.js` for the chat side.
+- Overlaps: item 37 (one brain) touches `sparky-tools.js`; build after or in the same chat.
+- Kind: feature (into `staging`); migration no; money, stock, RLS or payroll no.
+- Size: medium to large (a day and a half).
+- Test on staging: owner login, a job with a plan PDF in Documents, the four clicks in Done means; needs the Anthropic key on the staging site.
+- Simpler: a person stops redrawing outlet layouts by hand on every plan; still a manual step: the person's Save, kept on purpose so nothing AI-drawn lands on a job unseen.
+- Best model: Opus 5.5, effort high, because it is a feature build with a known shape and no migration.
