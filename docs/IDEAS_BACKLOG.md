@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 14 Nov 2026 (item 90 planned, waiting on yes; item 89 added as an idea; items 84 and 87 waiting on yes, 88 is PR 461)
+Last updated 14 Nov 2026 (items 89, 90 and 91 planned, waiting on yes; items 84 and 87 waiting on yes, 88 is PR 461)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -18,8 +18,9 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 84 | Supplier bills with fewer taps: confident bills and credit notes save themselves, Accept all on a bill, no total prompt when the reader got it, uploads through the same path as emails, the Stock match default leaves junk out, Sales get the bills-to-match push | Reviewed 13 Nov 2026, waiting on yes | N | Turn `supplier_bill_auto_save` on with it |
 | 87 | A bill line that is the same item as a hand-typed PO line takes that line over instead of adding another (PO2020 doubled: the bill's five lines were added beside the five typed ones); the reader pairs by quantity and price when wording and part number do not, a Same as... choice for the rest, PO2020 repaired | Found 13 Nov 2026, planned, waiting on yes | Y (one function, one column) | None |
 | 88 | Delete a PO line that no bill charges for: a Delete on the line (pricing roles, open PO), a "Not on a bill" tag on those lines once the PO has a bill; a received line's cost comes back off the job or its stock back out | Planned 13 Nov 2026, waiting on yes | Y (one function) | None |
-| 89 | Sparky marks up a plan: reads a PDF in the job's Documents, answers questions about it, and drafts markup (outlets, symbols, cable paths, a schedule) into the existing plan editor for a person to adjust and save | Idea 14 Nov 2026, not asked for yet | N | None |
+| 89 | Sparky draws on plans: markup saved as objects that reopen and move, Sparky reads the plan and drafts an aircon, battery or rough-in layout from a one-line brief, people move, delete and add, ask Sparky to add more or clean up, the symbol schedule becomes quote lines | Planned 14 Nov 2026, waiting on yes | N | Item 90 first (same files) |
 | 90 | Sparky changes things from the app: knows the page you are on, one edit tool over a field registry (jobs, quotes, clients, contacts, suppliers, tasks, leads, materials, assets, fleet; never money, stock, status or settings), every change proposed then confirmed, Undo for 24 hours, the same powers for @Sparky in team chat | Planned 14 Nov 2026, waiting on yes | N | None |
+| 91 | Sparky changes the app when told to: an admin's ask becomes an Updates board row and a Claude Code build in GitHub Actions on its own branch, a PR with the check and a preview link, the owner's "merge it" merges it; no migrations, secrets or deletes that way | Planned 14 Nov 2026, waiting on yes | N | Owner: Anthropic key as a GitHub secret, wider GitHub token |
 | 15 | Security sweep and hardening | Planned: last step, once major additions stop | N | Build sequence finished |
 | 17 | User-friendliness upgrades (whole-app review) | Owner said build all 168 in six deliveries; deliveries 1 to 4 (items 1 to 109) LIVE 19 to 20 Oct 2026, next delivery 5 (`docs/UX_REVIEW.md`) | N | None |
 | 37 | One brain, many workers: see everywhere, event routing, Postie filing and learning, My Plan, enquiry to draft quote (`docs/AI_AGENTS_PLAN.md`) | Step 5 (Postie filing) built 27 Oct 2026, on `staging`; rest waiting on yes | N | Owner's yes to remove the 4 wrong labels on production; staff notice for per-person email |
@@ -743,24 +744,63 @@ Touches: `public/js/supabase-client.js` (`openPoLineMenu`, `renderPoTickLines`: 
 - Simpler: nobody types a job number for the record they are looking at; one Confirm, one Undo, no second way to do the same edit; a field Sparky cannot touch is answered with where to do it instead of a silent nothing. No toggle: the registry is the only switch, and it is code reviewed in a PR.
 - Best model: Fable 5.1, effort high, because the field registry decides what Sparky may write on live records (the migration itself is one log table).
 
-## 89. Sparky marks up a plan (idea, 14 Nov 2026, from the 70 Riverview St duct plan done in a cloud chat)
+## 89. Sparky draws on plans (planned 14 Nov 2026, waiting on yes; was an idea the same morning)
 
-**Why.** The owner asked whether Sparky could have drawn the ducted aircon plan for J7040 inside the app. Today it cannot: Sparky's tools are `query_database` (read-only), the Knowledge Base search and reader, a calculator and web search. It cannot open a file in a job's Documents, cannot see a picture, and cannot write anything to a job. The drawing side already exists: the plan markup editor (`openPdfViewer` in `supabase-client.js`, spec A-list "Plan markup", 21 Oct 2026) draws symbols, cable paths, boxes, labels and a schedule over a PDF page and saves it as a new document or replaces the old one.
+**Owner's ask (14 Nov 2026):** "create plans and proposals: if we need to quote for an aircon system or battery system he can edit the floor plan to add it all in. Same as a house rough in: he can put power points on the walls and do cable routes. We can then move where he's put stuff and delete it, or ask him to add stuff or clean up what we put in."
 
-**Plan.**
-1. `read_job_document` tool in `_shared/sparky-tools.js`: given a document id (or a job and a file name) it returns the pages of a PDF the same way `read_knowledge_entry` does (text layer, or the page as a picture for a drawing), under the asker's own access. Half a day; reuses the Knowledge Base page reader.
-2. `draft_plan_markup` tool: Sparky returns markup objects in the editor's own format (`{ type: 'symbol' | 'text' | 'box' | 'cable' | 'label', x, y, ... }` in page coordinates, the shapes `openPdfViewer` already saves) for one page, with a short schedule. Nothing is written to the job: the job page opens the editor on that page with the draft loaded as unsaved marks, and the person moves, deletes or adds before tapping Save markup (the existing Replace / Save as new step). Human in the loop by design, so no AI consent or new permission is needed and a wrong draft costs nothing.
-3. A "Draft markup with Sparky" button on a PDF page in the viewer (next to Mark up this page), with a one-line brief ("ducted aircon, 14 kW, upstairs only"). The prompt for aircon, lighting and power layouts lives in `agents/prompts/plan-markup.js` with the sizing rules used on 14 Nov 2026 (W/m² by construction, outlet sizes by L/s, raked ceilings, return air placement).
-4. Model: this needs a picture-reading model with room to reason; the Ask AI widget runs Sonnet 5.5 today, so the markup call goes to Opus 5.5 on its own background function (`plan-markup-background.js`), about 20 to 60 seconds a page, cents to a dollar a run.
+**Today (from the code).** The plan markup editor (`openPdfViewer` and `openPhotoMarkup` in `supabase-client.js`, symbols in `public/js/electrical-symbols.js`) already has 23 electrical symbols (power points, lights, switches, fans, smoke alarm, data, switchboard, EV charger, inverter, battery, isolator, air conditioner, oven, hot water), cable paths with a scale and measured lengths, and a symbol schedule. But Save draws the marks into a new PDF and keeps only the counts (`project_documents.plan_summary`): the objects themselves are not stored, so a saved plan cannot be reopened with its marks movable. Sparky cannot read a document in a job or write a mark.
 
-**Done means.** Open J7040 > Documents > the Rev 2 plan > first floor page > Draft markup with Sparky > "ducted aircon upstairs" > the editor opens with outlets, a return and labels placed in the rooms > drag one, Save as new > the new PDF opens with the marks in place. Ask Sparky in chat "what size is Bed 2 on the J7040 plan" and get the answer from the drawing.
+**Plan, five parts, one branch, built in order.**
 
-**Not in scope.** Sparky saving a document by itself; markup on photos; anything on a client's portal.
+1. **Marks become data.** New `plan_markups` table (document, page, the shapes as JSON, scale, who and when; RLS the same as `project_documents`). Mark up opens with the stored marks, every object movable and deletable; Save still writes the PDF for sending, from the stored shapes. Plans marked up before this stay as they are (flattened, nothing to recover).
+2. **Sparky reads the plan.** `read_job_document` in `_shared/sparky-tools.js`: a document's pages as text or as pictures, under the asker's own access, so "what is on the first floor plan" and "how many GPOs on the ground floor" work in Ask Sparky and team chat.
+3. **Sparky drafts a layout.** A Sparky bar in the editor: a brief ("ducted aircon upstairs, 14 kW", "battery, 25 kWh, in the garage", "rough in, 3 bed house") and Draft. A background function (`plan-markup-background.js`, Opus 5.5, one call per page) reads the page picture, finds the rooms, and returns shapes in the editor's own format: symbols by id, cable, duct or pipe runs, labels and a schedule. The placement rules live in `agents/prompts/plan-markup.js` as data: aircon (an outlet per room sized by floor area, the return in the hall, the outdoor unit on the wall the brief or the plan allows, duct and condensate runs), battery and solar (battery, inverter, switchboard, DC and AC isolators, the meter, cable routes), rough in (double GPOs per wall by room type, lights and switches by the doors, data, smoke alarms to AS 3786, oven and hot water, cables back to the switchboard). New symbols for it in `electrical-symbols.js`: ducted outlet, return air grille, indoor unit, outdoor unit, duct run, refrigerant pipe run, meter.
+4. **The loop.** Sparky's marks land as ordinary objects: drag, delete, add by hand as today. Then type to Sparky in the same bar: "add a double GPO each side of the bed", "move the outdoor unit to the south wall", "clean up" (symbols pulled onto walls, even spacing, straight runs, labels tidied, the schedule rebuilt). Sparky gets the page picture and the current shapes and returns the full list; the editor shows "added 2, moved 5, removed 1" with Undo. Nothing is saved until Save, as today, so nothing AI-drawn lands on a job unseen.
+5. **Schedule to quote.** On a quote, the plan's schedule (symbol counts, cable metres) is offered as quote lines, one tap, each symbol mapped to a prebuild in Settings > Prebuilds (the mapping is data, a column on the prebuild). This is the new build path of item 37 point 9; built last, as its own PR if the branch gets long.
 
-- Touches: `netlify/functions/_shared/sparky-tools.js`, new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`, `public/js/supabase-client.js` (the viewer button and loading a draft into the editor), `public/js/ai-chat.js` for the chat side.
-- Overlaps: item 37 (one brain) touches `sparky-tools.js`; build after or in the same chat.
-- Kind: feature (into `staging`); migration no; money, stock, RLS or payroll no.
-- Size: medium to large (a day and a half).
-- Test on staging: owner login, a job with a plan PDF in Documents, the four clicks in Done means; needs the Anthropic key on the staging site.
-- Simpler: a person stops redrawing outlet layouts by hand on every plan; still a manual step: the person's Save, kept on purpose so nothing AI-drawn lands on a job unseen.
-- Best model: Opus 5.5, effort high, because it is a feature build with a known shape and no migration.
+**Done means.**
+1. J7040 > Documents > the Rev 2 plan > first floor > Mark up > "ducted aircon upstairs, 14 kW" > Draft: an outlet in every room, the return in the hall, the outdoor unit under Bed 2, duct runs, a schedule.
+2. Drag one outlet, delete another, then "add an outlet in the ensuite and clean up": the ensuite outlet appears, the runs straighten, the list says what changed, Undo puts it back.
+3. Save as new: the PDF opens with the marks; open it again: every object is still movable.
+4. A ground floor plan on a staging job > "rough in, 3 bed house": GPOs on the walls, lights and switches at the doors, smoke alarms, cables to the switchboard, the schedule counts match what is drawn.
+5. Ask Sparky in chat "how many double GPOs on J7040's ground floor": the answer matches the schedule.
+6. On the quote: Add lines from the plan: one line per symbol with the mapped prebuild and the counts.
+
+**Not in scope.** Sparky saving a document by itself; markup on photos; the client portal; sizing the aircon or battery (the brief says the size).
+
+- Touches: `public/js/supabase-client.js` (the editor loads and saves shapes, the Sparky bar, the change list and Undo), `public/js/electrical-symbols.js`, new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`, `netlify/functions/_shared/sparky-tools.js`, `netlify/functions/ai-chat-background.js`, `netlify/functions/_shared/chat-ai.js`, `public/project.html` (the quote's Add lines from the plan, in its own file), `public/settings.html` (the prebuild mapping column), one migration (`plan_markups`, a prebuild column), `?v=` bumps.
+- Overlaps: item 90 (same Sparky files and `supabase-client.js`): build 90 first, then 89, in one chat or one after the other; item 88 (PR 461) on `supabase-client.js`; item 37 (waiting on yes) on `sparky-tools.js`.
+- Kind: feature (into `staging`); migration yes (`plan_markups`, additions only); money no (part 5 adds quote lines through the quote's own line code, prices from the prebuild as a hand-added line would); RLS yes (the new table).
+- Size: large (two to three days in parts: 1 and 2 a day, 3 and 4 a day, 5 half a day).
+- Test on staging: admin@staging.test, upload a floor plan PDF to a staging job's Documents, then the Done means clicks; the Anthropic key is on the staging site.
+- Simpler: nobody redraws an outlet or GPO layout by hand on every plan, a marked-up plan can be changed later instead of started again, and the quote's lines come off the drawing instead of a count by eye. The manual step kept on purpose: the person's Save.
+- Best model: Fable 5.1, effort high, because it is a new agent plus a migration with RLS, and a wrong placement rule lands on quotes.
+
+## 91. Sparky changes the app when told to (planned 14 Nov 2026, waiting on yes)
+
+**Owner's ask (14 Nov 2026):** "Allow him to access the repo and change stuff when told to."
+
+**How it works.** Sparky does not edit code himself (a Netlify function has no git, no npm and 26 seconds). The builder is Claude Code running in GitHub Actions (`anthropics/claude-code-action`) on this repo, with `CLAUDE.md`, the skills and the software factory, the same rules every chat follows, so there is one path and no second way.
+
+1. **Ask.** An admin tells Sparky in Ask Sparky or team chat: "change the Jobs list to open on Active", "the invoice email says Kind regards twice, fix it". Sparky lines up a card: the brief as it will send it, bug fix or update (a bug goes to `main`, an update to `staging`), Confirm. Only admins see this tool.
+2. **Build.** Confirm writes an Updates and ideas row (`bug_reports`, "asked through Sparky", so it is on the board like any other) and fires a `repository_dispatch` with the brief. The new workflow `.github/workflows/sparky-build.yml` checks out the right base, runs Claude Code (Opus 5.5, effort high) with the brief and the repo's rules, which builds, runs `npm run check`, pushes its own branch and opens the PR with the template filled in. Builds that would need a migration, a secret, a production data change, a change to `CLAUDE.md` or the release stop and say "needs a chat" on the PR and the board row.
+3. **Tell.** When the PR opens, the board row gets the PR and Netlify preview links and the owner gets a notification (bell and push, kind `agent_alert`). Sparky answers "what happened to my Jobs list change" from the row.
+4. **Merge.** The owner tests on the preview, then "merge it" to Sparky: a card naming the PR, Confirm, and Sparky merges through the GitHub API only when the check is green, into `staging` for an update or `main` for a bug fix (then `main` into `staging`). A release stays a chat's job.
+
+**Owner steps (once).** Add the Anthropic API key as a GitHub Actions secret on the repo (Settings > Secrets and variables > Actions > New repository secret, `ANTHROPIC_API_KEY`); widen the Netlify `GITHUB_TOKEN` the Updates board already uses (or add a fine-grained token in `api_keys`) to contents, pull requests and actions on `thomson-projects`. Each build costs API tokens (roughly a dollar to ten on Opus 5.5 by size), billed to the same Anthropic account as Sparky.
+
+**Done means.**
+1. As admin, "Sparky, make the Tasks page open on My tasks": the card says update, into staging, Confirm; within a few minutes a row on Updates and ideas has a PR link and a preview link, and a push arrives.
+2. The preview shows the change; "merge it": the card names the PR, Confirm, the PR merges into `staging` with a merge commit, the row says Merged.
+3. "Sparky, add a column to the jobs table": the PR says "needs a chat: this needs a migration", nothing merges.
+4. As the sales login, the tool is not offered.
+
+**Not in scope.** Sparky editing code outside GitHub; merges without the owner's "merge it"; migrations, secrets, data fixes, releases; the website repo (the same workflow can be copied there later).
+
+- Touches: new `.github/workflows/sparky-build.yml`, `netlify/functions/_shared/ops-actions.js` (`request_app_change`, `merge_app_change`), new `netlify/functions/_shared/github-builds.js` (dispatch, PR status, merge), `netlify/functions/sync-bugs-to-repo.js`, `public/bugs.html` (the PR and preview links on a row), `docs/SOFTWARE_FACTORY.md`, `docs/ENV_VARS.md`, one small migration (`bug_reports.pr_url`, `preview_url`, `build_status`).
+- Overlaps: item 90 (`ops-actions.js` is loaded by `ai-actions.js`): build after 90; none on the workflow.
+- Kind: feature (into `staging`); migration yes (three columns, additions only); money, stock, RLS or payroll no.
+- Size: medium (a morning for the workflow and the two actions, an afternoon to prove it end to end on a throwaway ask).
+- Test on staging: admin@staging.test, the four Done means clicks; needs the GitHub secret and token first, and the first real build is on this repo (there is no staging GitHub).
+- Simpler: a small change no longer needs the owner to open a chat, pick a model and watch it; the ask, the PR, the preview and the merge are four lines in Sparky. Manual steps kept on purpose: Confirm on the ask and "merge it", so no code reaches the live site on a sentence alone.
+- Best model: Opus 5.5, effort high, because it is wiring between known pieces (a workflow, two ops actions, three columns) with no money or RLS.
