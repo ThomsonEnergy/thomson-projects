@@ -169,7 +169,8 @@ function poLineDeleteEffect(li, po) {
 async function deletePoLine(li, po, bills, onComplete) {
   if (!confirm(`Delete "${li.description}" (${poQty(li.quantity)} x ${money(li.unit_cost)}) from ${po.po_number || 'this PO'}? ${poLineDeleteEffect(li, po)}`)) return;
   const { error } = await supabaseClient.rpc('po_line_delete', { p_line_id: li.id });
-  if (error) { alert(friendlyError(error)); return; }
+  // refused (a bill landed on it, someone else got there first): say why and show the PO as it is now
+  if (error) { alert(friendlyError(error)); if (onComplete) await onComplete(); return; }
   // the PO's total changed, so its unpaid bills are checked against it again
   await Promise.all((bills || []).filter(b => !b.paid).map(b => recheckBill(b.id)));
   showToast(`${li.description} deleted from ${po.po_number || 'the PO'}`);
@@ -181,9 +182,11 @@ function poLineDeleteMenu(li, po, bills, role, onComplete) {
   return [{ label: 'Delete this line', hint: li.received ? 'Takes it back off where it was received, then off the PO' : 'Not ordered after all, or typed in by mistake', danger: true, onPick: () => deletePoLine(li, po, bills, onComplete) }];
 }
 // Once the PO has a bill, every line the bill does not charge for is marked on the row, with
-// Delete beside it (the line typed in by hand that the bill came in under another name).
+// Delete beside it (the line typed in by hand that the bill came in under another name). A bill
+// saved with no lines read cannot say what it charges for, so nothing is marked while one is there.
 function markPoLinesNotOnBill(containerEl, po, bills, role, onComplete) {
-  if (!(bills || []).some(b => b.kind !== 'credit_note')) return;
+  const charged = (bills || []).filter(b => b.kind !== 'credit_note');
+  if (!charged.length || charged.some(b => !(b.supplier_bill_line_items || []).length)) return;
   (po.purchase_order_line_items || []).filter(li => canDeletePoLine(li, po, bills, role)).forEach(li => {
     const row = [...containerEl.querySelectorAll('.po-line')].find(r => r.dataset.lineId === li.id);
     if (!row) return;
