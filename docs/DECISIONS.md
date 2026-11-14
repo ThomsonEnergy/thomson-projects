@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 14 Nov 2026
 
+- Planned (waiting on yes): item 90, Sparky changes things from the app. Today Sparky can only propose ten changes (tasks, Schedule, timesheets, three ops actions) and does not know which page a person is on. Plan: the widget sends the page and record with every question, one `update_record` tool over a field registry (jobs, quotes, clients, contacts, suppliers, tasks, leads, materials, assets, fleet, DNSP; never money, stock, status, settings or deletes, enforced by `check`), the same propose then Confirm cards, Undo for 24 hours from a new `ai_changes` table, and the same powers for @Sparky in team chat. Detail: `docs/IDEAS_BACKLOG.md` item 90.
 - Idea (not asked for yet): item 89, Sparky marks up a plan. Asked in a cloud chat after a ducted aircon duct plan for the owner's own house (J7040, 70 Riverview St, upstairs only, Daikin 14 kW FDYAN140, hall return, every outlet in the ceiling, outdoor unit under Bed 2 facing south) was drawn outside the app. Sparky cannot read a job's documents or write markup today; the plan markup editor can already draw and save the result, so the build is a document-reading tool, a draft-markup tool that loads into the editor for a person to save, and an Opus 5.5 background call. The duct plan PDF is the owner's to upload to J7040 > Documents > Plans (the cloud session has no storage key). Detail: `docs/IDEAS_BACKLOG.md` item 89.
 
 ## 13 Nov 2026
