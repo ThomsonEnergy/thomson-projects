@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 14 Nov 2026
+
+- Idea (not asked for yet): item 89, Sparky marks up a plan. Asked in a cloud chat after a ducted aircon duct plan for the owner's own house (J7040, 70 Riverview St, upstairs only, Daikin 14 kW FDYAN140, hall return, every outlet in the ceiling, outdoor unit under Bed 2 facing south) was drawn outside the app. Sparky cannot read a job's documents or write markup today; the plan markup editor can already draw and save the result, so the build is a document-reading tool, a draft-markup tool that loads into the editor for a person to save, and an Opus 5.5 background call. The duct plan PDF is the owner's to upload to J7040 > Documents > Plans (the cloud session has no storage key). Detail: `docs/IDEAS_BACKLOG.md` item 89.
+
 ## 13 Nov 2026
 
 - Planned (waiting on yes): item 88, delete a PO line that no bill charges for (owner's ask, 13 Nov 2026). The PO page has no delete today. Plan: Delete on the line for pricing roles on an open PO, a "Not on a bill" tag once the PO has a bill, one database function over the existing take-back step (a received line's cost comes off the job, its stock comes back out). With it PO2020 is fixed in six taps; item 87's automatic pairing still waits on its own yes. Detail: `docs/IDEAS_BACKLOG.md` item 88.
