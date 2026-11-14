@@ -1413,7 +1413,7 @@ Touches: `public/project.html` (Actual cost reads the same materials rule, Left 
 
 Touches: `public/project.html` (one select), `public/js/supplier-quotes.js`, `netlify/functions/_shared/supplier-quote-intake.js`. Overlaps: none. Kind: bug fix into `main`; migration no; money no. Size: small. Test on staging: sales@staging.test, a job made from a quote shows Go to quote; its price request reads RFQ and the quote's number. Simpler: one tap from a job back to its quote, as intended. Best model: Sonnet 5.5, effort medium, because it is three one-line reads with a known cause.
 
-## 88. Delete a PO line that no bill charges for (owner, 13 Nov 2026; built 14 Nov 2026 straight to `main`: PR_REF, migration 20261204000000, spec A10)
+## 88. Delete a PO line that no bill charges for (owner, 13 Nov 2026; built 14 Nov 2026 straight to `main`: PR 461, migration 20261204000000, spec A10)
 
 **Owner, 13 Nov 2026:** make it so we can delete items on a PO if they do not match a bill item.
 
