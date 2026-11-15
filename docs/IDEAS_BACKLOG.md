@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 14 Nov 2026 (item 88 built and moved to the built file; items 89, 90 and 91 planned, waiting on yes; items 84 and 87 waiting on yes)
+Last updated 16 Nov 2026 (item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -653,6 +653,10 @@ The rule is in `CLAUDE.md` (How the owner works, "Use the whole screen") and the
 Touches: `public/css/style.css` (the frame, the sizes, `?v=25` on all 59 pages), `public/project.html` (classes only), then the pages named above in PRs 3 and 4 (markup and their page-top CSS, no logic), `scripts/page-budgets.json` only downwards, `docs/PROJECT_SPEC.md`, `docs/DECISIONS.md`. Overlaps: item 62 (pipeline, waiting on yes) and item 47 touch `project.html` and `dashboard.html` logic, not layout; item 74 PR 2 (client portal, to come) adds to the job Feed tab and People card; no unmerged branch or open PR touches `style.css` (checked 12 Nov 2026, only PR 34 open). Kind: feature into `staging`, four PRs; no migration; no money, stock, RLS or payroll. Size: large (two to three days; PR 1 a morning, PR 2 a day, PR 3 a day, PR 4 a morning). Test on staging: admin@staging.test, the Done means above on a laptop and once on a phone, no key needed. Simpler: nobody scrolls past tasks to read a summary, past a form to reach a list, or past a call request to reach an enquiry; what matters most on every page is on screen when it opens; no toggle or manual step added. Best model: Opus 5.5, effort high, because it is markup and CSS across many pages with no logic, money or migration.
 
 ## 84. Supplier bills with fewer taps (second pass over the whole process, 13 Nov 2026, waiting on yes)
+
+**Owner, 16 Nov 2026 (asked after item 88 went live):** on a PO with no lines, after picking the right bill under "Waiting to be matched", is it still line by line, or does it land on the PO to tick, move or query? **Today it depends on how the PO was made:** an Open PO takes every bill line by itself; a fixed PO (the panel's default even with nothing typed) shows every line red for Accept one at a time. Query supplier shows only on a bill with a red line, so an Open PO's bill has no query button. Live on 16 Nov: one lineless fixed PO (PO2017, Tradezone, J7057), three lineless Open POs.
+
+**First slice offered 16 Nov 2026 (waiting on yes):** (a) new: a PO with no lines takes its lines from the bill whatever its type, in both save paths (`saveInboxItem` in `_shared/supplier-bill-intake.js` and `supplier_bill_save_review`), so nobody has to remember Open PO and PO2017 works as it stands; (b) point 3, Accept all on a bill; (c) point 4, Create PO with no lines typed saves as an Open PO; (d) new: Query supplier on every unpaid bill, not only one with a red line; (e) point 2, no total prompt when the reader read a total the lines add up to. Touches: `public/js/supabase-client.js` (the PO type choice), `netlify/functions/_shared/supplier-bill-intake.js`, `netlify/functions/supplier-bill-inbox.js` (accept all), `public/js/po-bills.js`, `public/js/po-bills-match.js`, one migration (`supplier_bill_save_review`, the same rule), `docs/PROJECT_SPEC.md` A10 and A11a.
 
 **Owner, 13 Nov 2026:** "Check over the whole process again and make sure it's simple and look for ways it can be streamlined."
 
