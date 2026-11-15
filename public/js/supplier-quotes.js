@@ -3,8 +3,11 @@
 //
 // Left card, Asked: one row per supplier asked (supplier_quote_requests). Ask suppliers for prices
 // picks the suppliers (the shared picker, each one a chip), the lines come in from the quote's
-// material lines matched to Stock (fuzzyMatchScore, as Suggest POs does), Send makes the request
-// PDF (generate-client-document-pdf, supplier_quote_request: po.html in request mode) and opens the
+// material lines matched to Stock (fuzzyMatchScore, as Suggest POs does), and plans or other files
+// can go with it (a builder's plan and "please quote": then the lines are optional). The files go
+// into Documents > Supplier quotes and are kept on the request (attachments), so every supplier's
+// email and Send again carry them already ticked. Send makes the request PDF when there are lines
+// (generate-client-document-pdf, supplier_quote_request: po.html in request mode) and opens the
 // email window to each supplier in turn with it attached, tagged to the job as Materials quote.
 // The request number is RFQ plus the quote's number (RFQ1017), the same for every supplier asked.
 // Right card, Quotes in: one row per quote a supplier sent back (supplier_quotes, filed by the
@@ -15,7 +18,7 @@
 // activity_log. Needs supabase-client.js (supabaseClient, escapeHtml, money, poQty, openModal,
 // showToast, friendlyError, logActivity, supplierPickerHtml, wireSupplierPicker, fuzzyMatchScore,
 // uploadPrivateFile, openSignedDocInNewTab, showPoCreatedPanel, emailPurchaseOrder) and
-// email-compose.js (openEmailComposer).
+// email-compose.js (openEmailComposer, emailLocalFilePicker).
 
 const SQ_MATCH_SCORE = 0.3; // the same bar as Suggest POs on the job page
 const SQ_FOLDER = 'Supplier quotes';
@@ -55,15 +58,15 @@ async function mountSupplierQuotes(ctx) {
 
   function requestRow(r) {
     const name = escapeHtml(r.suppliers?.name || r.supplier_name || 'Supplier');
-    const n = (r.lines || []).length;
+    const n = (r.lines || []).length, f = (r.attachments || []).length;
     const state = r.status === 'sent'
       ? `<span class="subtitle">Sent ${escapeHtml(sqDay(r.sent_at))}${r.sent_to ? ' to ' + escapeHtml(r.sent_to) : ''}</span>`
       : `<span class="badge amber">Not sent yet</span>`;
     return `
       <div class="sq-row" data-id="${r.id}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:7px 0; border-bottom:1px solid var(--border);">
-        <div style="flex:1 1 180px; min-width:0;"><strong>${name}</strong> <span class="subtitle">${n} line${n === 1 ? '' : 's'}</span><br>${state}</div>
+        <div style="flex:1 1 180px; min-width:0;"><strong>${name}</strong> <span class="subtitle">${[n ? `${n} line${n === 1 ? '' : 's'}` : '', f ? `${f} file${f === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}</span><br>${state}</div>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <button type="button" class="secondary btn-sm sq-lines">Lines</button>
+          <button type="button" class="secondary btn-sm sq-lines">Details</button>
           ${r.status === 'sent' ? '<button type="button" class="secondary btn-sm sq-send">Send again</button>' : '<button type="button" class="btn-sm sq-send">Send</button><button type="button" class="secondary btn-sm sq-remove">Remove</button>'}
         </div>
       </div>`;
@@ -174,11 +177,14 @@ async function mountSupplierQuotes(ctx) {
     const pickerIds = { search: 'sq-sup-search', results: 'sq-sup-results', selected: 'sq-sup-selected', newSection: 'sq-sup-new', newEmail: 'sq-sup-new-email', newPhone: 'sq-sup-new-phone' };
     const overlay = openModal(`
       <h2 style="margin-top:0;">${escapeHtml(rfq)}: ask suppliers for prices</h2>
-      <p class="subtitle" style="margin:0 0 8px; font-size:12px;">Each supplier gets the same list as a request for quote PDF, in an email from the job. Not an order.</p>
+      <p class="subtitle" style="margin:0 0 8px; font-size:12px;">Each supplier gets the same list as a request for quote PDF, and any plans attached, in an email from the job. Not an order.</p>
       <label style="margin-top:0;">Suppliers to ask</label>
       <div id="sq-chips" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;"></div>
       <div id="sq-picker">${supplierPickerHtml(pickerIds)}</div>
       <button type="button" class="secondary btn-sm" id="sq-add-sup" style="margin-top:6px;">+ Add this supplier</button>
+      <label style="margin-top:14px;">Plans and documents (optional)</label>
+      <p class="subtitle" style="margin:0 0 6px; font-size:12px;">A builder's plan to quote from: attach it here and it goes to every supplier. Then the items below are optional.</p>
+      <div id="sq-files"></div>
       <label style="margin-top:14px;">Items to price</label>
       <div id="sq-lines"></div>
       <button type="button" class="secondary btn-sm" id="sq-add-line" style="margin-top:6px;">+ Add line</button>
@@ -191,6 +197,7 @@ async function mountSupplierQuotes(ctx) {
       <div id="sq-ask-msg" style="margin-top:8px;"></div>`, { maxWidth: 640, zIndex: 110 });
     const q = (s) => overlay.querySelector(s);
     let resolveSupplier = wireSupplierPicker(overlay, suppliers || [], pickerIds);
+    const filePicker = emailLocalFilePicker(q('#sq-files'), { jobs: [{ id: project.id }] });
 
     const drawChips = () => {
       q('#sq-chips').innerHTML = chips.length ? chips.map((c, i) => `<span class="badge info" style="display:inline-flex; gap:6px; align-items:center;">${escapeHtml(c.name)}${c.email ? '' : ' <span class="subtitle">(no email saved)</span>'} <button type="button" class="sq-chip-x" data-i="${i}" style="all:unset; cursor:pointer; font-weight:700;" title="Remove">&times;</button></span>`).join('')
@@ -206,7 +213,7 @@ async function mountSupplierQuotes(ctx) {
           <td><input class="sq-l-unit" data-i="${i}" value="${escapeHtml(l.unit || '')}" placeholder="ea" style="margin:0;" /></td>
           <td><button type="button" class="sq-l-rm" data-i="${i}" style="all:unset; cursor:pointer; font-weight:700;" title="Remove">&times;</button></td>
         </tr>`).join('')}</tbody></table>`
-        : '<p class="subtitle" style="font-size:12px;">No material lines on the quote yet. Add the items to price.</p>';
+        : '<p class="subtitle" style="font-size:12px;">No material lines on the quote yet. Add the items to price, or attach the plans above.</p>';
       const read = (cls, key, fn) => q('#sq-lines').querySelectorAll(cls).forEach(inp => inp.addEventListener('input', () => { lines[Number(inp.dataset.i)][key] = fn(inp); }));
       read('.sq-l-on', 'off', (inp) => !inp.checked);
       read('.sq-l-desc', 'description', (inp) => inp.value);
@@ -243,14 +250,26 @@ async function mountSupplierQuotes(ctx) {
         try { const picked = await resolveSupplier(); if (picked.supplierId) chips.push({ id: picked.supplierId, name: picked.supplierName, email: (suppliers || []).find(s => s.id === picked.supplierId)?.contact_email || null }); } catch (e) { /* told below */ }
       }
       if (!chips.length) { msg.innerHTML = '<div class="error-box">Add at least one supplier.</div>'; return; }
-      if (!sendLines.length) { msg.innerHTML = '<div class="error-box">Tick at least one item to price.</div>'; return; }
+      const localFiles = filePicker.files(), jobFiles = filePicker.refs();
+      if (!sendLines.length && !localFiles.length && !jobFiles.length) { msg.innerHTML = '<div class="error-box">Tick at least one item to price, or attach the plans.</div>'; return; }
       if (sendLines.some(l => l.quantity <= 0)) { msg.innerHTML = '<div class="error-box">Every item needs a quantity.</div>'; return; }
-      btn.disabled = true; btn.textContent = 'Saving...';
+      const limit = filePicker.limitError();
+      if (limit) { msg.innerHTML = `<div class="error-box">${escapeHtml(limit)}</div>`; return; }
+      btn.disabled = true; btn.textContent = localFiles.length ? 'Uploading...' : 'Saving...';
       try {
         const { data: { user } } = await supabaseClient.auth.getUser();
         const note = q('#sq-note').value.trim() || null;
+        // files from this computer go onto the job (Documents > Supplier quotes) first
+        const uploaded = [];
+        for (const f of localFiles) {
+          const path = await uploadPrivateFile(f, `documents/${project.id}`);
+          const { error: dErr } = await supabaseClient.from('project_documents').insert({ project_id: project.id, folder: SQ_FOLDER, file_path: path, file_name: f.name, mime_type: f.type, uploaded_by: user.id });
+          if (dErr) throw dErr;
+          uploaded.push({ bucket: 'project-documents', path, name: f.name, size: f.size });
+        }
+        const attachments = [...uploaded, ...jobFiles.map(r => ({ bucket: r.bucket, path: r.path, name: r.name, size: r.size || 0 }))];
         const { data: made, error } = await supabaseClient.from('supplier_quote_requests').insert(chips.map(c => ({
-          project_id: project.id, supplier_id: c.id, supplier_name: c.name, status: 'draft', lines: sendLines, note, created_by: user.id,
+          project_id: project.id, supplier_id: c.id, supplier_name: c.name, status: 'draft', lines: sendLines, attachments, note, created_by: user.id,
         }))).select('*, suppliers(name, contact_email)');
         if (error) throw error;
         overlay.remove();
@@ -263,7 +282,7 @@ async function mountSupplierQuotes(ctx) {
     setTimeout(() => q(`#${pickerIds.search}`).focus(), 30);
   }
 
-  // The PDF, then the email window for each request in turn (the next opens when one is sent or
+  // The PDF (when there are lines), then the email window for each request in turn (the next opens when one is sent or
   // closed). A request whose email was not sent stays "Not sent yet" with its own Send button.
   async function sendRequests(list, btn) {
     const label = btn ? btn.textContent : '';
@@ -273,17 +292,26 @@ async function mountSupplierQuotes(ctx) {
       for (const r of list) {
         const sup = r.suppliers || {};
         const name = sup.name || r.supplier_name || 'the supplier';
-        const out = await sqPost('generate-client-document-pdf', { doc_type: 'supplier_quote_request', record_id: r.id }, 'Could not make the request PDF');
+        const hasLines = (r.lines || []).length > 0, files = r.attachments || [];
         const first = String(name).trim().split(/\s+/)[0] || 'there';
         const site = project.client_address ? ` at ${project.client_address}` : '';
         const fileName = `${rfq} ${name}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+        const attachOptions = files.map(f => ({ group: 'Plans and documents', label: f.name, bucket: f.bucket, path: f.path, name: f.name, size: f.size || 0, checked: true }));
+        if (hasLines) {
+          const out = await sqPost('generate-client-document-pdf', { doc_type: 'supplier_quote_request', record_id: r.id }, 'Could not make the request PDF');
+          attachOptions.unshift({ group: 'Request for quote', label: fileName, bucket: 'project-documents', path: out.path, name: fileName, checked: true });
+        }
+        const plans = files.length === 1 ? 'plan' : 'plans';
+        const ask = hasLines
+          ? `Could you please price the attached list (${rfq}) for ${project.name}${site}?${files.length ? ` The ${plans} ${files.length === 1 ? 'is' : 'are'} attached too.` : ''} Please reply with your quote number, prices ex GST and availability.`
+          : `Could you please quote the attached ${plans} (${rfq}) for ${project.name}${site}? Please reply with an itemised quote: your quote number, each item with its price ex GST, and availability.`;
         await new Promise((done) => openEmailComposer({
           title: `Email ${rfq} to ${name}`,
           to: sup.contact_email || '',
           subject: `${rfq} request for quote: ${project.name}`,
-          body: `Hi ${first},\n\nCould you please price the attached list (${rfq}) for ${project.name}${site}? Please reply with your quote number, prices ex GST and availability.\n\nThis is a request for pricing, not an order. A purchase order follows if we go ahead.${r.note ? '\n\n' + r.note : ''}\n\nThanks,`,
+          body: `Hi ${first},\n\n${ask}\n\nThis is a request for pricing, not an order. A purchase order follows if we go ahead.${r.note ? '\n\n' + r.note : ''}\n\nThanks,`,
           projectId: project.id, tagKind: 'materials_quote',
-          attachOptions: [{ group: 'Request for quote', label: fileName, bucket: 'project-documents', path: out.path, name: fileName, checked: true }],
+          attachOptions,
           onSent: async (threadId, sent) => {
             const { error } = await supabaseClient.from('supplier_quote_requests').update({ status: 'sent', sent_at: new Date().toISOString(), email_thread_id: threadId || null, sent_to: (sent && sent.to) || null }).eq('id', r.id);
             if (error) showToast(friendlyError(error), { error: true });
@@ -302,16 +330,18 @@ async function mountSupplierQuotes(ctx) {
   }
 
   function showLines(r) {
-    const lines = r.lines || [];
+    const lines = r.lines || [], files = r.attachments || [];
     const overlay = openModal(`
       <h2 style="margin-top:0;">${escapeHtml(rfq)} to ${escapeHtml(r.suppliers?.name || r.supplier_name || '')}</h2>
-      ${lines.length ? `<table style="width:100%; font-size:13px;"><thead><tr><th>Item</th><th style="text-align:right;">Qty</th></tr></thead><tbody>${lines.map(l => `<tr><td>${escapeHtml(l.description)}</td><td style="text-align:right;">${escapeHtml(poQty(l.quantity))}${l.unit ? ' ' + escapeHtml(l.unit) : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="subtitle">No lines.</p>'}
+      ${lines.length ? `<table style="width:100%; font-size:13px;"><thead><tr><th>Item</th><th style="text-align:right;">Qty</th></tr></thead><tbody>${lines.map(l => `<tr><td>${escapeHtml(l.description)}</td><td style="text-align:right;">${escapeHtml(poQty(l.quantity))}${l.unit ? ' ' + escapeHtml(l.unit) : ''}</td></tr>`).join('')}</tbody></table>` : (files.length ? '<p class="subtitle">No lines: priced from the files.</p>' : '<p class="subtitle">No lines.</p>')}
+      ${files.length ? `<label style="margin-top:10px;">Files sent</label>${files.map((f, i) => `<div><a href="#" class="sq-l-file" data-i="${i}">${escapeHtml(f.name)}</a></div>`).join('')}` : ''}
       ${r.note ? `<p class="subtitle" style="margin-top:8px;">Note: ${escapeHtml(r.note)}</p>` : ''}
       <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
         ${r.pdf_path ? '<button type="button" class="secondary" id="sq-l-pdf">View the PDF</button>' : ''}
         <button type="button" class="secondary" id="sq-l-close">Close</button>
       </div>`, { maxWidth: 520, zIndex: 110 });
     overlay.querySelector('#sq-l-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelectorAll('.sq-l-file').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); const f = files[Number(a.dataset.i)]; openSignedDocInNewTab(f.path, f.bucket); }));
     const pdf = overlay.querySelector('#sq-l-pdf');
     if (pdf) pdf.addEventListener('click', () => openSignedDocInNewTab(r.pdf_path));
   }
