@@ -6754,8 +6754,9 @@ async function togglePoLineTool(li, po, onComplete) {
   if (onComplete) await onComplete();
 }
 
-// The "..." on a line: everything other than the plain tick-to-receive.
-function openPoLineMenu(li, po, role, onComplete) {
+// The "..." on a line: everything other than the plain tick-to-receive. more(li) gives the
+// page's own extra actions (the PO page adds Delete, js/po-bills.js).
+function openPoLineMenu(li, po, role, onComplete, more) {
   const open = !po.closed_at;
   const tool = poLineIsTool(li, po);
   const pricing = isPricingRole(role);
@@ -6772,13 +6773,14 @@ function openPoLineMenu(li, po, role, onComplete) {
   }
   if (pricing && !li.material_id && Number(li.quantity) > 0 && !tool) items.push({ label: 'Add to Stock', hint: 'Make it a Stock item', onPick: () => openAddLineToStockPanel(li, po, onComplete) });
   if (pricing && !po.stock_source && open && po.po_kind !== 'tools') items.push({ label: li.is_tool ? 'Not a tool' : 'This is a tool', hint: li.is_tool ? 'Back to the job or stock when received' : 'Goes to the Tools register when received', onPick: () => togglePoLineTool(li, po, onComplete) });
+  if (more) items.push(...more(li));
   if (!items.length) items.push({ label: 'Nothing to do on this line', onPick: () => {} });
   openActionSheet(li.description.length > 48 ? li.description.slice(0, 46) + '...' : li.description, items);
 }
 
 // Wires the tick boxes, Select all, the Receive bar and every "..." in a container rendered with
 // renderPoTickLines. onComplete reloads the page's data.
-function wirePoTickLines(container, po, { role, onComplete, bar, selectAll } = {}) {
+function wirePoTickLines(container, po, { role, onComplete, bar, selectAll, lineMenuMore } = {}) {
   const items = po.purchase_order_line_items || [];
   const cbs = [...container.querySelectorAll('.po-line-cb')];
   const btn = bar ? bar.querySelector('.po-receive-btn') : null;
@@ -6826,7 +6828,7 @@ function wirePoTickLines(container, po, { role, onComplete, bar, selectAll } = {
   });
   container.querySelectorAll('.po-line-more').forEach(b => b.addEventListener('click', () => {
     const li = items.find(x => x.id === b.dataset.lineId);
-    if (li) openPoLineMenu(li, po, role, onComplete);
+    if (li) openPoLineMenu(li, po, role, onComplete, lineMenuMore);
   }));
   update();
 }
@@ -7661,7 +7663,7 @@ const JOB_ACTIVITY_GROUPS = [
     label: (n) => n === 1 ? 'Edited a timesheet' : `Edited timesheets (${n} changes)` },
   { tab: 'costcentres', actions: ['stage_updated', 'cost_centre_added'],
     label: (n) => n === 1 ? 'Edited the cost centres' : `Edited the cost centres (${n} changes)` },
-  { tab: 'pos', actions: ['po_item_added', 'po_item_edited'], byPo: true,
+  { tab: 'pos', actions: ['po_item_added', 'po_item_edited', 'po_item_deleted'], byPo: true,
     label: (n, po) => `Edited ${po ? 'PO ' + po : 'a PO'}${n === 1 ? '' : ` (${n} changes)`}` },
   { tab: 'pos', actions: ['material_received'], byPo: true,
     label: (n, po) => `Received ${n} item${n === 1 ? '' : 's'} on ${po ? 'PO ' + po : 'a PO'}` },
