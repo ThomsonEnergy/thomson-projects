@@ -126,6 +126,7 @@
                 <div id="client-agreement" style="margin-top:8px;"></div>
               </div>
             </div>
+            <div id="client-statement" style="margin-top:10px;"></div>
             <div id="client-portal" style="margin-top:10px;"></div>
             <label>Notes</label>
             <textarea id="c-notes" style="min-height:70px;"></textarea>
@@ -195,7 +196,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=138"></script>
+  <script src="/js/supabase-client.js?v=139"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -235,6 +236,7 @@
     // --- contacts sub-form ---
     // js/clients-portal.js (the portal card, item 74) comes down on first use, like the email composer.
     const loadClientPortalJs = () => loadJsOnce('/js/clients-portal.js?v=3', () => typeof renderClientPortal === 'function');
+    const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=1', () => typeof renderClientStatement === 'function');
 
     function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
@@ -294,6 +296,7 @@
       document.getElementById('c-terms').value = 'cod';
       document.getElementById('c-rate-card').value = defaultRateCardId;
       renderClientAgreement(null);
+      document.getElementById('client-statement').innerHTML = '';
       document.getElementById('client-portal').innerHTML = '';
       document.getElementById('c-type').value = 'individual';
       document.getElementById('c-notes').value = '';
@@ -487,6 +490,7 @@
       renderClientAgreement(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) });
       // The portal card's code is downloaded the first time a client is opened, so the page stays under its weight budget.
       loadClientPortalJs().then(() => renderClientPortal(c, { reopen: () => loadClients().then(() => openClientForEdit(c.id)) }));
+      loadClientStatementJs().then(() => renderClientStatement(c)).catch((err) => showToast(err.message, { error: true }));
       document.getElementById('c-type').value = c.client_type || 'individual';
       document.getElementById('c-notes').value = c.notes || '';
       document.getElementById('contacts-rows').innerHTML = '';

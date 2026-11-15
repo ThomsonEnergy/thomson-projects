@@ -427,6 +427,24 @@ async function handle(event) {
       if (upErr) throw upErr;
       const { error: cliErr } = await supabaseAdmin.from('clients').update({ agreement_document_path: path }).eq('id', client.id);
       if (cliErr) throw cliErr;
+    } else if (doc_type === 'client_statement') {
+      // record_id is the client (owner, 15 Nov 2026): statement.html as at today, every unpaid invoice
+      // across their jobs, for Email statement on the Clients page. Pricing roles (the page is pricing-only).
+      const pricing = await requirePricingRole(event);
+      if (!pricing) return { statusCode: 403, body: JSON.stringify({ ok: false, error: 'Only Admin, Finance or Sales can send a statement.' }) };
+      const { data: client, error } = await supabaseAdmin.from('clients').select('id, statement_token').eq('id', record_id).single();
+      if (error || !client) throw new Error(error?.message || 'Client not found');
+
+      const finalPdf = await renderPageToPdf(`${siteUrl}/statement.html?token=${client.statement_token}&print=1`, {
+        printBackground: true,
+        preferCSSPageSize: true,
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+
+      const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+      path = `client-documents/statements/${client.id}/${day}.pdf`;
+      const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, finalPdf, { contentType: 'application/pdf', upsert: true });
+      if (upErr) throw upErr;
     } else {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Unknown doc_type "${doc_type}"` }) };
     }
