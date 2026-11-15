@@ -84,6 +84,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=138"></script>
+  <script src="/js/po-bills-match.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     const FILTERS = {
@@ -262,10 +263,14 @@
         if (!po_id && !isCredit && !confirm('Save this bill with no PO?')) return null;
         const ex = item.extracted || {};
         const total = ex.total != null ? Math.abs(Number(ex.total)) : null;
-        const raw = prompt(`${isCredit ? 'Credit amount' : 'Bill total'} inc GST, as printed${total != null ? ` (read as ${money(total)})` : ' (no total was read)'}:`, total != null ? String(total) : '');
-        if (raw === null) return null;
-        const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-        if (!(amount > 0)) { showErr(new Error('Enter the amount as a number, more than zero.')); return null; }
+        // a bill whose lines add up to the total read is not asked about again (item 84); a credit note always is
+        let amount = total;
+        if (isCredit || !billTotalReadOk(ex)) {
+          const raw = prompt(`${isCredit ? 'Credit amount' : 'Bill total'} inc GST, as printed${total != null ? ` (read as ${money(total)})` : ' (no total was read)'}:`, total != null ? String(total) : '');
+          if (raw === null) return null;
+          amount = Number(String(raw).replace(/[^0-9.]/g, ''));
+          if (!(amount > 0)) { showErr(new Error('Enter the amount as a number, more than zero.')); return null; }
+        }
         const out = { po_id, amount };
         if (isCredit) {
           // what each line does on the PO, as shown on the card (a tick switched by the person wins)

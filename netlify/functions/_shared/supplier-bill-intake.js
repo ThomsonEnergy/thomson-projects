@@ -702,7 +702,9 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     });
     (billed || []).filter(b => b.resolution !== 'denied').forEach(b => { billedQty[b.po_line_item_id] = (billedQty[b.po_line_item_id] || 0) + (Number(b.quantity) || 0); });
   }
-  const poOpen = !!po && po.po_type === 'open' && !po.closed_at; // an open PO takes its lines from the bill
+  // any PO that is not closed takes the bill's lines that are not on it (item 84: it was Open POs only, a fixed
+  // PO showed each one red for Accept). They are marked added_from_bill and wait on the PO to be ticked received.
+  const poOpen = !!po && !po.closed_at;
   const lines = [];
   for (const l of (ex.line_items || []).filter(l => l.description)) {
     const unitCost = Number(l.unit_cost) || 0;
@@ -723,7 +725,7 @@ async function saveInboxItemAsBill(supabaseAdmin, itemId, { poId = null, userId 
     else if (po && !poLine && poOpen) {
       // the new PO line carries the Stock item too, so receiving it moves the count (item 57)
       const { data: added, error: addErr } = await supabaseAdmin.from('purchase_order_line_items')
-        .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId, material_id: byCode }).select('id, material_id').single();
+        .insert({ po_id: po.id, description: l.description, quantity, unit_cost: unitCost, added_by: userId, material_id: byCode, added_from_bill: true }).select('id, material_id').single();
       if (addErr) throw addErr;
       poLine = added; resolution = 'added';
     }

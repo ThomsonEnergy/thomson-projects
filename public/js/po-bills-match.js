@@ -6,7 +6,18 @@
 // or a number that is not that supplier's) shows on every open PO of that supplier; one whose PO is
 // sure (our PO number is on it) shows on that PO only, waiting for its one tap. Reads
 // supplier_bill_inbox (pricing roles). "This bill is for PO2009" is the same save as the Emailed
-// bills page (supplier-bill-inbox 'save', the total confirmed first). Writes nothing itself.
+// bills page (supplier-bill-inbox 'save'; the total is asked for only when the reader's one cannot
+// be trusted, billTotalReadOk). Writes nothing itself. supplier-bills.html loads it for that test.
+
+// The total the reader got needs no second look: the bill's own lines add up to it, ex or inc GST
+// (the same test as the bill check's total_differs). No total read, or no lines: ask.
+function billTotalReadOk(ex) {
+  const total = Math.abs(Number(ex && ex.total)), lines = (ex && ex.line_items) || [];
+  if (!(total > 0) || !lines.length) return false;
+  const sum = Math.abs(lines.reduce((s, l) => s + (l.quantity == null || l.quantity === '' ? 1 : Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0));
+  const near = (n) => Math.abs(n - total) <= Math.max(1, total * 0.001);
+  return near(sum) || near(Math.round(sum * 1.1 * 100) / 100);
+}
 
 // The rows worth matching: read, supplier known, not saved, an invoice (never a packing slip, a
 // credit note or a statement). supplierIds null = every supplier.
@@ -64,10 +75,13 @@ function wireBillsToMatch(container, rows, po, onDone) {
     const item = (rows || []).find(r => r.id === row.dataset.id);
     if (!item) return;
     const ex = item.extracted || {};
-    const raw = prompt(`Bill ${ex.bill_number || ''} is for ${po.po_number}. Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
-    if (raw === null) return;
-    const amount = Number(String(raw).replace(/[^0-9.]/g, ''));
-    if (!(amount > 0)) { alert('Enter the bill total as a number, more than zero.'); return; }
+    let amount = Number(ex.total);
+    if (!billTotalReadOk(ex)) {
+      const raw = prompt(`Bill ${ex.bill_number || ''} is for ${po.po_number}. Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
+      if (raw === null) return;
+      amount = Number(String(raw).replace(/[^0-9.]/g, ''));
+      if (!(amount > 0)) { alert('Enter the bill total as a number, more than zero.'); return; }
+    }
     btn.disabled = true; btn.textContent = 'Saving...';
     try {
       const { data: { session } } = await supabaseClient.auth.getSession();
