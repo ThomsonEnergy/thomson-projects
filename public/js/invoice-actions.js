@@ -1,6 +1,7 @@
 // The invoice panel and every action on an invoice after it is made (item 61): email to the
 // client, send a reminder, push to Xero, edit amounts (while not in Xero and not paid), edit details
-// (dates, name, the job's name and site, until paid, Xero updated too: owner, 16 Nov 2026), issue a
+// (dates, name, bill to, the job's name and site, until paid, Xero updated too: owner, 16 Nov 2026),
+// email the billed client's statement (js/client-statement.js, downloaded on use), issue a
 // credit note (once in Xero, Finance and Admin), notes, PDF, and the history of who did what and when.
 // One panel, two doors: the Invoices page (invoices.html, a row click) and the job's Invoices tab
 // (project.html, the Open button), so the two can never disagree.
@@ -12,7 +13,7 @@
 //   pushInvoiceToXero(invoiceId)                 resolves to the server's answer, throws on failure
 //   openEditInvoicePanel(invoice, project, onDone)  the per-stage numbers (a quoted claim); a do-and-charge invoice
 //                                                with line items opens the Invoice actual costs panel instead (item 64)
-//   openInvoiceDetailsPanel(invoice, project, onDone)  dates, name, job name and site (update-invoice-details.js)
+//   openInvoiceDetailsPanel(invoice, project, onDone)  dates, name, bill to, job name and site (update-invoice-details.js)
 //   openIssueCreditNotePanel(invoice, project, onDone)
 //   pushCreditNoteToXero(creditNoteId)           throws on failure
 //   recordInvoiceEvent(invoiceId, kind, detail)  one history line written by the browser (edit, notes, sent
@@ -26,6 +27,7 @@ const INVOICE_PANEL_PROJECT = 'projects(id, name, job_number, quote_number, clie
 const INVOICE_PANEL_SELECT = `*, balance_due, interest_accrued, interest_days, interest_daily, cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_line_items(id), invoice_events(*, actor:profiles(full_name))`;
 const INVOICE_BTN = 'font-size:12px; padding:6px 10px;';
 const loadInvoiceNotes = () => loadJsOnce('/js/invoice-notes.js?v=4', () => typeof openInvoiceNotesPanel === 'function');
+const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=2', () => typeof emailStatementForClient === 'function');
 
 // One history line from the browser. The insert policy needs the actor to be the signed in person.
 // Throws when it could not be written: for "Sent another way" the line is the action itself, so the
@@ -107,6 +109,8 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       inv = data; mappings = mappingsRes.data || []; role = myRole;
       // the invoice an interest invoice charges: a self reference, so it is read on its own rather than embedded
       inv.interest_of = inv.interest_of_invoice_id ? (await supabaseClient.from('invoices').select('id, invoice_number').eq('id', inv.interest_of_invoice_id).maybeSingle()).data : null;
+      // billed to another client (warranty, or Edit details > Bill to): shown in the header and used for the statement
+      inv.bill_to = inv.bill_to_client_id ? (await supabaseClient.from('clients').select('id, name').eq('id', inv.bill_to_client_id).maybeSingle()).data : null;
       rate = Number(settingsRes.data && settingsRes.data.late_interest_rate_pct);
       if (!(rate >= 0)) rate = 21;
     } catch (err) {
@@ -125,6 +129,8 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
     const clientType = (project && project.clients && project.clients.client_type) || 'individual';
     const why = [];
     const xeroPending = !!inv.xero_invoice_id && !inv.paid_at && invoiceXeroPending(status.events);
+    // the statement goes to whoever the invoice is billed to: every unpaid invoice of theirs, all jobs
+    const statementClientId = inv.bill_to_client_id || (project && project.client_id) || inv.client_id || null;
     if (!canEdit) why.push(isInterestInvoice ? 'Edit amounts is off: an interest invoice is one fixed amount. If it is wrong, void it in Xero; credit notes here are for claims.' : inv.xero_invoice_id ? 'Edit amounts is off: this invoice is in Xero, so amounts change through a credit note. Edit details still changes the dates, name and site, here and in Xero.' : inv.paid_at ? 'Edit is off: this invoice is paid. Changes go through a credit note.' : 'Edit amounts is off: this invoice has no job.');
     if (inv.xero_invoice_id && !canIssueCreditNote && !isInterestInvoice) why.push('Issue credit note: Finance and Admin only.');
     if (inv.paid_at) why.push('Paid: no more emails or reminders from here.');
@@ -135,7 +141,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
         <div>
           <h2 style="margin:0;">${escapeHtml(inv.invoice_number)}${inv.description ? ` <span class="subtitle" style="font-size:14px;">${escapeHtml(inv.description)}</span>` : ''}</h2>
           <p class="subtitle" style="margin:4px 0 0; font-size:13px;">
-            ${project ? `<a class="link-quiet" href="/project.html?id=${project.id}&tab=invoices">${escapeHtml(projectRef(project))}</a>` : 'No job'}${project && project.client_name ? ` &middot; ${escapeHtml(project.client_name)}` : ''}
+            ${project ? `<a class="link-quiet" href="/project.html?id=${project.id}&tab=invoices">${escapeHtml(projectRef(project))}</a>` : 'No job'}${project && project.client_name ? ` &middot; ${escapeHtml(project.client_name)}` : ''}${inv.bill_to ? ` &middot; billed to <strong>${escapeHtml(inv.bill_to.name)}</strong>` : ''}
             ${inv.interest_of ? ` &middot; Late payment interest on <a class="link-quiet" href="/invoices.html?id=${escapeHtml(inv.interest_of.id)}">${escapeHtml(inv.interest_of.invoice_number)}</a>, GST free` : ''}
           </p>
         </div>
@@ -181,6 +187,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
         ${xeroPending ? `<button type="button" class="secondary" id="ip-resend-xero" style="${INVOICE_BTN}">Resend to Xero</button>` : ''}
         ${inv.xero_invoice_id && canIssueCreditNote && !isInterestInvoice ? `<button type="button" class="secondary" id="ip-credit" style="${INVOICE_BTN}">Issue credit note</button>` : ''}
         ${project ? `<button type="button" class="secondary" id="ip-notes" style="${INVOICE_BTN}">Notes</button>` : ''}
+        ${statementClientId ? `<button type="button" class="secondary" id="ip-statement" style="${INVOICE_BTN}">Email statement</button>` : ''}
         ${inv.pdf_path ? `<button type="button" class="secondary" id="ip-pdf" style="${INVOICE_BTN}">View PDF</button>` : ''}
         <button type="button" class="secondary" id="ip-make-pdf" style="${INVOICE_BTN}">${inv.pdf_path ? 'Regenerate PDF' : 'Generate PDF'}</button>
         <a class="link-quiet" href="/invoice.html?token=${escapeHtml(inv.invoice_token)}" target="_blank" style="font-size:12px;">Client's invoice page</a>
@@ -261,6 +268,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       ? loadInvoiceActuals().then(() => openInvoiceActualCostsPanel(project, { invoice: inv, onDone: () => afterChange(true) })).catch(fail)
       : openEditInvoicePanel(inv, project, () => afterChange(true))));
     on('#ip-details', () => openInvoiceDetailsPanel(inv, project, () => afterChange(true)));
+    on('#ip-statement', (e) => { const btn = e.currentTarget; loadClientStatementJs().then(() => emailStatementForClient(statementClientId, { btn, msgEl: msg })).catch(fail); });
     const resendBtn = card.querySelector('#ip-resend-xero');
     if (resendBtn) resendBtn.addEventListener('click', call(resendBtn, 'Sending...', async () => {
       const d = await saveInvoiceDetails({ invoiceId: inv.id, resend: true });
@@ -382,6 +390,11 @@ async function invoiceCreditLeft(projectId) {
 // it all, remakes the PDF and updates Xero (update-invoice-details.js); amounts are not here.
 function openInvoiceDetailsPanel(invoice, project, onDone) {
   const inXero = !!invoice.xero_invoice_id;
+  // Bill to: the job's own client unless the invoice is billed to someone else (bill_to_client_id)
+  const ownId = (project && project.client_id) || invoice.client_id || null;
+  const ownName = (project && project.client_name) || '';
+  let billToId = invoice.bill_to_client_id || ownId;
+  let billName = (invoice.bill_to && invoice.bill_to.name) || ownName || 'Not set';
   const overlay = openModal(`
       <h2 style="margin-top:0;">Edit details of ${escapeHtml(invoice.invoice_number)}</h2>
       <p class="subtitle" style="margin:0 0 12px; font-size:12px;">${inXero ? 'Saved here and in Xero at once, and the PDF is remade. ' : 'The PDF is remade on save. '}Amounts are not changed here${inXero ? ': in Xero they change through a credit note' : ': use Edit amounts'}.</p>
@@ -392,6 +405,15 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
       <label>Invoice name</label>
       <input id="id-name" value="${escapeHtml(invoice.description || '')}" placeholder="e.g. Stage 2 rough-in" />
       <p class="subtitle" style="margin:4px 0 0; font-size:11px;">The heading on a one-line invoice, and the reference in Xero.</p>
+      ${ownName || invoice.bill_to_client_id ? `
+      <label>Bill to</label>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <strong id="id-bill-name">${escapeHtml(billName)}</strong>
+        ${invoice.bill_to_client_id && ownName ? `<button type="button" class="secondary" id="id-bill-own" style="font-size:12px; padding:4px 10px;">Back to ${escapeHtml(ownName)}</button>` : ''}
+      </div>
+      <input id="id-bill-search" placeholder="Search clients to bill someone else" style="margin-top:6px;" autocomplete="off" />
+      <div id="id-bill-results"></div>
+      <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Who the invoice is made out to${inXero ? ', here and in Xero' : ''}. A new client is added on the Clients page first.</p>` : ''}
       ${project ? `
       <h3 style="font-size:14px; margin:16px 0 0;">On the job ${escapeHtml(projectRef(project))}</h3>
       <p class="subtitle" style="margin:2px 0 0; font-size:11px;">These change the job itself, so every invoice and document on it shows the same.</p>
@@ -406,9 +428,27 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
       <div id="id-msg" style="margin-top:8px;"></div>`, { maxWidth: 520, zIndex: 130 });
   const q = (sel) => overlay.querySelector(sel);
   q('#id-cancel').addEventListener('click', () => overlay.remove());
+  const pickBillTo = (id, name) => { billToId = id; billName = name; q('#id-bill-name').textContent = name; q('#id-bill-results').innerHTML = ''; q('#id-bill-search').value = ''; };
+  const ownBtn = q('#id-bill-own');
+  if (ownBtn) ownBtn.addEventListener('click', () => { pickBillTo(ownId, ownName); ownBtn.remove(); });
+  const search = q('#id-bill-search');
+  let searchTimer;
+  if (search) search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const text = search.value.replace(/[,()%*\\]/g, ' ').trim();
+    if (text.length < 2) { q('#id-bill-results').innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      const { data } = await supabaseClient.from('clients').select('id, name, email').or(`name.ilike.%${text}%,email.ilike.%${text}%`).order('name').limit(8);
+      const box = q('#id-bill-results');
+      if (!data || !data.length) { box.innerHTML = '<p class="subtitle" style="margin:4px 0 0; font-size:12px;">No client by that name. Add them on the Clients page first.</p>'; return; }
+      box.innerHTML = `<div style="border:1px solid var(--border); border-radius:8px; margin-top:4px;">${data.map(c => `<div class="id-bill-row" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}" style="padding:7px 10px; cursor:pointer; border-bottom:1px solid var(--border);">${escapeHtml(c.name)} <span class="subtitle" style="font-size:12px;">${escapeHtml(c.email || '')}</span></div>`).join('')}</div>`;
+      box.querySelectorAll('.id-bill-row').forEach(row => row.addEventListener('click', () => pickBillTo(row.dataset.id, row.dataset.name)));
+    }, 250);
+  });
   q('#id-save').addEventListener('click', async () => {
     const btn = q('#id-save'), msg = q('#id-msg');
     const body = { invoiceId: invoice.id, invoiceDate: q('#id-date').value, dueDate: q('#id-due').value, description: q('#id-name').value };
+    if (billToId && billToId !== (invoice.bill_to_client_id || ownId)) body.billToClientId = billToId;
     if (project) { body.jobName = q('#id-job-name').value; body.siteAddress = q('#id-site').value; }
     if (!body.invoiceDate) { msg.innerHTML = '<div class="error-box">Pick the invoice date.</div>'; return; }
     invoiceBusy(btn, inXero ? 'Saving and updating Xero...' : 'Saving...');

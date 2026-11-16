@@ -1,5 +1,5 @@
 // Sends an invoice's details to the Xero invoice it was pushed as (owner, 16 Nov 2026): the date, due
-// date and reference, and the wording of its lines when that changed (a stage renamed, the invoice's
+// date, reference and contact (who it is billed to), and the wording of its lines when that changed (a stage renamed, the invoice's
 // name on a one-line invoice). Amounts are never sent differently: the lines go back with Xero's own
 // quantities, prices, accounts and tax, so a change of money still goes through a credit note.
 // Used by update-invoice-details.js (Edit details, and Resend to Xero when an update did not go).
@@ -41,12 +41,14 @@ function reworded(theirs, ours, current) {
 }
 
 async function updateInvoiceInXero(admin, invoiceId) {
-  const { invoice, reference, lineItems, date, dueDate } = await buildXeroInvoicePayload(admin, invoiceId);
+  const { invoice, contactId, reference, lineItems, date, dueDate } = await buildXeroInvoicePayload(admin, invoiceId);
   if (!invoice.xero_invoice_id) throw new Error('This invoice is not in Xero yet. Use Push to Xero.');
   const current = await readXeroInvoice(invoice.xero_invoice_id);
   const blocker = xeroInvoiceBlocker(current);
   if (blocker) throw new Error(blocker);
   const body = { InvoiceID: invoice.xero_invoice_id, Reference: reference, Date: date, DueDate: dueDate };
+  // billed to someone else now (Edit details > Bill to): the Xero invoice moves to that contact
+  if (contactId && (!current.Contact || current.Contact.ContactID !== contactId)) body.Contact = { ContactID: contactId };
   const lines = reworded(current.LineItems, lineItems, current);
   if (lines) { body.LineItems = lines; body.LineAmountTypes = current.LineAmountTypes; }
   const res = await xeroRequest('accounting', 'Invoices', { method: 'POST', body: { Invoices: [body] } });
