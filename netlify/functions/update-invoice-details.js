@@ -1,12 +1,14 @@
 // POST /.netlify/functions/update-invoice-details (owner, 16 Nov 2026). Pricing roles.
 // Edit details on an invoice that is not paid, whether or not it is in Xero: the invoice date, due
-// date and name, and the job's name and site address (the invoice reads those from the job, so the
-// job and every document on it stay the same). Amounts are not touched: they change through Edit
-// (before Xero) or a credit note (after). In one go: saves, writes one history line, remakes the
+// date and name, who it is billed to (invoices.bill_to_client_id; empty means the job's own client),
+// and the job's name and site address (the invoice reads those from the job, so the job and every
+// document on it stay the same). Amounts are not touched: they change through Edit amounts (before
+// Xero) or a credit note (after); a bill-to change that would move the GST on an STC credit (an
+// individual to a company or back) is refused for that reason. In one go: saves, writes one history line, remakes the
 // PDF, and when the invoice is in Xero sends the change there (_shared/update-invoice-in-xero.js).
 // A Xero update that does not go is recorded in the history as "Xero not updated: <reason>", and the
 // panel offers Resend to Xero ({ invoiceId, resend: true }) until one goes.
-// Body: { invoiceId, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or ''), description, jobName, siteAddress }
+// Body: { invoiceId, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or ''), description, billToClientId, jobName, siteAddress }
 //   or  { invoiceId, resend: true }
 // Answer: { ok, changed, xero: null | { ok, error } }
 
@@ -35,7 +37,7 @@ exports.handler = async (event) => {
 
   try {
     const { data: inv, error } = await admin.from('invoices')
-      .select('id, invoice_number, sent_at, due_date, description, paid_at, xero_invoice_id, pdf_path, project_id, cost_centre_id, cost_centres(project_id)')
+      .select('id, invoice_number, sent_at, due_date, description, paid_at, xero_invoice_id, pdf_path, project_id, cost_centre_id, client_id, bill_to_client_id, stc_amount, bstc_amount, cost_centres(project_id)')
       .eq('id', invoiceId).maybeSingle();
     if (error) throw error;
     if (!inv) return reply(404, { ok: false, error: 'Invoice not found' });
@@ -56,7 +58,7 @@ exports.handler = async (event) => {
 
     const projectId = inv.project_id || (inv.cost_centres && inv.cost_centres.project_id) || null;
     const { data: project } = projectId
-      ? await admin.from('projects').select('id, name, client_address, client_site_id, client_id').eq('id', projectId).maybeSingle()
+      ? await admin.from('projects').select('id, name, client_address, client_site_id, client_id, client_name').eq('id', projectId).maybeSingle()
       : { data: null };
 
     // What changed (only the fields sent are looked at)
@@ -77,6 +79,26 @@ exports.handler = async (event) => {
     if (body.description !== undefined) {
       const d = clean(body.description) || null;
       if (d !== (clean(inv.description) || null)) { invoiceChange.description = d; said.push(`Name ${quoted(inv.description)} to ${quoted(d)}`); }
+    }
+    if (body.billToClientId !== undefined) {
+      // The job's own client (or a standalone invoice's client) is the default: picking it clears the override.
+      const ownId = (project && project.client_id) || inv.client_id || null;
+      const wanted = body.billToClientId || null;
+      const next = wanted && wanted !== ownId ? wanted : null;
+      if (next !== (inv.bill_to_client_id || null)) {
+        const ids = [inv.bill_to_client_id || ownId, next || ownId].filter(Boolean);
+        const { data: people } = ids.length ? await admin.from('clients').select('id, name, client_type').in('id', ids) : { data: [] };
+        const who = (id) => (people || []).find((c) => c.id === id) || null;
+        const before = who(inv.bill_to_client_id || ownId), after = who(next || ownId);
+        if (next && !after) return reply(400, { ok: false, error: 'That client was not found.' });
+        const hasCredit = Number(inv.stc_amount) > 0 || Number(inv.bstc_amount) > 0;
+        if (hasCredit && (before?.client_type || 'individual') !== (after?.client_type || 'individual')) {
+          return reply(400, { ok: false, error: 'This invoice has an STC credit, and its GST depends on whether the client is a company or a person. Billing it to a different kind of client changes the amount, so use a credit note and a new invoice.' });
+        }
+        invoiceChange.bill_to_client_id = next;
+        const nameOf = (c, fallback) => (c && c.name) || fallback || 'the job\'s client';
+        said.push(`Bill to ${quoted(nameOf(before, project && project.client_name))} to ${quoted(nameOf(after, project && project.client_name))}`);
+      }
     }
     if (project && body.jobName !== undefined) {
       const n = clean(body.jobName);
