@@ -9,14 +9,15 @@
 // bills page (supplier-bill-inbox 'save'; the total is asked for only when the reader's one cannot
 // be trusted, billTotalReadOk). Writes nothing itself. supplier-bills.html loads it for that test.
 
-// The total the reader got needs no second look: the bill's own lines add up to it, ex or inc GST
-// (the same test as the bill check's total_differs). No total read, or no lines: ask.
+// The total the reader got needs no second look: the bill's own lines (ex GST) plus GST come to it,
+// or the bill says it has no GST and the lines come to it. A total equal to the lines on a bill
+// with GST is the subtotal read as the total: ask. No total read, or no lines: ask.
 function billTotalReadOk(ex) {
   const total = Math.abs(Number(ex && ex.total)), lines = (ex && ex.line_items) || [];
   if (!(total > 0) || !lines.length) return false;
   const sum = Math.abs(lines.reduce((s, l) => s + (l.quantity == null || l.quantity === '' ? 1 : Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0));
   const near = (n) => Math.abs(n - total) <= Math.max(1, total * 0.001);
-  return near(sum) || near(Math.round(sum * 1.1 * 100) / 100);
+  return near(Math.round(sum * 1.1 * 100) / 100) || (ex.gst != null && ex.gst !== '' && Number(ex.gst) === 0 && near(sum));
 }
 
 // The rows worth matching: read, supplier known, not saved, an invoice (never a packing slip, a
@@ -75,7 +76,7 @@ function wireBillsToMatch(container, rows, po, onDone) {
     const item = (rows || []).find(r => r.id === row.dataset.id);
     if (!item) return;
     const ex = item.extracted || {};
-    let amount = Number(ex.total);
+    let amount = Math.abs(Number(ex.total));
     if (!billTotalReadOk(ex)) {
       const raw = prompt(`Bill ${ex.bill_number || ''} is for ${po.po_number}. Bill total inc GST, as printed on the bill${ex.total != null ? ` (read as ${money(ex.total)})` : ' (no total was read)'}:`, ex.total != null ? String(ex.total) : '');
       if (raw === null) return;

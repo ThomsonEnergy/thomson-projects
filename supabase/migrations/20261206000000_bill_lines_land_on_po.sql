@@ -8,7 +8,7 @@
 --   2. supplier_bill_save_review (upload, review screen, scan) and supplier_bill_relocate (Move a
 --      bill to another PO): the rule above. The emailed save has it in _shared/supplier-bill-intake.js.
 --   3. supplier_bill_line_resolve: Accept marks the line it adds; Deny on a line the bill put on
---      the PO takes it off the PO.
+--      the PO takes it off the PO (an open PO, and no other bill's line on the same PO line).
 -- Nothing is approved or paid that was not before: a PO still closes only when every line is
 -- received, back ordered or moved off, and closing is still the approval step.
 
@@ -139,9 +139,11 @@ begin
           end if;
         end if;
         if v_po_line is null then
-          select * into pl from purchase_order_line_items
-            where po_id = v_po_id and ((v_mat is not null and material_id = v_mat) or lower(description) = lower(v_desc))
-            order by (material_id = v_mat) desc nulls last, created_at limit 1;
+          -- never the line an earlier line of this same bill just added: a second line with the same name gets its own
+          select * into pl from purchase_order_line_items pli
+            where pli.po_id = v_po_id and ((v_mat is not null and pli.material_id = v_mat) or lower(pli.description) = lower(v_desc))
+              and not exists (select 1 from supplier_bill_line_items x where x.bill_id = v_bill and x.po_line_item_id = pli.id and x.resolution = 'added')
+            order by (pli.material_id = v_mat) desc nulls last, pli.created_at limit 1;
           if found then
             v_po_line := pl.id;
             if v_cost > pl.unit_cost * 1.01 + 0.005 then
@@ -312,14 +314,14 @@ begin
       update supplier_bill_line_items set resolution = 'accepted', resolution_note = v_note, resolved_by = auth.uid(), resolved_at = now() where id = l.id;
     end if;
   elsif p_action = 'deny' then
-    -- item 84: a line the bill put on the PO comes off the PO with the charge (a received one is un-received first)
-    if l.resolution = 'added' and l.po_line_item_id is not null then
+    -- item 84: a line the bill put on the PO comes off the PO with the charge (a received one is un-received first).
+    -- Not on a closed PO, and not while another bill's line sits on the same PO line: then only the charge is denied.
+    if l.resolution = 'added' and l.po_line_item_id is not null and po.id is not null and po.closed_at is null
+       and not exists (select 1 from supplier_bill_line_items x where x.po_line_item_id = l.po_line_item_id and x.id <> l.id) then
       perform _po_line_unadd(l.po_line_item_id);
       update supplier_bill_line_items set po_line_item_id = null, flag_reason = 'Not on the linked PO' where id = l.id;
-      if po.id is not null then
-        perform _po_log('purchase_order', po.id, 'bill_line_unaccepted', format('%s x%s from bill %s taken off PO %s (charge denied)', l.description, _po_qty(l.quantity), coalesce(b.bill_number, ''), po.po_number));
-        perform _po_sync_received(po.id);
-      end if;
+      perform _po_log('purchase_order', po.id, 'bill_line_unaccepted', format('%s x%s from bill %s taken off PO %s (charge denied)', l.description, _po_qty(l.quantity), coalesce(b.bill_number, ''), po.po_number));
+      perform _po_sync_received(po.id);
     end if;
     update supplier_bill_line_items set resolution = 'denied', resolution_note = v_note, resolved_by = auth.uid(), resolved_at = now() where id = l.id;
     update supplier_bills set approved_for_payment = false, approved_by = null, approved_at = null, pay_on = null where id = b.id and approved_for_payment;

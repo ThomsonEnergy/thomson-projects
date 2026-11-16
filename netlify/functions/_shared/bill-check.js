@@ -70,7 +70,8 @@ async function checkBill(admin, billId) {
 
     (bill.kind === 'credit_note' ? [] : (lines || [])).forEach(l => {
       if (l.resolution === 'denied') { issues.push({ kind: 'denied', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) denied${l.resolution_note ? ': ' + l.resolution_note : ''}, waiting on the supplier` }); return; }
-      if (l.resolution === 'accepted' || l.resolution === 'added' || isNoCharge(l)) return;
+      // 'added' counts only while its PO line is still there: a back order cancelled at close takes the line off, and the charge is a decision again
+      if (l.resolution === 'accepted' || (l.resolution === 'added' && l.po_line_item_id) || isNoCharge(l)) return;
       if (!l.po_line_item_id) {
         if (isFreight(l.description)) issues.push({ kind: 'freight', line_id: l.id, text: `Freight / delivery: "${l.description}" ${money((Number(l.unit_cost) || 0) * (Number(l.quantity) || 1))}` });
         else issues.push({ kind: 'not_on_po', line_id: l.id, text: `"${l.description}" (${qty(l.quantity)} x ${money(l.unit_cost)}) is not on ${po?.po_number || 'the PO'}` });
@@ -127,6 +128,9 @@ async function checkBill(admin, billId) {
   const real = issues.filter(i => i.kind !== 'no_po');
   let status = real.length ? 'problems' : (bill.po_id ? 'matches' : 'no_po');
   if (['queried', 'resolved'].includes(bill.check_status) && status !== 'matches') status = bill.check_status;
+  // a bill queried while nothing was wrong with it (Query supplier is on every unpaid bill, item 84) stays queried, so it is
+  // not approved when the PO closes, until someone marks it sorted on Bill checks
+  if (bill.check_status === 'queried' && status === 'matches' && !(bill.check_issues || []).some(i => i.kind !== 'no_po')) status = 'queried';
   const update = { check_status: status, check_issues: issues, checked_at: new Date().toISOString() };
   // matches a PO that is already closed (the approval step): approved for payment, pay on the later of the
   // supplier's terms date and today (same rule as closing the PO)

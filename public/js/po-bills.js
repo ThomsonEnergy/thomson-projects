@@ -32,7 +32,7 @@ function billLineState(l, bill) {
     return { red: false, label: 'Money only' };
   }
   if (l.resolution === 'denied') return { red: true, label: 'Denied' + (l.resolution_note ? ': ' + l.resolution_note : '') };
-  if (l.resolution === 'added') return { red: false, label: 'Added to PO' };
+  if (l.resolution === 'added' && l.po_line_item_id) return { red: false, label: 'Added to PO' };
   if (l.resolution === 'accepted') return { red: false, label: 'Accepted' + (l.resolution_note ? ': ' + l.resolution_note : '') };
   if (isNoCharge(l)) return { red: false, label: 'No charge' };
   if (l.flag_reason) return { red: true, label: l.flag_reason };
