@@ -30,7 +30,7 @@ async function openMoveBillPanel(bill, { supplierId, onDone } = {}) {
   const label = (po) => `${po.po_number || 'PO'} - ${po.projects ? projectRef(po.projects) : 'Stock'}${po.description ? ' - ' + po.description : ''}`;
   overlay.querySelector('.card').innerHTML = `
     <h2>Move ${billWord(bill).toLowerCase()} ${escapeHtml(bill.bill_number || '(no number)')}</h2>
-    <p class="subtitle" style="margin-bottom:10px;">Its lines come off the PO it is on now (anything Accept added, received goods back out of stock or off the job) and are matched against the PO you pick. The bill is approved again when that PO closes.</p>
+    <p class="subtitle" style="margin-bottom:10px;">Its lines come off the PO it is on now (anything the bill added to it, received goods back out of stock or off the job) and are matched against the PO you pick. The bill is approved again when that PO closes.</p>
     <label style="margin-top:0;">To</label>
     <select id="mb-po">
       <option value="">Pick the PO...</option>
@@ -61,7 +61,7 @@ async function openMoveBillPanel(bill, { supplierId, onDone } = {}) {
 }
 
 async function removeBill(bill, onDone) {
-  const reason = prompt(`Remove ${billWord(bill).toLowerCase()} ${bill.bill_number || ''} from TEops? Say why (paid by the customer, not ours, entered twice...). Anything Accept added to the PO comes off it; its emailed card is put aside with this reason.`, '');
+  const reason = prompt(`Remove ${billWord(bill).toLowerCase()} ${bill.bill_number || ''} from TEops? Say why (paid by the customer, not ours, entered twice...). Anything the bill added to the PO comes off it; its emailed card is put aside with this reason.`, '');
   if (reason === null) return;
   if (!reason.trim()) { alert('Say why it is being removed.'); return; }
   try {

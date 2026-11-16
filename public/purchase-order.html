@@ -33,9 +33,9 @@
 
   <script src="/js/supabase-client.js?v=139"></script>
   <script src="/js/email-compose.js?v=13"></script>
-  <script src="/js/po-bills.js?v=2"></script>
-  <script src="/js/po-bills-match.js?v=1"></script>
-  <script src="/js/supplier-bill-actions.js?v=1"></script>
+  <script src="/js/po-bills.js?v=3"></script>
+  <script src="/js/po-bills-match.js?v=2"></script>
+  <script src="/js/supplier-bill-actions.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // One purchase order, one page: the next step at the top, the lines with a tick box each
@@ -192,7 +192,7 @@
         bar: document.getElementById('po-receive-bar'), selectAll: document.getElementById('po-select-all'),
         lineMenuMore: (li) => poLineDeleteMenu(li, po, bills, myRole, load),
       });
-      markPoLinesNotOnBill(document.getElementById('po-lines'), po, bills, myRole, load);
+      markPoLines(document.getElementById('po-lines'), po, bills, myRole, load);
       wirePoBillButtons(pageEl, load, bills);
       wireBillsToMatch(pageEl, toMatch, po, load);
       const logEl = document.getElementById('po-log');
@@ -214,7 +214,7 @@
         { before: () => setTick(true), target: '#po-receive-bar', title: 'Then press Receive', text: `One button receives every ticked line to ${where}: it goes on the job's costs or into that stock count. "Somewhere else" is for the odd line that went to the Warehouse or a van instead.` },
         { before: () => setTick(false), target: () => document.querySelector('.po-line-more'), title: 'Anything else for a line', text: 'Back ordered, move it to another job or stock, undo a tick, add it to Stock, mark it as a tool, or delete a line no bill charges for: all under this button.' },
         { target: '#po-more-btn', title: 'Everything else is under More', text: 'Add an item, edit the lines, email the PO, view the PDF, notes, prices on the PO, upload the invoice, close or reopen, and the log.' },
-        { target: '#po-bills', title: 'Bills', text: "The supplier's invoices for this PO. Green lines match the PO; a red line is not on the PO or costs more, and needs Accept or Deny. Closing the PO approves its bills for payment." },
+        { target: '#po-bills', title: 'Bills', text: "The supplier's invoices for this PO. Green lines match the PO. A line the bill added shows red, Not on the original PO, until you tick it received; freight or a higher price needs Accept or Deny. Closing the PO approves its bills for payment." },
         { target: '#po-where', title: 'Where it is going', text: 'Tap the job, vehicle or Stock name to go there. Back to the list with the arrow at the top.' },
       ], { key: 'po-page', onEnd: () => setTick(false) });
     }

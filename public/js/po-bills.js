@@ -1,6 +1,7 @@
 // The Bills fold on the PO page (purchase-order.html only, item 31; moved out of supabase-client.js
 // 13 Nov 2026 to keep every page under its weight budget). The bills and credit notes on one PO
-// with their lines (green on the PO, red to decide: Accept or Deny charge), Open invoice and Open
+// with their lines (green on the PO; red to decide: Accept or Deny charge; a line the bill put on
+// the PO is red, "Not on the original PO", until it is ticked received, item 84), Open invoice and Open
 // docket, Move and Remove (js/supplier-bill-actions.js), Query supplier, the PO's next step
 // (poNextStep), and Delete on a PO line that no bill charges for (item 88). Decisions go through
 // supplier_bill_line_resolve and po_line_delete; the bill check runs again on the server
@@ -31,17 +32,23 @@ function billLineState(l, bill) {
     return { red: false, label: 'Money only' };
   }
   if (l.resolution === 'denied') return { red: true, label: 'Denied' + (l.resolution_note ? ': ' + l.resolution_note : '') };
-  if (l.resolution === 'added') return { red: false, label: 'Added to PO' };
+  if (l.resolution === 'added' && l.po_line_item_id) return { red: false, label: 'Added to PO' };
   if (l.resolution === 'accepted') return { red: false, label: 'Accepted' + (l.resolution_note ? ': ' + l.resolution_note : '') };
   if (isNoCharge(l)) return { red: false, label: 'No charge' };
   if (l.flag_reason) return { red: true, label: l.flag_reason };
   if (l.po_line_item_id) return { red: false, label: 'On the PO' };
   return { red: true, label: 'Not on the PO' };
 }
+// A line a supplier's bill put on the PO (item 84): nobody accepts it, it shows red, "Not on the
+// original PO", until someone ticks it received. Only where the PO has lines of its own to differ
+// from: a PO filled entirely from its bills has no original.
+function poLineNotOriginal(po, li) {
+  return !!li && li.added_from_bill && !li.received && (po.purchase_order_line_items || []).some(x => !x.added_from_bill);
+}
 function renderPoBills(bills, po, role) {
   if (!bills || !bills.length) return '';
   const canDecide = isPricingRole(role);
-  const needsWord = (b) => b.kind !== 'credit_note' && (b.supplier_bill_line_items || []).some(l => billLineState(l, b).red);
+  const poLine = (id) => (po.purchase_order_line_items || []).find(x => x.id === id);
   const net = bills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const hasCredit = bills.some(b => b.kind === 'credit_note');
   return `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">
@@ -53,20 +60,21 @@ function renderPoBills(bills, po, role) {
           <span style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${billStatusChip(b)}
             ${b.file_path ? `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(b.file_path)}" title="${escapeHtml(b.file_name || '')}">Open ${b.kind === 'credit_note' ? 'credit note' : 'invoice'}</button>` : ''}
             ${(b.dockets || []).map(d => `<button type="button" class="secondary btn-sm po-bill-file-btn" data-path="${escapeHtml(d.file_path)}" title="${escapeHtml(d.file_name || '')}">Open docket</button>`).join('')}
-            ${canDecide && !b.paid && needsWord(b) ? `<button type="button" class="secondary btn-sm po-bill-query-btn" data-bill-id="${b.id}">${b.query_sent_at ? 'Email supplier again' : 'Query supplier'}</button>` : ''}
+            ${canDecide && !b.paid && b.kind !== 'credit_note' ? `<button type="button" class="secondary btn-sm po-bill-query-btn" data-bill-id="${b.id}">${b.query_sent_at ? 'Email supplier again' : 'Query supplier'}</button>` : ''}
             ${canDecide && !b.paid && b.kind !== 'credit_note' ? `<button type="button" class="secondary btn-sm po-bill-move-btn" data-bill-id="${b.id}" title="This bill is for another PO">Move</button>` : ''}
             ${canDecide && !b.paid ? `<button type="button" class="secondary btn-sm po-bill-remove-btn" data-bill-id="${b.id}" title="Not ours, paid by the customer, entered twice: take it out of TEops" style="color:var(--red);">Remove</button>` : ''}
           </span>
         </div>
         ${b.kind === 'credit_note' && (b.check_issues || []).some(i => i.kind === 'credit_exceeds') ? `<div style="font-size:12px; color:var(--red); margin:3px 0 0 8px;">${escapeHtml((b.check_issues || []).find(i => i.kind === 'credit_exceeds').text)}</div>` : ''}
         ${(b.supplier_bill_line_items || []).map(l => {
-          const st = billLineState(l, b);
-          const colour = st.red ? 'var(--red)' : 'var(--green)';
+          const fromBill = l.resolution === 'added' && b.kind !== 'credit_note' && poLineNotOriginal(po, poLine(l.po_line_item_id));
+          const st = fromBill ? { red: false, label: 'Not on the original PO, tick it when it arrives' } : billLineState(l, b);
+          const colour = st.red || fromBill ? 'var(--red)' : 'var(--green)';
           return `<div style="display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; align-items:center; font-size:12px; padding:3px 0 3px 8px; border-left:3px solid ${colour}; margin-top:3px;">
             <span>${escapeHtml(l.description)} &middot; ${poQty(Math.abs(Number(l.quantity) || 0))} &times; ${money(l.unit_cost)} <span style="color:${colour};">${escapeHtml(st.label)}</span></span>
             ${canDecide && !b.paid && b.kind !== 'credit_note' ? `<span style="display:flex; gap:4px; flex-wrap:wrap;">
-              ${st.red && l.resolution !== 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="accept" data-desc="${escapeHtml(l.description)}" data-on-po="${l.po_line_item_id ? '1' : ''}">Accept</button>
-                <button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="deny" data-desc="${escapeHtml(l.description)}" style="color:var(--red);">Deny charge</button>` : ''}
+              ${st.red && l.resolution !== 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="accept" data-desc="${escapeHtml(l.description)}" data-on-po="${l.po_line_item_id ? '1' : ''}">Accept</button>` : ''}
+              ${(st.red || fromBill) && l.resolution !== 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="deny" data-desc="${escapeHtml(l.description)}"${fromBill ? ' data-off-po="1"' : ''} style="color:var(--red);">Deny charge</button>` : ''}
               ${l.resolution === 'accepted' || l.resolution === 'denied' ? `<button type="button" class="secondary btn-sm po-bill-line-btn" data-line-id="${l.id}" data-action="undo" data-desc="${escapeHtml(l.description)}">Undo</button>` : ''}
             </span>` : ''}
           </div>`;
@@ -86,14 +94,14 @@ function openSupplierQueryEmail(billId) {
 }
 function wirePoBillButtons(containerEl, onComplete, bills) {
   containerEl.querySelectorAll('.po-bill-line-btn').forEach(btn => btn.addEventListener('click', async () => {
-    const { lineId, action, desc, onPo } = btn.dataset;
+    const { lineId, action, desc, onPo, offPo } = btn.dataset;
     let note = null;
     if (action === 'accept') {
       const freight = /(freight|delivery|deliver|shipping|postage|courier|handling|cartage)/i.test(desc);
       if (!confirm(onPo ? `Accept the higher price for "${desc}"? The PO line and the job's cost take the billed price.`
         : `Accept "${desc}"? It is added to the PO${freight ? ' and costed straight away' : ' and received the normal way'}.`)) return;
     } else if (action === 'deny') {
-      note = prompt(`Deny "${desc}". Why? (goes in the email to the supplier)`, '');
+      note = prompt(`Deny "${desc}"${offPo ? ' and take it off the PO' : ''}. Why? (goes in the email to the supplier)`, '');
       if (note === null) return;
     }
     btn.disabled = true;
@@ -135,7 +143,7 @@ function poNextStep(po, bills, { emailed, role } = {}) {
     // Reading the invoice is for pricing roles only (bug F9); anyone else adds the lines by hand.
     if (po.po_type === 'open' && po.supplier_id && isPricingRole(role)) return { key: 'invoice', label: "Upload the supplier's invoice", hint: 'An open PO takes its lines from the invoice.' };
     if (po.po_type === 'open' && po.supplier_id) return { key: 'add', label: 'Add the lines', hint: "What arrived, how many, and the unit cost. Admin, Finance or Sales can upload the supplier's invoice instead." };
-    return { key: 'add', label: 'Add the lines', hint: 'What is being ordered, how many, and the unit cost.' };
+    return { key: 'add', label: 'Add the lines', hint: po.supplier_id ? "What is being ordered, how many, and the unit cost. Or leave it: the supplier's bill fills them in." : 'What is being ordered, how many, and the unit cost.' };
   }
   if (po.supplier_id && !po.stock_source && !emailed && !c.received) return { key: 'email', label: 'Email the PO to the supplier', hint: 'Then tick each line below as it arrives.' };
   if (c.toReceive) return { key: 'receive', label: 'Receive what arrived', hint: 'Tick the lines that came in, then press Receive.' };
@@ -181,14 +189,24 @@ function poLineDeleteMenu(li, po, bills, role, onComplete) {
   if (!canDeletePoLine(li, po, bills, role)) return [];
   return [{ label: 'Delete this line', hint: li.received ? 'Takes it back off where it was received, then off the PO' : 'Not ordered after all, or typed in by mistake', danger: true, onPick: () => deletePoLine(li, po, bills, onComplete) }];
 }
-// Once the PO has a bill, every line the bill does not charge for is marked on the row, with
-// Delete beside it (the line typed in by hand that the bill came in under another name). A bill
-// saved with no lines read cannot say what it charges for, so nothing is marked while one is there.
-function markPoLinesNotOnBill(containerEl, po, bills, role, onComplete) {
+// Marks on the PO's own lines, for everyone who can see the PO:
+//   red "Not on the original PO" on a line a bill put there, until it is ticked received (item 84);
+//   "Not on a bill" with Delete beside it on every line no bill charges for, once the PO has a bill
+//   (item 88: the line typed in by hand that the bill came in under another name). A bill saved with
+//   no lines read cannot say what it charges for, so nothing is marked "Not on a bill" while one is there.
+function markPoLines(containerEl, po, bills, role, onComplete) {
+  const rowOf = (li) => [...containerEl.querySelectorAll('.po-line')].find(r => r.dataset.lineId === li.id);
+  const items = po.purchase_order_line_items || [];
+  items.filter(li => poLineNotOriginal(po, li)).forEach(li => {
+    const row = rowOf(li);
+    if (!row) return;
+    row.style.cssText += 'border-left:3px solid var(--red); padding-left:8px;';
+    row.querySelector('.po-line-desc').insertAdjacentHTML('beforeend', ' <span class="badge draft" style="color:var(--red); border-color:var(--red);" title="From the supplier\'s bill, not on the PO as ordered. Tick it when it arrives and it is received like any other line.">Not on the original PO</span>');
+  });
   const charged = (bills || []).filter(b => b.kind !== 'credit_note');
   if (!charged.length || charged.some(b => !(b.supplier_bill_line_items || []).length)) return;
-  (po.purchase_order_line_items || []).filter(li => canDeletePoLine(li, po, bills, role)).forEach(li => {
-    const row = [...containerEl.querySelectorAll('.po-line')].find(r => r.dataset.lineId === li.id);
+  items.filter(li => canDeletePoLine(li, po, bills, role)).forEach(li => {
+    const row = rowOf(li);
     if (!row) return;
     row.querySelector('.po-line-desc').insertAdjacentHTML('beforeend', ' <span class="badge draft" title="No bill on this PO charges for this line">Not on a bill</span>');
     const btn = document.createElement('button');
