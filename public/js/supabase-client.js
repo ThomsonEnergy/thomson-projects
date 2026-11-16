@@ -7056,7 +7056,7 @@ const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof
 const loadInvoiceActions = () => Promise.all([
   loadJsOnce('/js/email-compose.js?v=13', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
-  loadJsOnce('/js/invoice-actions.js?v=4', () => typeof openInvoicePanel === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=5', () => typeof openInvoicePanel === 'function'),
 ]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
