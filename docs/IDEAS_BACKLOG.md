@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 17 Nov 2026 (item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 17 Nov 2026 (item 93, NETCC Approved Seller on solar and battery proposals, planned and waiting on yes; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -27,6 +27,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 74 | Client portal and lead rewards: builders and repeat clients log in by email code and see their quotes, jobs, status, bookings, who is on site now, shared photos and documents, the Schedule of Rates, invoices, hours on do and charge jobs, request work (a draft quote with a due date, or a do and charge job with suggested dates), and message us on the job; 74b: a client refers a job (or asks for their own quote) from a personal link with no login, it shows in their portal as a quote, and they earn $80, $200 or $500 (paid or credited) when we win it, nothing under $1k, the reward hidden in the quote's cost; a quick referral (no inspection) earns a flat $50; every staff member gets the same form in the app and a link to send anyone, $50 through payroll for a job won from their link, 2% of the saving up to $500 when a job they quoted finishes under budget with a 5 star review (a one-tap review ask at clock-out, QR code or send, credited on the KPIs of whoever got the customer to do it and worth $5 to them, and sent by itself at Complete), every amount and shape in Settings, all of it a sales expense on the Xero P&L, a client document and a staff document explaining it | Owner's yes 11 Nov 2026; PR 1 (login, lists, job page, share ticks, invoices, work so far, usage log) LIVE 12 Nov 2026 (PR 377 straight into `main` on the owner's word, migration 20261201000000, spec A35); PR 2 and 3 to come | N | None (Twilio, item 7, for text messages later) |
 | 77 | Whole screen on every page (owner's rule 12 Nov 2026): existing pages move to edge-to-edge columns as they are touched, the job Summary tab first (Tasks far left, summary in the middle) | On `staging` 13 Nov 2026 (PR 431, every staff page), waiting for release | N | Item 76 is the first page |
 | 92 | Job plan (Gantt): every quote and job as a bar on the Schedule page with start, finish and on-site days, variations in orange, a crew load row, the wait time worked out for the quoter, dates confirmed with the client after approval, a drafted email when a job slips past the promised dates, order-by and not-booked flags | Planned 17 Nov 2026, waiting on yes | N (one table, RLS) | None |
+| 93 | NETCC Approved Seller on solar and battery proposals: a line with the logo on the cover, one sentence in the About panel with a link to the consumer code, the same line on the website | Planned 17 Nov 2026, waiting on yes | N | Owner sends the Approved Seller logo file from the NETCC portal (text only until then) |
 
 ## Owner to-dos left over from shipped items
 
@@ -166,6 +167,29 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 - [x] Buy a Mac now or later: later, only if debugging gets painful
 - [ ] Final app name (TEgo for now, can change any time)
 - [ ] Offline conflicts: last write wins, or flag for review?
+
+---
+
+## 93. NETCC Approved Seller on solar and battery proposals (planned 17 Nov 2026, waiting on yes)
+
+**Owner's ask (17 Nov 2026):** "Add NETCC approved seller to our solar and battery proposals."
+
+**What is true today:** Thomson Energy has been a New Energy Tech Approved Seller since 2 Nov 2026 (application NET-010695; the welcome email is in Gmail under the NETCC label). The proposal (`public/quote.html`) does not say so anywhere. The website has a commented-out line waiting for the approval (`index.html` line 798 in `website-updates-9e18ed`). The logo and certificate are in the Approved Seller portal (members.newenergytech.org.au), which a cloud session cannot open.
+
+**Plan:**
+
+1. **Cover.** Under the company block (legal name, ABN, address, licences), one line "New Energy Tech Approved Seller", with the Approved Seller logo beside it once the file is in the repo (`public/img/netcc-approved-seller.png`, squashed).
+2. **The project page, About panel.** One sentence after the About text: "Thomson Energy is a New Energy Tech Approved Seller: a signatory to the New Energy Tech Consumer Code (NETCC), the consumer protection code for solar and batteries authorised by the ACCC." The words "New Energy Tech Consumer Code" link to newenergytech.org.au.
+3. **By itself.** Shown on every proposal whose template is Solar or Battery (`projects.proposal_template`), on screen and in the PDF, including quotes already sent. Not on new build, quick estimate or other templates. No setting, no tick.
+4. **Website.** The waiting line goes live in the credentials list: "Consumer code: New Energy Tech Approved Seller, signatory to the New Energy Tech Consumer Code (NETCC)". `python3 build.py`, push to `main` (that deploys), then `python3 scripts/indexnow.py`.
+
+**Not in this build:** the NETCC wording rules for the quote itself (already covered by the compliance checklist, `netlify/functions/_shared/solar-compliance-rules.js`); the updated NETCC from 1 Dec 2026 (a separate check of the proposal against the new code, worth its own chat before that date).
+
+Done means (staging, admin@staging.test): (1) open a Solar quote's proposal: the cover shows "New Energy Tech Approved Seller" under the licence line. (2) The project page's About panel ends with the NETCC sentence and the link opens newenergytech.org.au. (3) Download PDF: both show, nothing pushed onto a new page (`node scripts/proposal-fits.js` passes). (4) A new build quote's proposal shows neither. (5) thomsonenergy.com.au credentials list shows the Consumer code line.
+
+Touches: `public/quote.html`, `public/img/netcc-approved-seller.png` (new, when supplied), `scripts/fixtures/proposal-solar-battery.json` (only if the fit check needs it), `docs/PROJECT_SPEC.md` (A16); website repo: `index.html`.
+
+Overlaps: items 58 (Pylon layout on the "Your system" page) and 92 (wait time printed on the proposal) will also change `public/quote.html`, both waiting on yes with no branch building; different parts of the page.
 
 ---
 
