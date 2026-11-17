@@ -1463,7 +1463,7 @@ Overlaps: items 58 (Pylon layout on the "Your system" page) and 92 (wait time pr
 
 **As built (17 Nov 2026):** the owner's yes added "allow me to upload the NETCC logo from Settings". The logo could not be found (not in Gmail, the portal and the NETCC site are closed to a cloud session), so Settings > Company Details > Proposal pictures has a third box, **NETCC Approved Seller logo**; the picture is kept in `company_settings.proposal_cover_photos` under the key `netcc_logo` (no migration: that map already reaches the proposal through `get_public_company_settings`). No logo file ships with the site. Without a logo the cover says it in words only.
 
-## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (built 17 Nov 2026, on staging; spec A36)
+## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (built 17 Nov 2026, LIVE 18 Nov 2026; spec A36)
 
 **Building in: `claude/gantt-project-scheduling-gxrxgi`** (owner's "Build the client portal stuff too", 17 Nov 2026), one PR into `staging`. Touches the portal files that item 74 point 9a also lists: build 9a after this merges, or in this chat.
 
