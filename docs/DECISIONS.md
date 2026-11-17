@@ -2,6 +2,9 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 18 Nov 2026
+
+- LIVE 18 Nov 2026 (owner: "Yes build it, live now, all functions to do with gantt or client portal build now and straight to main"): **item 74 point 9a, clients ask for a date in the portal**; booking it and telling the client closes the ask by itself. Migration 20261208000000 on production and staging. Next in this chat, each straight to `main` as it is finished: item 74 PR 2 (requests for work, messages on the Feed tab, the People card, the portal link in client emails), then PR 3 (referral link and lead rewards; money and payroll, so a backup before its migration). Detail: `docs/PROJECT_SPEC.md` A35.
 ## 17 Nov 2026
 
 - LIVE 18 Nov 2026 (owner's "Build the client portal stuff too", 17 Nov 2026, then "Yes, live now" on 18 Nov; PR 490 into `staging`, then straight to `main`): **item 92, the job plan (Gantt)**. Schedule > Plan shows every job and sent quote as bars with variations in orange and a crew load row; the quote's When card works out days on site and the wait to tell the client (printed on the proposal); approval places the job and asks the quoter to confirm the dates; a moved job prompts a drafted email; the 7am run flags gear to order and people to book; clients see their confirmed dates in the portal. Migration 20261207000000 on production and staging. Owner to do now: tick who is on the tools in Plan settings. Detail: `docs/PROJECT_SPEC.md` A36.
