@@ -243,16 +243,19 @@
     } catch { return file; }
   }
   async function readFiles(input) {
-    const list = [...(input.files || [])].slice(0, 5);
+    if ((input.files || []).length > 5) throw new Error('Up to 5 files, please.');
+    const list = [...(input.files || [])];
     const out = [];
+    let total = 0;
     for (const f of list) {
       const small = await shrink(f);
-      if (small.size > 4 * 1024 * 1024) throw new Error(`${f.name} is too big (4 MB each at most).`);
+      total += small.size;
+      if (total > 4 * 1024 * 1024) throw new Error('The files come to more than 4 MB. Send fewer, or smaller ones.');
       out.push({ name: f.name, type: small.type || f.type, data: await fileToB64(small) });
     }
     return out;
   }
-  const fileField = (id) => `<label class="pl-muted" style="display:block; margin-top:8px;">Photos or plans (optional, up to 5)</label><input type="file" id="${id}" multiple accept="image/*,application/pdf" style="width:100%;" />`;
+  const fileField = (id) => `<label class="pl-muted" style="display:block; margin-top:8px;">Photos or plans (optional, up to 5, 4 MB in all)</label><input type="file" id="${id}" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" style="width:100%;" />`;
 
   // ----- request work (item 74 point 9) -----
   function requestForm(opts) {
@@ -432,9 +435,9 @@
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
       ${d.variations.length ? card('Variations', d.variations.map((v) => `
           <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign', 'opened_variation', d.id, v.number != null ? `Variation ${v.number}` : '') : ''}</div>`).join('')) : ''}
-      ${card('Messages', `${(d.messages || []).length ? `<div id="pl-msgs" style="max-height:340px; overflow-y:auto;">${d.messages.map((m) => `<div style="display:flex; ${m.mine ? 'justify-content:flex-end;' : ''} margin:6px 0;"><div style="max-width:85%; padding:8px 12px; border-radius:10px; background:${m.mine ? '#e6e3f7' : 'var(--surface-2)'};"><div class="pl-muted" style="font-size:11px;">${esc(m.mine ? 'You' : m.who)}, ${esc(m.when)}</div><div style="white-space:pre-wrap;">${esc(m.body)}</div></div></div>`).join('')}</div>` : '<p class="pl-muted" style="margin:0 0 6px;">Questions about this job? Write to us here.</p>'}
+      ${d.messages ? card('Messages', `${(d.messages || []).length ? `<div id="pl-msgs" style="max-height:340px; overflow-y:auto;">${d.messages.map((m) => `<div style="display:flex; ${m.mine ? 'justify-content:flex-end;' : ''} margin:6px 0;"><div style="max-width:85%; padding:8px 12px; border-radius:10px; background:${m.mine ? '#e6e3f7' : 'var(--surface-2)'};"><div class="pl-muted" style="font-size:11px;">${esc(m.mine ? 'You' : m.who)}, ${esc(m.when)}</div><div style="white-space:pre-wrap;">${esc(m.body)}</div></div></div>`).join('')}</div>` : '<p class="pl-muted" style="margin:0 0 6px;">Questions about this job? Write to us here.</p>'}
         <textarea id="pl-msg-body" rows="2" maxlength="4000" placeholder="Write a message..." style="width:100%; font-size:16px; margin-top:6px;"></textarea>
-        <div id="pl-msg-err"></div><button type="button" id="pl-msg-send" style="margin-top:6px;">Send</button>`)}
+        <div id="pl-msg-err"></div><button type="button" id="pl-msg-send" style="margin-top:6px;">Send</button>`) : ''}
       ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
       ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
@@ -449,7 +452,8 @@
     wireAsk(d);
     const msgs = document.getElementById('pl-msgs');
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
-    document.getElementById('pl-msg-send').addEventListener('click', async (e) => {
+    const sendBtn = document.getElementById('pl-msg-send');
+    if (sendBtn) sendBtn.addEventListener('click', async (e) => {
       const text = document.getElementById('pl-msg-body').value.trim();
       if (!text) return;
       e.target.disabled = true;

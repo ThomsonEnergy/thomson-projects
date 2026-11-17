@@ -68,7 +68,7 @@ async function portalLine(admin, email) {
   const S = require('./portal-session');
   try {
     const scope = await S.portalScope(admin, S.normEmail(email), { staffCheck: false });
-    if (!scope.canLogIn || scope.staffUser) return '';
+    if (!scope.canLogIn) return ''; // staff never get client emails from these paths, so no staff lookup here
   } catch (e) { return ''; }
   return `\n\nSee your jobs, bookings, photos and invoices any time in your portal: ${publicBaseUrl()}/portal.html`;
 }

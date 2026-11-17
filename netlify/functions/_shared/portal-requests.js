@@ -22,7 +22,7 @@ class Refused extends Error { constructor(msg) { super(msg); this.statusCode = 4
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_FILES = 5;
-const MAX_FILE_BYTES = 4 * 1024 * 1024; // the function body limit is 6 MB in all
+const MAX_TOTAL_BYTES = 4 * 1024 * 1024; // all files together: the function body limit is 6 MB, and base64 adds a third
 const OK_MIME = /^(image\/(jpeg|png|webp|heic|heif)|application\/pdf)$/;
 const clean = (s, n) => String(s || '').trim().slice(0, n);
 
@@ -64,15 +64,27 @@ async function requestOptions(admin, scope) {
 }
 
 // files: [{ name, type, data (base64, no prefix) }]. Saved under the project, visible to the client.
-async function saveClientFiles(admin, projectId, files, email) {
-  const list = Array.isArray(files) ? files.slice(0, MAX_FILES) : [];
-  const saved = [];
-  for (const f of list) {
+// Every file is checked before anything is written (a bad one refuses the whole request, so a
+// refused request never leaves a project or a file behind). Returns the decoded files.
+function checkFiles(files) {
+  const list = Array.isArray(files) ? files : [];
+  if (list.length > MAX_FILES) throw new Refused(`Up to ${MAX_FILES} files, please.`);
+  let total = 0;
+  return list.map((f) => {
     const type = String(f.type || '').toLowerCase();
     if (!OK_MIME.test(type)) throw new Refused('Photos (JPG, PNG, HEIC) and PDFs only, please.');
     const bytes = Buffer.from(String(f.data || ''), 'base64');
-    if (!bytes.length || bytes.length > MAX_FILE_BYTES) throw new Refused('Each file must be under 4 MB.');
-    const name = clean(f.name, 120).replace(/[^a-zA-Z0-9._ -]/g, '_') || 'file';
+    total += bytes.length;
+    if (!bytes.length) throw new Refused('One of the files is empty.');
+    if (total > MAX_TOTAL_BYTES) throw new Refused('The files come to more than 4 MB. Send fewer, or smaller ones.');
+    return { type, bytes, name: clean(f.name, 120).replace(/[^a-zA-Z0-9._ -]/g, '_') || 'file' };
+  });
+}
+
+// checked: the result of checkFiles
+async function saveClientFiles(admin, projectId, checked, email) {
+  const saved = [];
+  for (const { type, bytes, name } of checked) {
     const path = `${projectId}/from-client/${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${name.replace(/\s+/g, '_')}`;
     const { error: upErr } = await admin.storage.from('project-documents').upload(path, bytes, { contentType: type, upsert: false });
     if (upErr) throw upErr;
@@ -92,6 +104,7 @@ async function createRequest(admin, scope, input) {
   if (need.length < 5) throw new Refused('Tell us what you need.');
   const kind = input.kind === 'book' ? 'book' : 'quote';
   const today = sydneyToday();
+  const checked = checkFiles(input.files);
 
   // the site: one of theirs, or a new address saved as a site
   let site = null;
@@ -102,7 +115,10 @@ async function createRequest(admin, scope, input) {
   } else {
     const address = clean(input.address, 300);
     if (address.length < 6) throw new Refused('Type the site address.');
-    const { data: same } = await admin.from('client_sites').select('id, address').eq('client_id', client.id).ilike('address', address.replace(/[\\%_]/g, '\\$&')).maybeSingle();
+    // the same match as the unique index (lower case, trimmed)
+    const norm = (a) => String(a || '').trim().toLowerCase();
+    const { data: sites } = await admin.from('client_sites').select('id, address').eq('client_id', client.id);
+    const same = (sites || []).find((x) => norm(x.address) === norm(address));
     if (same) site = same;
     else {
       const { data: made, error } = await admin.from('client_sites').insert({ client_id: client.id, address, created_by: null }).select('id, address').single();
@@ -144,7 +160,7 @@ async function createRequest(admin, scope, input) {
     if (ccErr) throw ccErr;
   }
 
-  const files = await saveClientFiles(admin, project.id, input.files, scope.email);
+  const files = await saveClientFiles(admin, project.id, checked, scope.email);
   const ref = jobRef(project);
   const { data: madeRow } = await admin.from('projects').select('client_suggested_dates').eq('id', project.id).single();
   const what = kind === 'quote' ? `a quote, needed by ${fmtDay(input.dueDate)}` : `work booked in on ${((madeRow && madeRow.client_suggested_dates) || []).map(fmtDay).join(' or ')}`;
@@ -161,7 +177,7 @@ async function createRequest(admin, scope, input) {
 async function addToRequest(admin, scope, p, input) {
   if (p.job_number || p.sent_at || !p.portal_requested_at) throw new Refused('You can add to a request until we send the quote.');
   const more = clean(input.note, 4000);
-  const files = await saveClientFiles(admin, p.id, input.files, scope.email);
+  const files = await saveClientFiles(admin, p.id, checkFiles(input.files), scope.email);
   if (!more && !files.length) throw new Refused('Add a note or a file.');
   if (more) {
     const { data: cur } = await admin.from('projects').select('notes').eq('id', p.id).single();
@@ -174,6 +190,8 @@ async function addToRequest(admin, scope, p, input) {
 }
 
 async function postClientMessage(admin, scope, p, body) {
+  // the thread is between us and the client (it talks about prices and invoices), never a job contact
+  if (!p.money) throw new Refused('Messages are for the client on this job. Please call us instead.');
   const text = clean(body, 4000);
   if (!text) throw new Refused('Write a message first.');
   const { error } = await admin.from('job_client_messages').insert({ project_id: p.id, from_email: scope.email, body: text });
@@ -183,6 +201,11 @@ async function postClientMessage(admin, scope, p, body) {
 }
 
 // ----- the People card: a client's main email lets others in -----
+async function contactRows(admin, clientId, email) {
+  const { data } = await admin.from('client_contacts').select('id, email').eq('client_id', clientId).not('email', 'is', null);
+  const em = String(email).trim().toLowerCase();
+  return (data || []).filter((x) => String(x.email).trim().toLowerCase() === em);
+}
 const mainClients = (scope) => scope.clients.filter((c) => c.main);
 async function peopleFor(admin, scope) {
   const out = [];
@@ -198,8 +221,11 @@ async function addPerson(admin, scope, { clientId, name, email }) {
   if (!c) throw new Refused('Only the main email on the account can add people.');
   const em = String(email || '').trim().toLowerCase();
   if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(em)) throw new Refused('That is not an email address.');
-  const { data: have } = await admin.from('client_contacts').select('id').eq('client_id', c.id).ilike('email', em.replace(/[\\%_]/g, '\\$&')).maybeSingle();
-  if (have) await admin.from('client_contacts').update({ portal_access: true }).eq('id', have.id);
+  // a staff login is never made a client contact (checked before anything is written)
+  const { portalScope } = require('./portal-session');
+  if ((await portalScope(admin, em)).staffUser) throw new Refused('That is a Thomson Energy staff email, not one of yours.');
+  const same = await contactRows(admin, c.id, em);
+  if (same.length) await admin.from('client_contacts').update({ portal_access: true }).in('id', same.map((x) => x.id));
   else {
     const { error } = await admin.from('client_contacts').insert({ client_id: c.id, contact_type: 'job', name: clean(name, 120) || null, email: em, portal_access: true });
     if (error) throw error;
@@ -212,7 +238,9 @@ async function removePerson(admin, scope, { clientId, contactId }) {
   if (!c) throw new Refused('Only the main email on the account can remove people.');
   const { data: row } = await admin.from('client_contacts').select('id, email').eq('id', contactId).eq('client_id', c.id).maybeSingle();
   if (!row) throw new Refused('That person is not on your account.');
-  await admin.from('client_contacts').update({ portal_access: false }).eq('id', row.id);
+  // every row with that email on this client (staff sometimes save one person as two contacts)
+  const same = row.email ? await contactRows(admin, c.id, row.email) : [row];
+  await admin.from('client_contacts').update({ portal_access: false }).in('id', same.map((x) => x.id));
   // no session to end: every portal call works the scope out fresh, so this client is gone from it at once
   await admin.from('activity_log').insert({ entity_type: 'client', entity_id: c.id, action: 'portal_person_removed', description: `${scope.email} took ${row.email}'s portal login away` });
 }

@@ -34,21 +34,23 @@ exports.handler = async (event) => {
     if (body.action === 'reply') {
       const text = String(body.body || '').trim().slice(0, 4000);
       if (!text) return json(400, { ok: false, error: 'Write a message first.' });
-      const { data: msg, error } = await admin.from('job_client_messages').insert({ project_id: project.id, author_id: user.id, body: text }).select('id').single();
-      if (error) throw error;
+      // the email goes first: if it fails nothing is saved, so trying again never posts the message twice
       let emailed = false;
+      let warning = null;
       if (body.email) {
         const rec = await E.recipientFor(admin, project);
-        if (!rec.to) return json(200, { ok: true, emailed: false, warning: 'Saved in the portal, but there is no client email on this job, so no email went.' });
-        await sendAsUser(admin, {
-          userId: user.id, to: rec.to, subject: `${E.jobTitle(project)}: a message from us`,
-          bodyText: `Hi ${rec.first},\n\n${text}${await portalLine(admin, rec.to)}`, tagProjectId: project.id, tagKind: 'client',
-        });
-        await admin.from('job_client_messages').update({ emailed_at: new Date().toISOString() }).eq('id', msg.id);
-        emailed = true;
+        if (rec.to) {
+          await sendAsUser(admin, {
+            userId: user.id, to: rec.to, subject: `${E.jobTitle(project)}: a message from us`,
+            bodyText: `Hi ${rec.first},\n\n${text}${await portalLine(admin, rec.to)}`, tagProjectId: project.id, tagKind: 'client',
+          });
+          emailed = true;
+        } else warning = 'Saved in the portal, but there is no client email on this job, so no email went.';
       }
+      const { error } = await admin.from('job_client_messages').insert({ project_id: project.id, author_id: user.id, body: text, emailed_at: emailed ? new Date().toISOString() : null });
+      if (error) throw error;
       await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'client_message_reply', changed_by: user.id, description: `${(me && me.full_name) || 'Someone'} wrote to the client${emailed ? ' (emailed)' : ''}: "${text.slice(0, 200)}"` });
-      return json(200, { ok: true, emailed });
+      return json(200, { ok: true, emailed, warning });
     }
 
     if (body.action === 'extend') {

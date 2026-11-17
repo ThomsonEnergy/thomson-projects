@@ -12,7 +12,8 @@
 //   message       { projectId, body }          a message on the job's thread (the Feed tab)
 //   add_person    { clientId, name, email }    the People card, a client's main email only: a portal
 //   remove_person { clientId, contactId }      login for someone else at their company, or take it away
-// 5 asks or requests an hour per login; 20 messages an hour (counted from the usage log).
+// Per login an hour (counted from the usage log, each try once, refused tries too): 5 requests,
+// 10 add_more, 10 people changes, 20 messages; and 5 date asks per device.
 // Every call checks the session and that the job is in the login's scope before anything is
 // written. Writes portal_booking_requests, activity_log, notifications (create_notification) and
 // the usage row (portal_events).
@@ -52,16 +53,31 @@ exports.handler = async (event) => {
   try {
     // the actions that are not about one existing job
     const since = new Date(Date.now() - 3600 * 1000).toISOString();
-    const hourly = async (actions) => { const { count } = await admin.from('portal_events').select('id', { count: 'exact', head: true }).eq('email', scope.email).in('action', actions).gte('created_at', since); return count || 0; };
+    // the usage log writes one row per client in the scope: count the first client's rows (or the
+    // no-client rows of a job contact) so each try counts once. A try is logged before it runs, so a
+    // refused or failed one still counts.
+    const firstClient = scope.clients[0] ? scope.clients[0].id : null;
+    const hourly = async (actions) => {
+      let q = admin.from('portal_events').select('id', { count: 'exact', head: true }).eq('email', scope.email).in('action', actions).gte('created_at', since);
+      q = firstClient ? q.eq('client_id', firstClient) : q.is('client_id', null);
+      const { count } = await q;
+      return count || 0;
+    };
+    const limited = async (action, max, detail) => {
+      if ((await hourly([action])) >= max) return true;
+      await log(action, detail || {});
+      return false;
+    };
+    const TOO_MANY = S.json(429, { ok: false, error: 'That is a lot in an hour. Please call us instead.' });
     if (body.action === 'request') {
-      if ((await hourly(['portal_request'])) >= 5) return S.json(429, { ok: false, error: 'That is a lot of requests in an hour. Please call us instead.' });
+      if (await limited('portal_request', 5, { detail: String(body.kind || '') })) return TOO_MANY;
       const made = await R.createRequest(admin, scope, body);
-      await log('portal_request', { projectId: made.id, detail: made.ref });
       return S.json(200, { ok: true, ...made });
     }
     if (body.action === 'add_person' || body.action === 'remove_person') {
+      const action = body.action === 'add_person' ? 'added_person' : 'removed_person';
+      if (await limited(action, 10, { detail: String(body.email || body.contactId || '').slice(0, 80) })) return TOO_MANY;
       if (body.action === 'add_person') await R.addPerson(admin, scope, body); else await R.removePerson(admin, scope, body);
-      await log(body.action === 'add_person' ? 'added_person' : 'removed_person', { detail: String(body.email || body.contactId || '').slice(0, 80) });
       return S.json(200, { ok: true, people: await R.peopleFor(admin, scope) });
     }
 
@@ -71,14 +87,13 @@ exports.handler = async (event) => {
     if (!p) return S.json(404, { ok: false, error: 'That job is not on your account.' });
     if (body.action === 'add_more') {
       if (!p.money) return S.json(403, { ok: false, error: 'Only the client can add to a quote request.' });
+      if (await limited('portal_request_more', 10, { projectId: p.id, detail: jobRef(p) })) return TOO_MANY;
       const r = await R.addToRequest(admin, scope, p, body);
-      await log('portal_request_more', { projectId: p.id, detail: jobRef(p) });
       return S.json(200, { ok: true, ...r });
     }
     if (body.action === 'message') {
-      if ((await hourly(['portal_message'])) >= 20) return S.json(429, { ok: false, error: 'That is a lot of messages in an hour. Please call us instead.' });
+      if (await limited('portal_message', 20, { projectId: p.id, detail: jobRef(p) })) return TOO_MANY;
       await R.postClientMessage(admin, scope, p, body.body);
-      await log('portal_message', { projectId: p.id, detail: jobRef(p) });
       return S.json(200, { ok: true });
     }
     if (!p.job_number) return S.json(404, { ok: false, error: 'That job is not on your account.' });

@@ -261,8 +261,9 @@ async function portalProject(admin, p) {
   const { data: askRow } = p.job_number ? await admin.from('portal_booking_requests').select('ask_date, ask_time, note, created_at')
     .eq('project_id', p.id).is('answered_at', null).is('withdrawn_at', null).maybeSingle() : { data: null };
   // the job's thread with us (item 74 point 8), oldest first; staff first names only
-  const { data: msgRows } = await admin.from('job_client_messages').select('from_email, body, created_at, profiles(full_name)').eq('project_id', p.id).order('created_at').limit(200);
-  const messages = (msgRows || []).map((m) => ({ mine: !!m.from_email, who: m.from_email ? m.from_email : (staffFirst(m.profiles && m.profiles.full_name) || 'Thomson Energy'), body: m.body, when: `${fmtDay(localDateKey(m.created_at))}, ${timeText(m.created_at)}` }));
+  // only to the client (money scope): the thread talks about prices and invoices, so never to a job contact
+  const { data: msgRows } = !p.money ? { data: [] } : await admin.from('job_client_messages').select('from_email, body, created_at, profiles(full_name)').eq('project_id', p.id).order('created_at').limit(200);
+  const messages = !p.money ? null : (msgRows || []).map((m) => ({ mine: !!m.from_email, who: m.from_email ? m.from_email : (staffFirst(m.profiles && m.profiles.full_name) || 'Thomson Energy'), body: m.body, when: `${fmtDay(localDateKey(m.created_at))}, ${timeText(m.created_at)}` }));
   const request = p.portal_requested_at ? { dueDate: p.client_due_date ? fmtDay(p.client_due_date) : null, moved: p.client_due_note || null, canAdd: !!p.money && !p.job_number && !p.sent_at } : null;
   const ask = askRow ? { date: askRow.ask_date, day: fmtDay(askRow.ask_date), time: askRow.ask_time ? fmtTime(askRow.ask_time) : '', timeValue: askRow.ask_time ? String(askRow.ask_time).slice(0, 5) : '', note: askRow.note || '' } : null;
   const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
