@@ -209,7 +209,8 @@
     const d = await call('portal-read', { action: 'overview' });
     header(d.email);
     const names = d.clients.map((c) => c.name);
-    main.innerHTML = `
+    // whole screen (owner's rule): three columns that scroll on their own on a laptop, one on a phone
+    main.innerHTML = `<div class="pl-cols"><div class="pl-col">
       ${names.length ? `<p class="pl-muted" style="margin:4px 0 0;">${esc(names.join(', '))}</p>` : ''}
       ${d.needsYou.length ? `
         <h2 class="pl-h">Needs you</h2>
@@ -217,14 +218,17 @@
           <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action, n.kind, n.projectId, n.detail) : ''}</div>`).join('')}</div>` : ''}
       ${d.plan && d.plan.length ? card('Your dates', planChart(d.plan.map((j) => ({ label: `<a href="/portal.html?job=${esc(j.id)}"><strong>${esc(j.ref)}</strong> ${esc(j.name)}</a>`, bars: j.bars, booked: j.booked, sub: `${esc(j.startText)}${j.start === j.end ? '' : ` to ${esc(j.endText)}`}` })))) : ''}
       ${d.request ? '<p style="margin:12px 0 0;"><button type="button" id="pl-req-open">Request work</button></p><div id="pl-req"></div>' : ''}
+      ${d.people && d.people.length ? `<h2 class="pl-h">People</h2><div class="pl-card" id="pl-people">${peopleHtml(d.people)}</div>` : ''}
+      <p class="pl-muted" style="margin-top:16px;">Need something? Call ${esc(d.company.name)} on <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>.</p>
+      </div><div class="pl-col">
       <h2 class="pl-h">Jobs</h2>
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
+      </div><div class="pl-col">
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
       ${(d.referrals || []).length ? `<h3 class="pl-muted" style="margin:12px 0 4px; font-size:13px;">Jobs you sent us</h3>${d.referrals.map((r) => `<div class="pl-row ${r.open ? '' : 'done'}" style="cursor:default;">${r.ref ? `<div class="ref">${esc(r.ref)}</div>` : ''}<div class="name" style="font-size:15px;">${esc(r.name)}</div><div class="site">${esc(r.when)}</div><div class="status"><span class="pl-status">${esc(r.status)}</span></div></div>`).join('')}` : ''}
       ${d.referLink ? `<p style="margin:10px 0 0;"><a class="secondary pl-btn" href="${esc(d.referLink)}" target="_blank" rel="noopener">Send us a job (your referral link)</a></p><p class="pl-muted" style="margin:4px 0 0;">Save it to your phone's home screen, or pass it to your team.</p>` : ''}
-      ${d.people && d.people.length ? `<h2 class="pl-h">People</h2><div class="pl-card" id="pl-people">${peopleHtml(d.people)}</div>` : ''}
-      <p class="pl-muted" style="margin-top:24px;">Need something? Call ${esc(d.company.name)} on <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>.</p>`;
+      </div></div>`;
     const reqBtn = document.getElementById('pl-req-open');
     if (reqBtn) reqBtn.addEventListener('click', () => { reqBtn.style.display = 'none'; requestForm(d.request); });
     if (d.people && d.people.length) wirePeople(d.people);
@@ -417,7 +421,7 @@
     const photoTile = (p) => `<div>${p.video
       ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>`
       : `<img src="${esc(p.thumb || p.url)}" data-i="${pictures.indexOf(p)}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`;
-    main.innerHTML = `
+    main.innerHTML = `<div class="pl-cols"><div class="pl-col">
       <a class="pl-back" href="/portal.html">&larr; All your jobs</a>
       <div class="pl-card">
         <div class="ref" style="font-size:13px; color:var(--muted); font-weight:700;">${esc(d.ref)}</div>
@@ -427,19 +431,21 @@
         ${factHtml('Your contact', contact)}
         ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote', 'opened_quote', d.id, d.ref)}</p>` : ''}
       </div>
-      ${d.request && d.request.canAdd ? `<div class="pl-card"><strong>Your request</strong>${d.request.dueDate ? `<br><span class="pl-muted">We are working to ${esc(d.request.dueDate)}${d.request.moved ? `. We moved it: ${esc(d.request.moved)}` : ''}.</span>` : ''}
-        <textarea id="pl-more-note" rows="2" maxlength="4000" placeholder="Anything to add?" style="width:100%; font-size:16px; margin-top:8px;"></textarea>${fileField('pl-more-files')}
-        <div id="pl-more-msg"></div><button type="button" id="pl-more-send" style="margin-top:8px;">Add to my request</button></div>` : ''}
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
-      ${d.kind === 'job' && d.plan ? card('Dates', d.plan.pending ? '<span class="pl-muted">Dates to be confirmed. We will email you the dates.</span>' : `${planChart([{ bars: d.plan.bars, booked: d.plan.booked }])}<div class="pl-muted" style="margin-top:6px;">${barsText(d.plan)}</div>`) : ''}
       ${d.kind === 'job' ? card('Bookings', `${askHtml(d)}
           ${d.bookings.length ? d.bookings.map((b) => `<div style="margin:4px 0;">${bookingLine(b)}</div>`).join('') : `<span class="pl-muted">Nothing booked yet. We will let you know when it is.</span>`}
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
+      ${d.kind === 'job' && d.plan ? card('Dates', d.plan.pending ? '<span class="pl-muted">Dates to be confirmed. We will email you the dates.</span>' : `${planChart([{ bars: d.plan.bars, booked: d.plan.booked }])}<div class="pl-muted" style="margin-top:6px;">${barsText(d.plan)}</div>`) : ''}
+      ${d.request && d.request.canAdd ? `<div class="pl-card"><strong>Your request</strong>${d.request.dueDate ? `<br><span class="pl-muted">We are working to ${esc(d.request.dueDate)}${d.request.moved ? `. We moved it: ${esc(d.request.moved)}` : ''}.</span>` : ''}
+        <textarea id="pl-more-note" rows="2" maxlength="4000" placeholder="Anything to add?" style="width:100%; font-size:16px; margin-top:8px;"></textarea>${fileField('pl-more-files')}
+        <div id="pl-more-msg"></div><button type="button" id="pl-more-send" style="margin-top:8px;">Add to my request</button></div>` : ''}
+      </div><div class="pl-col pl-col-msgs">
       ${d.variations.length ? card('Variations', d.variations.map((v) => `
           <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign', 'opened_variation', d.id, v.number != null ? `Variation ${v.number}` : '') : ''}</div>`).join('')) : ''}
       ${d.messages ? card('Messages', `${(d.messages || []).length ? `<div id="pl-msgs" style="max-height:340px; overflow-y:auto;">${d.messages.map((m) => `<div style="display:flex; ${m.mine ? 'justify-content:flex-end;' : ''} margin:6px 0;"><div style="max-width:85%; padding:8px 12px; border-radius:10px; background:${m.mine ? '#e6e3f7' : 'var(--surface-2)'};"><div class="pl-muted" style="font-size:11px;">${esc(m.mine ? 'You' : m.who)}, ${esc(m.when)}</div><div style="white-space:pre-wrap;">${esc(m.body)}</div></div></div>`).join('')}</div>` : '<p class="pl-muted" style="margin:0 0 6px;">Questions about this job? Write to us here.</p>'}
         <textarea id="pl-msg-body" rows="2" maxlength="4000" placeholder="Write a message..." style="width:100%; font-size:16px; margin-top:6px;"></textarea>
         <div id="pl-msg-err"></div><button type="button" id="pl-msg-send" style="margin-top:6px;">Send</button>`) : ''}
+      </div><div class="pl-col">
       ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
       ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
@@ -449,7 +455,8 @@
       ${card('Photos', d.photos.length ? `<div class="pl-grid">${d.photos.map(photoTile).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`)}
       ${card('Documents', `
         ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener" data-open="opened_document" data-project="${esc(d.id)}" data-detail="${esc(f.name)}">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
-        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener" data-open="opened_rates" data-project="${esc(d.id)}">Open</a></div>` : ''}`)}`;
+        ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener" data-open="opened_rates" data-project="${esc(d.id)}">Open</a></div>` : ''}`)}
+      </div></div>`;
     main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, Number(img.dataset.i))));
     wireAsk(d);
     const msgs = document.getElementById('pl-msgs');
