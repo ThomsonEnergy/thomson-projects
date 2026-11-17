@@ -85,7 +85,7 @@
     }
 
     function sourceLabel(source) {
-      return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form' }[source] || source;
+      return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form', portal_referral: 'Referral link' }[source] || source;
     }
 
     // A value inside a PostgREST filter (.or('email.eq.…')): quoted, so a comma, bracket or
@@ -104,6 +104,9 @@
       roof_type: 'Roof type', system_size_kw: 'System size (kW)', estimated_annual_bill: 'Estimated annual bill',
       estimated_savings_yearly: 'Estimated yearly savings', battery_interest: 'Interested in a battery',
       package_name: 'Package', package_price: 'Price', brand_name: 'Brand', product_type: 'Product type',
+      // the referral link (item 74b)
+      referred_by: 'Referred by', job_type: 'Job type', what_they_need: 'What they need', with_battery: 'Battery as well', phases: 'Supply',
+      existing_pv: 'Solar there now', backup_needs: 'Keep on in a blackout', board_age: 'Switchboard age', board_reason: 'Why now', fault: 'Fault', urgency: 'Urgency', reno_scope: 'Renovation', reno_when: 'When',
     };
     function detailsQandAHtml(details) {
       if (!details || !Object.keys(details).length) return `<p class="subtitle">No further details captured.</p>`;
@@ -160,7 +163,7 @@
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
               <h2 style="margin:0;">${escapeHtml(lead.name || '(no name given)')}</h2>
-              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))} &middot; ${timeAgo(lead.created_at)}</p>
+              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))}${lead.details && lead.details.referred_by ? ` from ${escapeHtml(lead.details.referred_by)}` : ''}${lead.referral_kind ? ` (${escapeHtml(lead.referral_kind)})` : ''}${lead.already_client ? ' &middot; <span class="badge draft">already a client, no reward</span>' : ''} &middot; ${timeAgo(lead.created_at)}</p>
             </div>
             <button type="button" class="secondary" id="ld-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
@@ -318,6 +321,7 @@
           pipeline_stage: 'job_booked',
           status: 'in_progress',
           lead_id: lead.id,
+          referrer_client_id: lead.already_client ? null : (lead.referrer_client_id || null), // item 74b
         }).select('id, name, job_number').single();
         if (error) throw error;
 

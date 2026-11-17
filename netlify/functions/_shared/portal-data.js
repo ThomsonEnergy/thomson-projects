@@ -31,6 +31,7 @@ const { localDateKey } = require('./compute-labour-cost');
 const { moneyText } = require('./invoice-events');
 const { renderedImageUrl } = require('./storage-image');
 const { requestOptions, peopleFor } = require('./portal-requests');
+const { referralRows } = require('./referrals');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
@@ -199,6 +200,17 @@ async function planFor(admin, jobs, bookings) {
   return out;
 }
 
+async function referralsFor(admin, scope) {
+  const ids = scope.clients.map((c) => c.id);
+  if (!ids.length) return { referrals: [], referLink: null };
+  const [{ data: cl }, referrals] = await Promise.all([
+    admin.from('clients').select('id, referral_token, lead_reward_kind').in('id', ids),
+    referralRows(admin, ids),
+  ]);
+  const on = (cl || []).find((c) => c.lead_reward_kind && c.lead_reward_kind !== 'off' && c.referral_token);
+  return { referrals, referLink: on ? `/refer.html?r=${on.referral_token}` : null };
+}
+
 async function company(admin) {
   const { data } = await admin.from('company_settings').select('company_name, phone, logo_url').eq('id', 1).maybeSingle();
   return { name: data?.company_name || 'Thomson Energy', phone: data?.phone || '', logoUrl: data?.logo_url || '' };
@@ -236,6 +248,8 @@ async function portalOverview(admin, scope) {
     // the request form and the People card (item 74 PR 2): only for an email on a client record
     request: scope.clients.length ? await requestOptions(admin, scope) : null,
     people: scope.clients.some((c) => c.main) ? await peopleFor(admin, scope) : [],
+    // the referral link and what it has sent us (item 74b): a client's own logins only
+    ...(await referralsFor(admin, scope)),
     plan: jobs.filter((j) => plan[j.id] && !plan[j.id].pending).map((j) => ({ id: j.id, ref: j.ref, name: j.name, ...plan[j.id] })),
   };
 }
