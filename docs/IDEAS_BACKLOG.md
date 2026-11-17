@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 17 Nov 2026 (item 92 job plan built, on `staging`, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, planned and waiting on yes; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 17 Nov 2026 (item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, planned and waiting on yes; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -38,7 +38,7 @@ Short steps the owner still has to take on things that are already built. Strike
 - Item 57: open Edit on the seven stock items chipped "Looks like cable" and set them to Cable.
 - Item 66: check the Interest charged account (270) in Settings > Xero Mapping.
 - Item 68: the first real card payment with interest: check the interest invoice lands in Xero.
-- Item 92 (after the release): Schedule > Plan > Plan settings, tick who is on the tools (Staff are ticked by default) and check the four numbers.
+- Item 92: Schedule > Plan > Plan settings, tick who is on the tools (Staff are ticked by default) and check the four numbers.
 - Item 70: one Allow tap for the production checklist change (point 9).
 - Item 71: Settings > Import from ServiceM8 once, "Deposits to add", tick, Import.
 - Item 73: run the picture tagger dry run in Settings (the tagger is off until then); a Photoroom key for the automatic cut-out.
