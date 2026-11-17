@@ -276,7 +276,7 @@ async function planReminders(admin) {
     if (!booked.length && toStart <= 14) {
       await notify(admin, managers, {
         title: `Book people for ${title}, starts ${P.fmtDay(span.start)}`,
-        body: `${main.onsite_days} day${Number(main.onsite_days) === 1 ? '' : 's'} on site with a crew of ${main.crew_size}, and nobody is booked between ${P.fmtRange(span.start, span.end)}.`,
+        body: `${main.onsite_days} day${Number(main.onsite_days) === 1 ? '' : 's'} on site with a crew of ${main.crew_size}, and nobody is booked for ${P.fmtRange(span.start, span.end)}.`,
         projectId, dedupe: `plan-book:${projectId}:${span.start}:${toStart <= 3 ? 'due' : 'soon'}`,
       });
       lines.push(`${title}: nobody booked`);

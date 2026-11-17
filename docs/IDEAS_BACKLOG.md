@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 17 Nov 2026 (item 74 point 9a, a client asks for a date and time on a job from the portal, planned and waiting on yes; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 17 Nov 2026 (item 92 job plan built, on `staging`, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, planned and waiting on yes; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -26,7 +26,6 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 62 | Pipeline moves done by the database: task gate, handover check and all-paid check as triggers, no-quote invoices move to Awaiting Payment, board quote columns for quotes only, 9 jobs put back in the right column | Planned 9 Nov 2026, waiting on yes | N | None |
 | 74 | Client portal and lead rewards: builders and repeat clients log in by email code and see their quotes, jobs, status, bookings, who is on site now, shared photos and documents, the Schedule of Rates, invoices, hours on do and charge jobs, request work (a draft quote with a due date, or a do and charge job with suggested dates), and message us on the job; 74b: a client refers a job (or asks for their own quote) from a personal link with no login, it shows in their portal as a quote, and they earn $80, $200 or $500 (paid or credited) when we win it, nothing under $1k, the reward hidden in the quote's cost; a quick referral (no inspection) earns a flat $50; every staff member gets the same form in the app and a link to send anyone, $50 through payroll for a job won from their link, 2% of the saving up to $500 when a job they quoted finishes under budget with a 5 star review (a one-tap review ask at clock-out, QR code or send, credited on the KPIs of whoever got the customer to do it and worth $5 to them, and sent by itself at Complete), every amount and shape in Settings, all of it a sales expense on the Xero P&L, a client document and a staff document explaining it | Owner's yes 11 Nov 2026; PR 1 (login, lists, job page, share ticks, invoices, work so far, usage log) LIVE 12 Nov 2026 (PR 377 straight into `main` on the owner's word, migration 20261201000000, spec A35); PR 2 and 3 to come | N | None (Twilio, item 7, for text messages later) |
 | 77 | Whole screen on every page (owner's rule 12 Nov 2026): existing pages move to edge-to-edge columns as they are touched, the job Summary tab first (Tasks far left, summary in the middle) | On `staging` 13 Nov 2026 (PR 431, every staff page), waiting for release | N | Item 76 is the first page |
-| 92 | Job plan (Gantt): every quote and job as a bar on the Schedule page with start, finish and on-site days, variations in orange, a crew load row, the wait time worked out for the quoter, dates confirmed with the client after approval, a drafted email when a job slips past the promised dates, order-by and not-booked flags | Planned 17 Nov 2026, waiting on yes | N (one table, RLS) | None |
 
 ## Owner to-dos left over from shipped items
 
@@ -39,6 +38,7 @@ Short steps the owner still has to take on things that are already built. Strike
 - Item 57: open Edit on the seven stock items chipped "Looks like cable" and set them to Cable.
 - Item 66: check the Interest charged account (270) in Settings > Xero Mapping.
 - Item 68: the first real card payment with interest: check the interest invoice lands in Xero.
+- Item 92 (after the release): Schedule > Plan > Plan settings, tick who is on the tools (Staff are ticked by default) and check the four numbers.
 - Item 70: one Allow tap for the production checklist change (point 9).
 - Item 71: Settings > Import from ServiceM8 once, "Deposits to add", tick, Import.
 - Item 73: run the picture tagger dry run in Settings (the tagger is off until then); a Photoroom key for the automatic cut-out.
@@ -169,37 +169,6 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 - [ ] Offline conflicts: last write wins, or flag for review?
 
 ---
-
-## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (planned 17 Nov 2026, owner's yes the same day)
-
-**Building in: `claude/gantt-project-scheduling-gxrxgi`** (owner's "Build the client portal stuff too", 17 Nov 2026), one PR into `staging`. Touches the portal files that item 74 point 9a also lists: build 9a after this merges, or in this chat.
-
-Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on-site days the quoter estimates; a variation cost centre in another colour with its own dates; the quoter sees whether a job fits and what wait to tell the client; once approved the dates are confirmed with the client, and if we fall outside them the client is emailed. It must help decide when to order gear and when to book site work. (Was Tier 3 item M3 in `docs/PROJECT_SPEC.md`.)
-
-**Touches:** `project.html` (two hook lines only), `supabase-client.js` (shared reads), `style.css`, `schedule.html` (Plan view button and container), new `js/plan-chart.js`, new `js/job-window.js`, `quote.html` (wait line), `netlify/functions/accept-quote.js`, `approval-actions.js`, `create-variation.js`, `accept-variation.js`, `remind-client-bookings.js`, new `plan-email.js`, new `_shared/job-plan.js`, `portal.html`, `js/portal.js`, `portal-read.js`, `_shared/portal-data.js`, migration `20261207000000_job_plan.sql`.
-
-**Data (one new table, `job_windows`):** one row per quote or job (the main bar) and one per variation cost centre (`cost_centre_id` set). Columns: `project_id`, `cost_centre_id`, `onsite_days`, `crew_size` (default 2), `lead_weeks` (gear lead time, default 2), `start_date`, `end_date`, `promised_start`, `promised_end`, `client_confirmed_at`, `client_confirmed_by`, `confirm_email_id`, `slip_email_id`, `slip_told_at`, `updated_by`. Staff read; Admin, Finance and Sales write (one policy per action, fast RLS, FK indexes). Settings as data in `company_settings`: hours in a site day (8), default crew (2), default lead weeks (2), slip allowance in working days (2), who is on the tools (a tick per person on the Team page, defaulting to every active Staff role).
-
-**How it works**
-1. **Quoting.** The quote gets a "When" card (`js/job-window.js`). On-site days fill in by themselves: labour hours on the quote divided by crew times 8, rounded up; the quoter can type over them. Lead weeks default to 2. The card shows the first gap that fits (after the lead time, around approved jobs, leave and public holidays) and one line to say to the client: "Tell the client: 4 to 6 weeks". The same range prints on the proposal as "Estimated start: 4 to 6 weeks from acceptance". A button opens the Plan view with this quote's bar highlighted.
-2. **Plan view** (Schedule page: Month, Day, Plan; `js/plan-chart.js`). Rows are jobs, columns are days, 12 weeks on a laptop screen with week scroll. Approved jobs are solid blue, sent quotes are faint outlines (not counted in the load), variations are orange bars on the row under their job, days with people actually booked are darker ticks inside the bar. Top row is crew load per week (person-days planned against person-days available after leave and holidays): green, amber, red. A left column lists approved jobs with no dates yet, to drag on. Drag a bar to move it, drag its end to stretch it (Admin, Finance, Sales). A phone gets the same data as a list by week.
-3. **Approval.** When the client accepts (or we approve), the server places the job in the first gap that fits, the bar turns solid, and the quoter gets a task "Confirm dates with client J1234". The task opens one panel: drafted email with the dates (sent from sales@ through `send-recorded-email.js`, recorded on the job) or "Told by phone". Either way the dates are saved as the promised dates and the bar shows "Client confirmed".
-4. **Slipping.** If a bar is moved, stretched, or pushed by a variation so that the start is more than 2 working days late or the finish passes the promised finish, the bar turns red "Client not told", the quoter is notified, and a drafted email with the new dates is one tap from the bar. The 7am run (`remind-client-bookings.js`) repeats the notice daily until the client is told, and also catches jobs that simply have not started by the promised start. Sending saves the new promised dates. Not sent by itself on purpose: a date change to a client is read by a person first.
-5. **Variations.** `create-variation.js` adds a window for the variation cost centre: days from its hours, start straight after the job's finish (or today if the job is running). An orange bar, own dates, own days. If it pushes the job past the promised finish, step 4 fires.
-6. **Ordering and booking.** Each bar has an order-by mark (start less lead weeks) and a PO chip (nothing ordered, ordered, received). The 7am run tells the ops managers "Order gear for J1234 by Fri 27 Nov" when the mark is within 7 days and the job has no PO, and "Book people for J1234, starts Mon 8 Dec" when a job starts within 14 days with nobody booked in its window. Clicking either opens the PO create panel or Book people with the dates filled in.
-7. **Jobs already running.** The migration gives every approved, unfinished job a window from its first to last booking; jobs with no bookings land in the "no dates yet" column.
-8. **Client portal (owner, 17 Nov 2026).** A client sees their own jobs as bars on a small chart at the top of the portal and on each job page: the dates we confirmed with them, variations in orange, days with people booked and told, today's line. Never other clients' jobs, the crew load, order marks, or dates not yet confirmed (those read "Dates to be confirmed"). A slipped job shows the new dates only after the slip email is sent. Read through `portal-read.js` and `_shared/portal-data.js` like everything else there.
-
-**Done means**
-- On a draft quote with 64 labour hours, the When card shows 4 on-site days and a "Tell the client" range without typing anything.
-- Schedule > Plan shows that quote as a faint bar, approved jobs solid, and a load row.
-- Accept the quote on staging: the bar turns solid, a "Confirm dates" task appears, sending the email marks it "Client confirmed".
-- Drag the bar 2 weeks later: it turns red, the drafted email opens with the new dates, sending clears it.
-- Add a variation with 16 hours: an orange 1 day bar appears under the job.
-- A job starting next week with no PO and no bookings shows both flags.
-- Log in to the portal as that client: their job shows as a bar with the confirmed dates and the orange variation, and no other client's job.
-
-**Kind:** feature into `staging`; migration yes (one table, RLS); no money, stock or payroll. **Size:** large.
 
 ## 4. Weather-aware scheduling worker and Weather page (design agreed 28 Oct 2026, build waiting on the owner's yes)
 

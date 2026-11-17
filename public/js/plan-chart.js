@@ -179,7 +179,8 @@ const PlanChart = (() => {
       const left = Math.max(0, x(w.start_date));
       const right = Math.min(width, x(w.end_date) + dayW);
       const ticks = (g.bookedDays || []).filter((day) => day >= w.start_date && day <= w.end_date && day >= S.start).map((day) => `<i class="plan-booked" style="left:${x(day) - left}px; width:${dayW}px;"></i>`).join('');
-      return `<div class="plan-bar ${cls}" data-window="${esc(w.id)}" data-project="${esc(g.project.id)}" style="left:${left}px; width:${Math.max(dayW, right - left)}px;" title="${esc(label)}: ${esc(P.fmtRange(w.start_date, w.end_date))}, ${esc(daysText(w.onsite_days))} on site, crew of ${Number(w.crew_size)}">${ticks}<span>${esc(label)}</span>${S.canEdit && g.isJob ? '<b class="plan-grip"></b>' : ''}</div>`;
+      const narrow = right - left < 90 ? ' narrow' : '';
+      return `<div class="plan-bar ${cls}${narrow}" data-window="${esc(w.id)}" data-project="${esc(g.project.id)}" style="left:${left}px; width:${Math.max(dayW, right - left)}px;" title="${esc(label)}: ${esc(P.fmtRange(w.start_date, w.end_date))}, ${esc(daysText(w.onsite_days))} on site, crew of ${Number(w.crew_size)}">${ticks}<span>${esc(label)}</span>${S.canEdit && g.isJob ? '<b class="plan-grip"></b>' : ''}</div>`;
     };
     const rowHtml = (g) => {
       const p = g.project;
@@ -222,11 +223,12 @@ const PlanChart = (() => {
         <div class="plan-muted">${esc(P.fmtRange(g.span.start, g.span.end))}, ${esc(daysText(g.rows.reduce((sum, w) => sum + Number(w.onsite_days), 0)))} on site${g.variations.length ? `, ${g.variations.length} variation${g.variations.length === 1 ? '' : 's'}` : ''}</div>
         <div class="plan-flags">${flagsHtml(g)}</div>
       </div>`;
+    // only the weeks with work in them (a job shows in the week it starts), so the list stays short
     const body = weeks.map((w) => {
       const end = P.addDays(w.mon, 6);
-      const here = jobs.filter((g) => g.span.start <= end && g.span.end >= w.mon);
-      return `<div class="plan-weekhead"><span>Week of ${esc(P.fmtDay(w.mon))}</span><span class="plan-chip ${w.tone}">${w.planned}/${w.free} person days</span></div>${here.length ? here.map(line).join('') : '<p class="plan-muted" style="margin:4px 0 10px;">Nothing planned.</p>'}`;
-    }).join('');
+      const here = jobs.filter((g) => g.span.start <= end && g.span.start >= w.mon || (w === weeks[0] && g.span.start < w.mon && g.span.end >= w.mon));
+      return here.length ? `<div class="plan-weekhead"><span>Week of ${esc(P.fmtDay(w.mon))}</span><span class="plan-chip ${w.tone}">${w.planned}/${w.free} person days</span></div>${here.map(line).join('')}` : '';
+    }).join('') || '<p class="plan-muted">Nothing planned in these 12 weeks.</p>';
     return `<div class="plan-list">${body}${quotes.length ? `<div class="plan-weekhead"><span>Quotes sent, if approved today</span></div>${quotes.map(line).join('')}` : ''}</div>`;
   }
 
@@ -261,6 +263,14 @@ const PlanChart = (() => {
       }
       try {
         await saveWindow(w.id, patch);
+        // moving the job moves its variations by the same number of days, so they stay after it
+        if (mode === 'move' && !w.cost_centre_id) {
+          const shiftBy = P.daysBetween(w.start_date, patch.start_date);
+          for (const v of g.variations.filter((x) => x.start_date)) {
+            const vs = P.nextWorkDay(P.addDays(v.start_date, shiftBy), holidays);
+            await saveWindow(v.id, { start_date: vs, end_date: P.addDays(vs, P.daysBetween(v.start_date, v.end_date)) });
+          }
+        }
         await refresh();
         const now = find(g.project.id);
         if (now && now.slip) openDetail(g.project.id); // the client was told other dates: tell them now
