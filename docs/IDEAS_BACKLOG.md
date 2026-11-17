@@ -170,7 +170,9 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 ---
 
-## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (planned 17 Nov 2026, waiting on yes)
+## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (planned 17 Nov 2026, owner's yes the same day)
+
+**Building in: `claude/gantt-project-scheduling-gxrxgi`** (owner's "Build the client portal stuff too", 17 Nov 2026), one PR into `staging`. Touches the portal files that item 74 point 9a also lists: build 9a after this merges, or in this chat.
 
 Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on-site days the quoter estimates; a variation cost centre in another colour with its own dates; the quoter sees whether a job fits and what wait to tell the client; once approved the dates are confirmed with the client, and if we fall outside them the client is emailed. It must help decide when to order gear and when to book site work. (Was Tier 3 item M3 in `docs/PROJECT_SPEC.md`.)
 
