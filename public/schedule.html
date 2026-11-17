@@ -69,21 +69,26 @@
   .plan-sw.quote { border:1.5px dashed var(--muted); } .plan-sw.booked { background:rgba(0,0,0,0.45); }
   .plan-sw.slip { background:var(--red); }
   .plan-muted { color:var(--muted); font-size:12px; }
-  .plan-undated { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:8px; font-size:13px; }
-  .plan-chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--surface-2); color:var(--muted); white-space:nowrap; }
+  /* No dates yet: one line until opened, then a small box that scrolls on its own */
+  .plan-undated { margin-bottom:6px; font-size:13px; }
+  .plan-undated summary { cursor:pointer; }
+  .plan-undated-list { display:flex; gap:6px; flex-wrap:wrap; max-height:96px; overflow-y:auto; margin-top:6px; }
+  /* Plan view uses the whole page: the page title and Clocked in now stay with Day and Month */
+  body.plan-mode .page-head { display:none; }
+  .plan-chip { display:inline-block; font-size:10px; padding:0 6px; border-radius:999px; background:var(--surface-2); color:var(--muted); white-space:nowrap; }
   .plan-chip.ok { background:var(--green-dim); color:var(--green); }
   .plan-chip.warn { background:var(--amber-dim); color:var(--amber); }
   .plan-chip.bad { background:var(--red-dim); color:var(--red); }
   .plan-scroll { overflow:auto; border:1px solid var(--border); border-radius:8px; }
   .plan-head, .plan-row { display:flex; border-bottom:1px solid var(--border); }
   .plan-head { position:sticky; top:0; z-index:3; background:var(--surface); }
-  .plan-label { flex:0 0 250px; width:250px; padding:4px 8px; border-right:1px solid var(--border); overflow:hidden; background:var(--surface); position:sticky; left:0; z-index:2; }
+  .plan-label { flex:0 0 250px; width:250px; padding:2px 8px; border-right:1px solid var(--border); overflow:hidden; background:var(--surface); position:sticky; left:0; z-index:2; }
   .plan-row .plan-label { cursor:pointer; }
   .plan-row.focus .plan-label { box-shadow: inset 3px 0 0 var(--accent); }
-  .plan-name { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .plan-flags { display:flex; gap:4px; flex-wrap:wrap; margin-top:2px; }
-  .plan-lane { position:relative; flex:0 0 auto; height:44px; }
-  .plan-row.two .plan-lane { height:66px; }
+  .plan-name { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .plan-flags { display:flex; gap:4px; flex-wrap:nowrap; overflow:hidden; margin-top:1px; }
+  .plan-lane { position:relative; flex:0 0 auto; height:34px; }
+  .plan-row.two .plan-lane { height:52px; }
   .plan-week { position:absolute; top:0; height:20px; font-size:11px; color:var(--muted); border-left:1px solid var(--border); padding-left:3px; overflow:hidden; white-space:nowrap; }
   .plan-load { position:absolute; top:22px; height:18px; font-size:11px; text-align:center; line-height:18px; border-left:1px solid var(--surface); overflow:hidden; }
   .plan-load.ok { background:var(--green-dim); color:var(--green); } .plan-load.warn { background:var(--amber-dim); color:var(--amber); } .plan-load.bad { background:var(--red-dim); color:var(--red); }
@@ -91,15 +96,15 @@
   .plan-backdrop { position:absolute; top:0; bottom:0; pointer-events:none; }
   .plan-off { position:absolute; top:0; bottom:0; background:var(--surface-2); opacity:0.7; }
   .plan-today { position:absolute; top:0; bottom:0; width:2px; background:var(--red); opacity:0.7; }
-  .plan-bar { position:absolute; top:6px; height:22px; border-radius:5px; font-size:11px; line-height:22px; color:#fff; overflow:hidden; white-space:nowrap; cursor:pointer; touch-action:none; user-select:none; z-index:1; }
+  .plan-bar { position:absolute; top:6px; height:20px; border-radius:5px; font-size:11px; line-height:20px; color:#fff; overflow:hidden; white-space:nowrap; cursor:pointer; touch-action:none; user-select:none; z-index:1; }
   .plan-bar span { position:relative; padding:0 6px; }
   .plan-bar.job { background:var(--btn-bg); }
   .plan-bar.job.slip { background:var(--red); }
-  .plan-bar.var { background:#f2a53a; color:#1a2030; top:0; height:18px; line-height:18px; }
-  .plan-bar.quote { background:transparent; border:1.5px dashed var(--muted); color:var(--text); line-height:19px; }
+  .plan-bar.var { background:#f2a53a; color:#1a2030; top:0; height:16px; line-height:16px; }
+  .plan-bar.quote { background:transparent; border:1.5px dashed var(--muted); color:var(--text); line-height:17px; }
   .plan-bar.narrow { overflow:visible; }
   .plan-bar.narrow span { position:absolute; left:100%; top:0; color:var(--text); padding-left:4px; white-space:nowrap; }
-  .plan-sub { position:absolute; left:0; right:0; top:36px; height:20px; }
+  .plan-sub { position:absolute; left:0; right:0; top:32px; height:18px; }
   .plan-booked { position:absolute; top:0; bottom:0; background:rgba(0,0,0,0.35); }
   .plan-grip { position:absolute; right:0; top:0; bottom:0; width:8px; cursor:ew-resize; background:rgba(255,255,255,0.35); }
   .plan-order { position:absolute; top:0; width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; border-top:8px solid var(--amber); z-index:1; }
@@ -1250,6 +1255,7 @@
       document.getElementById('view-month-btn').style.borderColor = view === 'month' ? 'var(--accent)' : '';
       document.getElementById('view-day-btn').style.borderColor = view === 'day' ? 'var(--accent)' : '';
       document.getElementById('plan-view').style.display = view === 'plan' ? 'block' : 'none';
+      document.body.classList.toggle('plan-mode', view === 'plan');
       document.getElementById('view-plan-btn').style.borderColor = view === 'plan' ? 'var(--accent)' : '';
       if (view === 'month') loadMonth(); else if (view === 'day') loadDay(); else showPlan();
     }
@@ -1259,7 +1265,7 @@
       document.getElementById('period-badges').innerHTML = '';
       try {
         await loadJsOnce('/js/plan-calc.js?v=1', () => typeof PlanCalc !== 'undefined');
-        await loadJsOnce('/js/plan-chart.js?v=3', () => typeof PlanChart !== 'undefined');
+        await loadJsOnce('/js/plan-chart.js?v=4', () => typeof PlanChart !== 'undefined');
         await PlanChart.show({
           el: document.getElementById('plan-view'), canEdit: canEditSchedule(), isAdmin: myRole === 'admin', myId, focus: planFocus,
           onLabel: (text, start) => { document.getElementById('period-label').textContent = text; document.getElementById('period-jump').value = start; },

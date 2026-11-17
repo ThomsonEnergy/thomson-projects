@@ -152,7 +152,7 @@ const PlanChart = (() => {
         ${d.ctx.crew.length ? `<span class="plan-muted">${d.ctx.crew.length} on the tools</span>` : '<span class="plan-chip warn">Nobody is ticked as on the tools, so the load is not measured</span>'}
         ${S.isAdmin ? '<button type="button" class="secondary btn-sm" id="plan-settings">Plan settings</button>' : ''}
       </div>
-      ${undated.length ? `<div class="plan-undated"><strong>No dates yet (${undated.length})</strong>${undated.map((g) => `<button type="button" class="secondary btn-sm" data-undated="${esc(g.project.id)}" title="${S.canEdit ? 'Put it in the first gap that fits' : ''}">${esc(ref(g.project))} ${esc(g.project.name)}, ${esc(daysText(g.main.onsite_days))}</button>`).join('')}</div>` : ''}`;
+      ${undated.length ? `<details class="plan-undated" ${S.undatedOpen ? 'open' : ''}><summary><strong>No dates yet (${undated.length})</strong> <span class="plan-muted">${S.canEdit ? 'tap one to put it in the first gap that fits' : ''}</span></summary><div class="plan-undated-list">${undated.map((g) => `<button type="button" class="secondary btn-sm" data-undated="${esc(g.project.id)}" title="${S.canEdit ? 'Put it in the first gap that fits' : ''}">${esc(ref(g.project))} ${esc(g.project.name)}, ${esc(daysText(g.main.onsite_days))}</button>`).join('')}</div></details>` : ''}`;
     S.el.innerHTML = head + (isPhone() ? listHtml(dated, d.quotes) : chartHtml(dated, d.quotes)) + (!dated.length && !d.quotes.length && !undated.length ? '<p class="subtitle" style="padding:16px;">Nothing on the plan yet. A job appears here when its quote is approved, and a quote when it is sent.</p>' : '');
     wire();
     if (S.focus) {
@@ -311,6 +311,9 @@ const PlanChart = (() => {
         showToast(`${ref(g.project)} planned for ${P.fmtRange(gap.start, gap.end)}. Drag the bar to change it.`);
       } catch (err) { showToast(err.message, { error: true }); n.disabled = false; }
     }));
+    // the No dates yet list stays open or folded as the person left it
+    const und = S.el.querySelector('.plan-undated');
+    if (und) und.addEventListener('toggle', () => { S.undatedOpen = und.open; });
     const settingsBtn = S.el.querySelector('#plan-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
   }
