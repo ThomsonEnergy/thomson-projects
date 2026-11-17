@@ -5060,7 +5060,7 @@
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
       if (document.getElementById('panel-quote')) wireQuoteSteps(project);
       if (document.getElementById('client-due-card') && project.portal_requested_at) loadJsOnce('/js/client-due.js?v=1', () => typeof initClientDue === 'function').then(() => initClientDue(project)); // item 74
-      if (document.getElementById('job-window-card')) loadJsOnce('/js/job-window.js?v=1', () => typeof initJobWindow === 'function').then(() => initJobWindow(project)); // item 92
+      if (document.getElementById('job-window-card')) loadJsOnce('/js/job-window.js?v=2', () => typeof initJobWindow === 'function').then(() => initJobWindow(project)); // item 92
 
       document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {
         // Show or hide the rows in place: no re-render, so search text, scroll and unsaved notes stay.
