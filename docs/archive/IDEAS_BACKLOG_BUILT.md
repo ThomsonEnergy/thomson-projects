@@ -1439,3 +1439,26 @@ Touches: `public/js/supabase-client.js` (`openPoLineMenu`, `renderPoTickLines`: 
 - On production: `po_undo_receive`, `_po_line_take_back` and `is_pricing_role` were read first and do the same as the repo's (the stored text differs only in comments, line endings and the split word the cloud database tool needs).
 - Page code: `public/js/po-bills.js` (PO page only: `poLinesOnBills`, `deletePoLine`, `poLineDeleteMenu`, `markPoLinesNotOnBill`), not `renderPoTickLines`, to keep `supabase-client.js` small. `supabase-client.js` gained only a hook (`openPoLineMenu(..., more)`, `wirePoTickLines({ lineMenuMore })`) and `po_item_deleted` in the job log's PO group. After a delete the PO's unpaid bills are checked against the PO again.
 - Proved: the function on a local Postgres with every repo migration loaded (37 checks: staff and logged-out refused, billed line and credit note line refused, invoiced goods refused with nothing changed, closed PO refused, job cost down by the line, Warehouse count back, tool out of the register, the PO2020 repair end to end); the PO page in the offline browser (tag and Delete on the five typed lines only, none for field staff, none on a closed PO, the confirm text, the call made).
+
+## 93. NETCC Approved Seller on solar and battery proposals (built 17 Nov 2026, on staging; website line live)
+
+**Owner's ask (17 Nov 2026):** "Add NETCC approved seller to our solar and battery proposals."
+
+**What is true today:** Thomson Energy has been a New Energy Tech Approved Seller since 2 Nov 2026 (application NET-010695; the welcome email is in Gmail under the NETCC label). The proposal (`public/quote.html`) does not say so anywhere. The website has a commented-out line waiting for the approval (`index.html` line 798 in `website-updates-9e18ed`). The logo and certificate are in the Approved Seller portal (members.newenergytech.org.au), which a cloud session cannot open.
+
+**Plan:**
+
+1. **Cover.** Under the company block (legal name, ABN, address, licences), one line "New Energy Tech Approved Seller", with the Approved Seller logo beside it once the file is in the repo (`public/img/netcc-approved-seller.png`, squashed).
+2. **The project page, About panel.** One sentence after the About text: "Thomson Energy is a New Energy Tech Approved Seller: a signatory to the New Energy Tech Consumer Code (NETCC), the consumer protection code for solar and batteries authorised by the ACCC." The words "New Energy Tech Consumer Code" link to newenergytech.org.au.
+3. **By itself.** Shown on every proposal whose template is Solar or Battery (`projects.proposal_template`), on screen and in the PDF, including quotes already sent. Not on new build, quick estimate or other templates. No setting, no tick.
+4. **Website.** The waiting line goes live in the credentials list: "Consumer code: New Energy Tech Approved Seller, signatory to the New Energy Tech Consumer Code (NETCC)". `python3 build.py`, push to `main` (that deploys), then `python3 scripts/indexnow.py`.
+
+**Not in this build:** the NETCC wording rules for the quote itself (already covered by the compliance checklist, `netlify/functions/_shared/solar-compliance-rules.js`); the updated NETCC from 1 Dec 2026 (a separate check of the proposal against the new code, worth its own chat before that date).
+
+Done means (staging, admin@staging.test): (1) open a Solar quote's proposal: the cover shows "New Energy Tech Approved Seller" under the licence line. (2) The project page's About panel ends with the NETCC sentence and the link opens newenergytech.org.au. (3) Download PDF: both show, nothing pushed onto a new page (`node scripts/proposal-fits.js` passes). (4) A new build quote's proposal shows neither. (5) thomsonenergy.com.au credentials list shows the Consumer code line.
+
+Touches: `public/quote.html`, `public/img/netcc-approved-seller.png` (new, when supplied), `scripts/fixtures/proposal-solar-battery.json` (only if the fit check needs it), `docs/PROJECT_SPEC.md` (A16); website repo: `index.html`.
+
+Overlaps: items 58 (Pylon layout on the "Your system" page) and 92 (wait time printed on the proposal) will also change `public/quote.html`, both waiting on yes with no branch building; different parts of the page.
+
+**As built (17 Nov 2026):** the owner's yes added "allow me to upload the NETCC logo from Settings". The logo could not be found (not in Gmail, the portal and the NETCC site are closed to a cloud session), so Settings > Company Details > Proposal pictures has a third box, **NETCC Approved Seller logo**; the picture is kept in `company_settings.proposal_cover_photos` under the key `netcc_logo` (no migration: that map already reaches the proposal through `get_public_company_settings`). No logo file ships with the site. Without a logo the cover says it in words only.

@@ -886,7 +886,7 @@
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
-      loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-proposal-pictures.js?v=2', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
       loadJsOnce('/js/settings-product-pictures.js?v=1', () => typeof loadProductPicturesCard === 'function').then(() => loadProductPicturesCard()).catch(() => {});
       renderCategorizedThumbs();
