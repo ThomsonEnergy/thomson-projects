@@ -8,6 +8,10 @@
 //     it is not theirs: the one check before a job is read or an open is logged against it
 //   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
 //     charge job the email may see money on)
+//   portalOverview also carries `request` (the request form's clients, sites and whether Book it in
+//     is offered) and `people` (the People card, a client's main email only).
+//   portalProject also carries `messages` (the job's thread with us) and `request` (a portal request:
+//     its due date, whether it moved, whether they can still add to it).
 //   portalProject also carries `ask`: the client's open ask for a date on a job (point 9a), or null.
 //   Both carry `plan` (item 92): the job's bars for the client's chart, from the dates the client
 //     was told (job_windows.promised_start and promised_end) only. Dates not yet told read "to be
@@ -26,6 +30,7 @@ const { firstName, listNames, sydneyToday, jobRef, fmtDay, fmtTime } = require('
 const { localDateKey } = require('./compute-labour-cost');
 const { moneyText } = require('./invoice-events');
 const { renderedImageUrl } = require('./storage-image');
+const { requestOptions, peopleFor } = require('./portal-requests');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const isVideoUrl = (u) => /\.(mp4|mov|m4v|webm)(\?|$)/i.test(String(u || ''));
@@ -35,7 +40,7 @@ const thumbUrl = (url) => renderedImageUrl(url, { width: 480, height: 480 });
 const staffFirst = (fullName) => (fullName ? firstName(fullName) : '');
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
 const timeText = (iso) => TIME.format(new Date(iso)).replace(/\s/g, '').toLowerCase();
-const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at';
+const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at, client_due_date, client_due_note, client_suggested_dates, portal_requested_at';
 const OPEN_STAGES_DONE = new Set(['complete', 'archived']);
 const INVOICE_LABELS = { paid: 'Paid', overdue: 'Overdue', awaiting: 'Awaiting payment' };
 // open rows first, newest number first
@@ -130,6 +135,7 @@ function statusLine(p, { booking, onSite, invoices }) {
     if (p.expired) return { text: 'Quote expired', open: false };
     if (p.status === 'approved' || p.approved_at) return { text: 'Approved', open: false };
     if (p.sent_at) return { text: 'Quote sent, waiting on you', open: true, tone: 'warn', needsYou: 'Approve your quote' };
+    if (p.client_due_date) return { text: `Quote being prepared, due ${fmtDay(p.client_due_date)}${p.client_due_note ? ' (moved)' : ''}`, open: true };
     return { text: 'Quote being prepared', open: true };
   }
   const stage = p.pipeline_stage || '';
@@ -145,6 +151,7 @@ function statusLine(p, { booking, onSite, invoices }) {
   if (stage === 'job_not_complete') return { text: 'In progress', open: true };
   if (unpaidDeposit) return { text: 'Approved, deposit to pay', open: true, tone: 'warn', needsYou: 'Pay the deposit' };
   if (stage === 'job_booked') return { text: 'Booked', open: true };
+  if (p.portal_requested_at && (p.client_suggested_dates || []).length) return { text: `Asked for ${(p.client_suggested_dates || []).map(fmtDay).join(' or ')}, being booked`, open: true };
   return { text: 'Being booked', open: true };
 }
 
@@ -226,6 +233,9 @@ async function portalOverview(admin, scope) {
   return {
     clients: scope.clients.map((c) => ({ id: c.id, name: c.name, main: c.main })),
     needsYou, jobs, quotes, company: comp,
+    // the request form and the People card (item 74 PR 2): only for an email on a client record
+    request: scope.clients.length ? await requestOptions(admin, scope) : null,
+    people: scope.clients.some((c) => c.main) ? await peopleFor(admin, scope) : [],
     plan: jobs.filter((j) => plan[j.id] && !plan[j.id].pending).map((j) => ({ id: j.id, ref: j.ref, name: j.name, ...plan[j.id] })),
   };
 }
@@ -250,6 +260,10 @@ async function portalProject(admin, p) {
   // the client's open ask for a date (point 9a): only on a job, and only theirs to see
   const { data: askRow } = p.job_number ? await admin.from('portal_booking_requests').select('ask_date, ask_time, note, created_at')
     .eq('project_id', p.id).is('answered_at', null).is('withdrawn_at', null).maybeSingle() : { data: null };
+  // the job's thread with us (item 74 point 8), oldest first; staff first names only
+  const { data: msgRows } = await admin.from('job_client_messages').select('from_email, body, created_at, profiles(full_name)').eq('project_id', p.id).order('created_at').limit(200);
+  const messages = (msgRows || []).map((m) => ({ mine: !!m.from_email, who: m.from_email ? m.from_email : (staffFirst(m.profiles && m.profiles.full_name) || 'Thomson Energy'), body: m.body, when: `${fmtDay(localDateKey(m.created_at))}, ${timeText(m.created_at)}` }));
+  const request = p.portal_requested_at ? { dueDate: p.client_due_date ? fmtDay(p.client_due_date) : null, moved: p.client_due_note || null, canAdd: !!p.money && !p.job_number && !p.sent_at } : null;
   const ask = askRow ? { date: askRow.ask_date, day: fmtDay(askRow.ask_date), time: askRow.ask_time ? fmtTime(askRow.ask_time) : '', timeValue: askRow.ask_time ? String(askRow.ask_time).slice(0, 5) : '', note: askRow.note || '' } : null;
   const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
   const manager = (contacts.data || []).find((c) => c.role === 'site_manager') || (contacts.data || []).find((c) => c.role === 'project_manager');
@@ -272,7 +286,7 @@ async function portalProject(admin, p) {
     hasWork, work,
     manager: manager ? staffFirst(manager.profiles?.full_name) || null : null,
     company: comp,
-    bookings, pastBookings, onSite, plan, ask,
+    bookings, pastBookings, onSite, plan, ask, messages, request,
     photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,

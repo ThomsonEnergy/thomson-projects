@@ -5,6 +5,14 @@
 //                 them the usual way, which closes the ask by itself (a database trigger). One open
 //                 ask per job: a second one replaces the first. 5 asks an hour per device.
 //   withdraw_ask  { projectId }                                               take the open ask back
+//   request       { clientId, siteId | address, need, kind: 'quote' | 'book', dueDate, dates, files }
+//                 ask for a quote (a draft Q with the date it is needed by) or for do and charge work
+//                 to be booked in (a J with one to three suggested days); files are photos or PDFs
+//   add_more      { projectId, note, files }   more on a draft quote they asked for, until it is sent
+//   message       { projectId, body }          a message on the job's thread (the Feed tab)
+//   add_person    { clientId, name, email }    the People card, a client's main email only: a portal
+//   remove_person { clientId, contactId }      login for someone else at their company, or take it away
+// 5 asks or requests an hour per login; 20 messages an hour (counted from the usage log).
 // Every call checks the session and that the job is in the login's scope before anything is
 // written. Writes portal_booking_requests, activity_log, notifications (create_notification) and
 // the usage row (portal_events).
@@ -12,6 +20,7 @@
 const S = require('./_shared/portal-session');
 const D = require('./_shared/portal-data');
 const { jobRef, fmtDay, fmtTime, sydneyToday, addDays } = require('./_shared/schedule-emails');
+const R = require('./_shared/portal-requests');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,10 +50,38 @@ exports.handler = async (event) => {
   if (auth.mustChange) return S.json(403, { ok: false, mustChange: true, error: 'Choose your password first.' });
   const { admin, scope, session, log } = auth;
   try {
+    // the actions that are not about one existing job
+    const since = new Date(Date.now() - 3600 * 1000).toISOString();
+    const hourly = async (actions) => { const { count } = await admin.from('portal_events').select('id', { count: 'exact', head: true }).eq('email', scope.email).in('action', actions).gte('created_at', since); return count || 0; };
+    if (body.action === 'request') {
+      if ((await hourly(['portal_request'])) >= 5) return S.json(429, { ok: false, error: 'That is a lot of requests in an hour. Please call us instead.' });
+      const made = await R.createRequest(admin, scope, body);
+      await log('portal_request', { projectId: made.id, detail: made.ref });
+      return S.json(200, { ok: true, ...made });
+    }
+    if (body.action === 'add_person' || body.action === 'remove_person') {
+      if (body.action === 'add_person') await R.addPerson(admin, scope, body); else await R.removePerson(admin, scope, body);
+      await log(body.action === 'add_person' ? 'added_person' : 'removed_person', { detail: String(body.email || body.contactId || '').slice(0, 80) });
+      return S.json(200, { ok: true, people: await R.peopleFor(admin, scope) });
+    }
+
     const projectId = String(body.projectId || '');
     if (!UUID.test(projectId)) return S.json(400, { ok: false, error: 'Which job?' });
     const p = await D.scopedProject(admin, scope, projectId);
-    if (!p || !p.job_number) return S.json(404, { ok: false, error: 'That job is not on your account.' });
+    if (!p) return S.json(404, { ok: false, error: 'That job is not on your account.' });
+    if (body.action === 'add_more') {
+      if (!p.money) return S.json(403, { ok: false, error: 'Only the client can add to a quote request.' });
+      const r = await R.addToRequest(admin, scope, p, body);
+      await log('portal_request_more', { projectId: p.id, detail: jobRef(p) });
+      return S.json(200, { ok: true, ...r });
+    }
+    if (body.action === 'message') {
+      if ((await hourly(['portal_message'])) >= 20) return S.json(429, { ok: false, error: 'That is a lot of messages in an hour. Please call us instead.' });
+      await R.postClientMessage(admin, scope, p, body.body);
+      await log('portal_message', { projectId: p.id, detail: jobRef(p) });
+      return S.json(200, { ok: true });
+    }
+    if (!p.job_number) return S.json(404, { ok: false, error: 'That job is not on your account.' });
     const now = new Date().toISOString();
 
     if (body.action === 'withdraw_ask') {
@@ -84,6 +121,7 @@ exports.handler = async (event) => {
     }
     return S.json(400, { ok: false, error: 'Unknown action' });
   } catch (err) {
+    if (err.statusCode === 400) return S.json(400, { ok: false, error: err.message });
     console.error('portal-write failed:', err);
     return S.json(500, { ok: false, error: 'Something went wrong. Please try again.' });
   }

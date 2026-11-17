@@ -4,6 +4,7 @@
 //
 //   sendPortalCode(admin, { to, code }) -> { ok } or throws
 //   sendPortalWelcome(admin, { to, password, name }) -> { ok } or throws
+//   portalLine(admin, email) -> the 'see it in your portal' line for a client email, or ''
 // Reads mailboxes and company_settings; writes nothing.
 
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
@@ -60,4 +61,16 @@ async function sendPortalWelcome(admin, { to, password, name: toName }) {
   return sendPlain(mailbox, { fromName: name, fromAddress: GMAIL_MAILBOX, to, subject: `Your ${name} login`, bodyText });
 }
 
-module.exports = { sendPortalCode, sendPortalWelcome };
+// The line client emails end with when the person can log in to the portal (item 74 PR 2): booking,
+// plan and message emails from the app. '' for anyone who cannot (no account is made by it). Never a
+// token in the link: the portal asks them to log in.
+async function portalLine(admin, email) {
+  const S = require('./portal-session');
+  try {
+    const scope = await S.portalScope(admin, S.normEmail(email), { staffCheck: false });
+    if (!scope.canLogIn || scope.staffUser) return '';
+  } catch (e) { return ''; }
+  return `\n\nSee your jobs, bookings, photos and invoices any time in your portal: ${publicBaseUrl()}/portal.html`;
+}
+
+module.exports = { sendPortalCode, sendPortalWelcome, portalLine };

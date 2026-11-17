@@ -120,11 +120,13 @@
           const stageCount = p.cost_centres.length;
           const stageLabel = `${stageCount} stage${stageCount === 1 ? '' : 's'}`;
           const nameDisplay = `${p.quote_number ? '#' + p.quote_number + ' - ' : ''}${escapeHtml(p.name)}`;
+          // asked for in the client portal (item 74): who wants it and by when
+          const portalChip = p.portal_requested_at && p.status === 'draft' ? ` <span class="badge sent" title="Asked for in the client portal by ${escapeHtml(p.portal_requested_by || '')}">From the portal${p.client_due_date ? `, due ${new Date(p.client_due_date + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}</span>` : '';
           const isLast = i === rowProjects.length - 1;
           const rowInner = !pricingVisible ? `
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
-                    <div class="name">${nameDisplay}</div>
+                    <div class="name">${nameDisplay}${portalChip}</div>
                     <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel}</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">
@@ -137,7 +139,7 @@
             return `
                 <a class="project-list-item" href="/project.html?id=${p.id}" style="${isLast ? 'border-bottom:none;' : ''}">
                   <div>
-                    <div class="name">${nameDisplay}</div>
+                    <div class="name">${nameDisplay}${portalChip}</div>
                     <div class="meta">${escapeHtml(p.client_name)} &middot; ${stageLabel} &middot; ${money(quoted)} quoted</div>
                   </div>
                   <div style="text-align:right; min-width:160px;">

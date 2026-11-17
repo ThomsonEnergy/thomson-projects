@@ -216,11 +216,126 @@
         <div class="pl-card">${d.needsYou.map((n) => `
           <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action, n.kind, n.projectId, n.detail) : ''}</div>`).join('')}</div>` : ''}
       ${d.plan && d.plan.length ? card('Your dates', planChart(d.plan.map((j) => ({ label: `<a href="/portal.html?job=${esc(j.id)}"><strong>${esc(j.ref)}</strong> ${esc(j.name)}</a>`, bars: j.bars, booked: j.booked, sub: `${esc(j.startText)}${j.start === j.end ? '' : ` to ${esc(j.endText)}`}` })))) : ''}
+      ${d.request ? '<p style="margin:12px 0 0;"><button type="button" id="pl-req-open">Request work</button></p><div id="pl-req"></div>' : ''}
       <h2 class="pl-h">Jobs</h2>
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
+      ${d.people && d.people.length ? `<h2 class="pl-h">People</h2><div class="pl-card" id="pl-people">${peopleHtml(d.people)}</div>` : ''}
       <p class="pl-muted" style="margin-top:24px;">Need something? Call ${esc(d.company.name)} on <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>.</p>`;
+    const reqBtn = document.getElementById('pl-req-open');
+    if (reqBtn) reqBtn.addEventListener('click', () => { reqBtn.style.display = 'none'; requestForm(d.request); });
+    if (d.people && d.people.length) wirePeople(d.people);
+  }
+
+  // ----- files: photos are made smaller on the phone first; at most 5, each under 4 MB -----
+  const fileToB64 = (blob) => new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = fail; r.readAsDataURL(blob); });
+  async function shrink(file) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 900 * 1024) return file;
+    try {
+      const img = await createImageBitmap(file);
+      const scale = Math.min(1, 2000 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.8));
+      return blob ? new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+    } catch { return file; }
+  }
+  async function readFiles(input) {
+    const list = [...(input.files || [])].slice(0, 5);
+    const out = [];
+    for (const f of list) {
+      const small = await shrink(f);
+      if (small.size > 4 * 1024 * 1024) throw new Error(`${f.name} is too big (4 MB each at most).`);
+      out.push({ name: f.name, type: small.type || f.type, data: await fileToB64(small) });
+    }
+    return out;
+  }
+  const fileField = (id) => `<label class="pl-muted" style="display:block; margin-top:8px;">Photos or plans (optional, up to 5)</label><input type="file" id="${id}" multiple accept="image/*,application/pdf" style="width:100%;" />`;
+
+  // ----- request work (item 74 point 9) -----
+  function requestForm(opts) {
+    const box = document.getElementById('pl-req');
+    const clients = opts.clients || [];
+    const tomorrow = (() => { const d = new Date(todayYmd() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+    const siteOptions = (c) => `${(c.sites || []).map((x) => `<option value="${esc(x.id)}">${esc(x.label ? `${x.label}: ${x.address}` : x.address)}</option>`).join('')}<option value="">A new address...</option>`;
+    box.innerHTML = `
+      <div class="pl-card">
+        <strong>Request work</strong>
+        <p class="pl-muted" style="margin:2px 0 8px;">Tell us what you need. It goes straight to our office.</p>
+        ${clients.length > 1 ? `<label class="pl-muted">For</label><select id="rq-client" style="width:100%; font-size:16px;">${clients.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select>` : ''}
+        <label class="pl-muted" style="display:block; margin-top:8px;">Site</label><select id="rq-site" style="width:100%; font-size:16px;"></select>
+        <input id="rq-address" placeholder="Street, suburb, postcode" style="width:100%; font-size:16px; margin-top:6px; display:none;" />
+        <label class="pl-muted" style="display:block; margin-top:8px;">What do you need?</label>
+        <textarea id="rq-need" rows="4" maxlength="4000" style="width:100%; font-size:16px;" placeholder="e.g. 6 new downlights in the kitchen and a dedicated circuit for the oven"></textarea>
+        ${fileField('rq-files')}
+        <div id="rq-kinds" style="margin-top:10px;"></div>
+        <div id="rq-msg"></div>
+        <div style="display:flex; gap:8px; margin-top:10px;"><button type="button" id="rq-send">Send request</button><button type="button" class="secondary" id="rq-cancel">Cancel</button></div>
+      </div>`;
+    const clientSel = box.querySelector('#rq-client');
+    const current = () => clients.find((c) => c.id === (clientSel ? clientSel.value : clients[0].id)) || clients[0];
+    const drawClient = () => {
+      const c = current();
+      const site = box.querySelector('#rq-site');
+      site.innerHTML = siteOptions(c);
+      box.querySelector('#rq-address').style.display = site.value ? 'none' : 'block';
+      box.querySelector('#rq-kinds').innerHTML = `
+        <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;"><input type="radio" name="rq-kind" value="quote" checked style="width:auto; margin-top:3px;" /> <span><strong>Quote it</strong><br><span class="pl-muted">Needed by</span> <input type="date" id="rq-due" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>
+        ${c.bookIn ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="book" style="width:auto; margin-top:3px;" /> <span><strong>Book it in</strong> (charged at your rates)<br><span class="pl-muted">Days that suit you</span><br><input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>` : ''}`;
+    };
+    if (clientSel) clientSel.addEventListener('change', drawClient);
+    box.querySelector('#rq-site').addEventListener('change', (e) => { box.querySelector('#rq-address').style.display = e.target.value ? 'none' : 'block'; });
+    drawClient();
+    box.querySelector('#rq-cancel').addEventListener('click', () => showOverview());
+    box.querySelector('#rq-send').addEventListener('click', async (e) => {
+      const msg = box.querySelector('#rq-msg');
+      const kind = (box.querySelector('input[name="rq-kind"]:checked') || {}).value || 'quote';
+      e.target.disabled = true;
+      msg.innerHTML = '<p class="pl-muted">Sending...</p>';
+      try {
+        const files = await readFiles(box.querySelector('#rq-files'));
+        const out = await call('portal-write', {
+          action: 'request', clientId: current().id, siteId: box.querySelector('#rq-site').value || null, address: box.querySelector('#rq-address').value,
+          need: box.querySelector('#rq-need').value, kind, dueDate: (box.querySelector('#rq-due') || {}).value || '',
+          dates: [...box.querySelectorAll('.rq-day')].map((x) => x.value).filter(Boolean), files,
+        });
+        window.history.pushState({}, '', `/portal.html?job=${encodeURIComponent(out.id)}`);
+        showJob(out.id);
+      } catch (err) { msg.innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; e.target.disabled = false; }
+    });
+  }
+
+  // ----- the People card: the main email gives others at the company a login (item 74 point 1) -----
+  function peopleHtml(groups) {
+    return groups.map((g) => `
+      ${groups.length > 1 ? `<h3>${esc(g.clientName)}</h3>` : ''}
+      <div class="pl-muted">${esc(g.main)} (you, the main email)</div>
+      ${g.people.map((x) => `<div class="pl-need"><span>${esc(x.name ? `${x.name}, ${x.email}` : x.email)}</span><button type="button" class="secondary pl-btn pl-person-x" data-client="${esc(g.clientId)}" data-id="${esc(x.id)}">Remove</button></div>`).join('')}
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+        <input class="pl-person-name" data-client="${esc(g.clientId)}" placeholder="Name" style="flex:1; min-width:120px; font-size:16px;" />
+        <input class="pl-person-email" data-client="${esc(g.clientId)}" type="email" placeholder="Email" style="flex:2; min-width:180px; font-size:16px;" />
+        <button type="button" class="pl-person-add" data-client="${esc(g.clientId)}">Give a login</button>
+      </div>`).join('') + '<p class="pl-muted" style="margin:8px 0 0;">They get an email with a login and see the same jobs, quotes and invoices you do.</p><div id="pl-people-msg"></div>';
+  }
+  function wirePeople() {
+    const card = document.getElementById('pl-people');
+    const msg = () => document.getElementById('pl-people-msg');
+    const redraw = (people) => { card.innerHTML = peopleHtml(people); wirePeople(); };
+    card.querySelectorAll('.pl-person-add').forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.client;
+      b.disabled = true;
+      try {
+        const out = await call('portal-write', { action: 'add_person', clientId: id, name: card.querySelector(`.pl-person-name[data-client="${id}"]`).value, email: card.querySelector(`.pl-person-email[data-client="${id}"]`).value });
+        redraw(out.people);
+      } catch (err) { msg().innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; b.disabled = false; }
+    }));
+    card.querySelectorAll('.pl-person-x').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Take this person\'s login away?')) return;
+      b.disabled = true;
+      try { const out = await call('portal-write', { action: 'remove_person', clientId: b.dataset.client, contactId: b.dataset.id }); redraw(out.people); } catch (err) { msg().innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; b.disabled = false; }
+    }));
   }
 
   // ----- one job -----
@@ -307,6 +422,9 @@
         ${factHtml('Your contact', contact)}
         ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote', 'opened_quote', d.id, d.ref)}</p>` : ''}
       </div>
+      ${d.request && d.request.canAdd ? `<div class="pl-card"><strong>Your request</strong>${d.request.dueDate ? `<br><span class="pl-muted">We are working to ${esc(d.request.dueDate)}${d.request.moved ? `. We moved it: ${esc(d.request.moved)}` : ''}.</span>` : ''}
+        <textarea id="pl-more-note" rows="2" maxlength="4000" placeholder="Anything to add?" style="width:100%; font-size:16px; margin-top:8px;"></textarea>${fileField('pl-more-files')}
+        <div id="pl-more-msg"></div><button type="button" id="pl-more-send" style="margin-top:8px;">Add to my request</button></div>` : ''}
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
       ${d.kind === 'job' && d.plan ? card('Dates', d.plan.pending ? '<span class="pl-muted">Dates to be confirmed. We will email you the dates.</span>' : `${planChart([{ bars: d.plan.bars, booked: d.plan.booked }])}<div class="pl-muted" style="margin-top:6px;">${barsText(d.plan)}</div>`) : ''}
       ${d.kind === 'job' ? card('Bookings', `${askHtml(d)}
@@ -314,6 +432,9 @@
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
       ${d.variations.length ? card('Variations', d.variations.map((v) => `
           <div class="pl-need"><span>${v.number != null ? `Variation ${esc(v.number)}: ` : ''}${esc(v.description || '')} <span class="pl-status ${v.url ? 'warn' : ''}">${esc(v.status)}</span></span>${v.url ? openLink(v.url, 'Sign', 'opened_variation', d.id, v.number != null ? `Variation ${v.number}` : '') : ''}</div>`).join('')) : ''}
+      ${card('Messages', `${(d.messages || []).length ? `<div id="pl-msgs" style="max-height:340px; overflow-y:auto;">${d.messages.map((m) => `<div style="display:flex; ${m.mine ? 'justify-content:flex-end;' : ''} margin:6px 0;"><div style="max-width:85%; padding:8px 12px; border-radius:10px; background:${m.mine ? '#e6e3f7' : 'var(--surface-2)'};"><div class="pl-muted" style="font-size:11px;">${esc(m.mine ? 'You' : m.who)}, ${esc(m.when)}</div><div style="white-space:pre-wrap;">${esc(m.body)}</div></div></div>`).join('')}</div>` : '<p class="pl-muted" style="margin:0 0 6px;">Questions about this job? Write to us here.</p>'}
+        <textarea id="pl-msg-body" rows="2" maxlength="4000" placeholder="Write a message..." style="width:100%; font-size:16px; margin-top:6px;"></textarea>
+        <div id="pl-msg-err"></div><button type="button" id="pl-msg-send" style="margin-top:6px;">Send</button>`)}
       ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
       ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
@@ -326,6 +447,23 @@
         ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener" data-open="opened_rates" data-project="${esc(d.id)}">Open</a></div>` : ''}`)}`;
     main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, Number(img.dataset.i))));
     wireAsk(d);
+    const msgs = document.getElementById('pl-msgs');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    document.getElementById('pl-msg-send').addEventListener('click', async (e) => {
+      const text = document.getElementById('pl-msg-body').value.trim();
+      if (!text) return;
+      e.target.disabled = true;
+      try { await call('portal-write', { action: 'message', projectId: d.id, body: text }); showJob(d.id); } catch (err) { document.getElementById('pl-msg-err').innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; e.target.disabled = false; }
+    });
+    const more = document.getElementById('pl-more-send');
+    if (more) more.addEventListener('click', async () => {
+      more.disabled = true;
+      try {
+        const files = await readFiles(document.getElementById('pl-more-files'));
+        await call('portal-write', { action: 'add_more', projectId: d.id, note: document.getElementById('pl-more-note').value, files });
+        showJob(d.id);
+      } catch (err) { document.getElementById('pl-more-msg').innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; more.disabled = false; }
+    });
     if (d.hasWork) showWork(d.work);
   }
 
