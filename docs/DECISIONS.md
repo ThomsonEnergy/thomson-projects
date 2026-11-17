@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 17 Nov 2026
 
+- Planned (waiting on yes): **item 93, NETCC Approved Seller on solar and battery proposals**, the owner's ask of 17 Nov 2026. Thomson Energy has been a New Energy Tech Approved Seller since 2 Nov 2026 (NET-010695). One line with the logo on the proposal cover and one sentence with a link in the About panel, on Solar and Battery templates only, by itself; the same line on the website's credentials list. No migration. The owner sends the logo file from the NETCC portal (text only until then). Detail: `docs/IDEAS_BACKLOG.md` item 93.
 - Planned (waiting on yes): **item 92, the job plan (Gantt)**, the owner's ask of 17 Nov 2026. A Plan view on the Schedule page with every quote and job as a bar (start, finish, on-site days from the quote's labour hours), variations in orange, a crew load row, the wait time worked out for the quoter and printed on the proposal, dates confirmed with the client after approval, a drafted email when a job slips past the promised dates, order-by and not-booked flags from the 7am run. One new table `job_windows`, migration 20261207000000. Detail: `docs/IDEAS_BACKLOG.md` item 92.
 
 ## 16 Nov 2026
