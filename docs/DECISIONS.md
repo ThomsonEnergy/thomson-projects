@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 17 Nov 2026
+
+- Planned (waiting on yes): **item 92, the job plan (Gantt)**, the owner's ask of 17 Nov 2026. A Plan view on the Schedule page with every quote and job as a bar (start, finish, on-site days from the quote's labour hours), variations in orange, a crew load row, the wait time worked out for the quoter and printed on the proposal, dates confirmed with the client after approval, a drafted email when a job slips past the promised dates, order-by and not-booked flags from the 7am run. One new table `job_windows`, migration 20261207000000. Detail: `docs/IDEAS_BACKLOG.md` item 92.
+
 ## 16 Nov 2026
 
 - Fixed and LIVE (owner's yes, 16 Nov 2026): **Bill to in Edit details, and Email statement on the invoice.** Edit details can bill an unpaid invoice to another client (`invoices.bill_to_client_id`, the warranty column; "Back to <job's client>" clears it); Xero moves the invoice to that contact in the same save; refused when the invoice has an STC credit and the new client is a different kind (company or person), because that changes the GST on the credit. Migration 20261206000000 (functions only, on production and staging): the client's invoice page shows the bill-to client and their office address in Bill to, and an invoice sits on the statement of the client it is billed to. The invoice panel has **Email statement** for that client (the same code as the Clients page). Detail: `docs/PROJECT_SPEC.md` A22.
