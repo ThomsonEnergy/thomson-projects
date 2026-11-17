@@ -174,7 +174,7 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 
 Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on-site days the quoter estimates; a variation cost centre in another colour with its own dates; the quoter sees whether a job fits and what wait to tell the client; once approved the dates are confirmed with the client, and if we fall outside them the client is emailed. It must help decide when to order gear and when to book site work. (Was Tier 3 item M3 in `docs/PROJECT_SPEC.md`.)
 
-**Touches:** `project.html` (two hook lines only), `supabase-client.js` (shared reads), `style.css`, `schedule.html` (Plan view button and container), new `js/plan-chart.js`, new `js/job-window.js`, `quote.html` (wait line), `netlify/functions/accept-quote.js`, `approval-actions.js`, `create-variation.js`, `accept-variation.js`, `remind-client-bookings.js`, new `plan-email.js`, new `_shared/job-plan.js`, migration `20261207000000_job_plan.sql`.
+**Touches:** `project.html` (two hook lines only), `supabase-client.js` (shared reads), `style.css`, `schedule.html` (Plan view button and container), new `js/plan-chart.js`, new `js/job-window.js`, `quote.html` (wait line), `netlify/functions/accept-quote.js`, `approval-actions.js`, `create-variation.js`, `accept-variation.js`, `remind-client-bookings.js`, new `plan-email.js`, new `_shared/job-plan.js`, `portal.html`, `js/portal.js`, `portal-read.js`, `_shared/portal-data.js`, migration `20261207000000_job_plan.sql`.
 
 **Data (one new table, `job_windows`):** one row per quote or job (the main bar) and one per variation cost centre (`cost_centre_id` set). Columns: `project_id`, `cost_centre_id`, `onsite_days`, `crew_size` (default 2), `lead_weeks` (gear lead time, default 2), `start_date`, `end_date`, `promised_start`, `promised_end`, `client_confirmed_at`, `client_confirmed_by`, `confirm_email_id`, `slip_email_id`, `slip_told_at`, `updated_by`. Staff read; Admin, Finance and Sales write (one policy per action, fast RLS, FK indexes). Settings as data in `company_settings`: hours in a site day (8), default crew (2), default lead weeks (2), slip allowance in working days (2), who is on the tools (a tick per person on the Team page, defaulting to every active Staff role).
 
@@ -186,6 +186,7 @@ Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on
 5. **Variations.** `create-variation.js` adds a window for the variation cost centre: days from its hours, start straight after the job's finish (or today if the job is running). An orange bar, own dates, own days. If it pushes the job past the promised finish, step 4 fires.
 6. **Ordering and booking.** Each bar has an order-by mark (start less lead weeks) and a PO chip (nothing ordered, ordered, received). The 7am run tells the ops managers "Order gear for J1234 by Fri 27 Nov" when the mark is within 7 days and the job has no PO, and "Book people for J1234, starts Mon 8 Dec" when a job starts within 14 days with nobody booked in its window. Clicking either opens the PO create panel or Book people with the dates filled in.
 7. **Jobs already running.** The migration gives every approved, unfinished job a window from its first to last booking; jobs with no bookings land in the "no dates yet" column.
+8. **Client portal (owner, 17 Nov 2026).** A client sees their own jobs as bars on a small chart at the top of the portal and on each job page: the dates we confirmed with them, variations in orange, days with people booked and told, today's line. Never other clients' jobs, the crew load, order marks, or dates not yet confirmed (those read "Dates to be confirmed"). A slipped job shows the new dates only after the slip email is sent. Read through `portal-read.js` and `_shared/portal-data.js` like everything else there.
 
 **Done means**
 - On a draft quote with 64 labour hours, the When card shows 4 on-site days and a "Tell the client" range without typing anything.
@@ -194,6 +195,7 @@ Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on
 - Drag the bar 2 weeks later: it turns red, the drafted email opens with the new dates, sending clears it.
 - Add a variation with 16 hours: an orange 1 day bar appears under the job.
 - A job starting next week with no PO and no bookings shows both flags.
+- Log in to the portal as that client: their job shows as a bar with the confirmed dates and the orange variation, and no other client's job.
 
 **Kind:** feature into `staging`; migration yes (one table, RLS); no money, stock or payroll. **Size:** large.
 
