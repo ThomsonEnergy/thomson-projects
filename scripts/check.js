@@ -109,6 +109,31 @@ for (const file of sqlFiles) {
   }
 }
 
+// 4c. A second foreign key from one table to another makes every embed between them ambiguous
+// ("more than one relationship was found for 'projects' and 'clients'", 18 Nov 2026). From
+// 12 Dec 2026's migration on, a new "references public.X" on a table that already points at X fails
+// unless the line says "-- second link ok" (and every embed between them then names its key).
+{
+  const allSql = sqlFiles.map((f) => fs.readFileSync(f, 'utf8').toLowerCase()).join('\n');
+  const linksBefore = (table, target, uptoFile) => {
+    const earlier = sqlFiles.filter((f) => path.basename(f) < path.basename(uptoFile)).map((f) => fs.readFileSync(f, 'utf8').toLowerCase()).join('\n');
+    const fk = new RegExp(`(?:alter\\s+table\\s+(?:only\\s+)?public\\.${table}\\b[^;]*references\\s+public\\.${target}\\b)|(?:create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?public\\.${table}\\s*\\([^;]*references\\s+public\\.${target}\\b)`);
+    return fk.test(earlier);
+  };
+  void allSql;
+  for (const file of sqlFiles) {
+    if (path.basename(file) < '20261212000000') continue;
+    let table = null;
+    for (const line of fs.readFileSync(file, 'utf8').toLowerCase().split('\n')) {
+      const t = line.match(/(?:alter|create)\s+table\s+(?:only\s+|if\s+not\s+exists\s+)?(?:public\.)?(\w+)/);
+      if (t) table = t[1];
+      const ref = line.match(/references\s+(?:public\.)?(\w+)/);
+      if (!ref || !table || /--\s*second link ok/.test(line)) continue;
+      if (linksBefore(table, ref[1], file)) fail(file, new Error(`${table} already has a foreign key to ${ref[1]}: a second one breaks every embed between them (mark the line "-- second link ok" only if every embed names its key)`));
+    }
+  }
+}
+
 // 5. Dead code (new findings only, see scripts/deadcode-baseline.json) and page weight
 // budgets (scripts/page-budgets.json). Both print their own lines.
 const dead = require('./deadcode');
