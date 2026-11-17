@@ -5,10 +5,13 @@
 // the client or mark it told); otherwise (a Staff tradie rebooked it, or the maker has left) to the
 // ops managers in company_settings plus every active pricing role person (F48 in
 // docs/BUG_REVIEW_2026-10-23.md). Staff bookings with no job (admin, training) are skipped.
+// The same run sends the job plan's reminders (item 92, _shared/job-plan.js planReminders): a job
+// that moved past the dates the client was told, dates not confirmed, gear to order, people to book.
 
 const { getAdminClient } = require('./_shared/require-admin');
 const { runAgent, managerIds } = require('./_shared/agent-log');
 const E = require('./_shared/schedule-emails');
+const { planReminders } = require('./_shared/job-plan');
 
 const PRICING_ROLES = ['admin', 'finance', 'sales']; // the same roles as is_pricing_role()
 
@@ -57,8 +60,10 @@ exports.handler = async (event) => {
       }
       lines.push(`${E.jobTitle(g.project)}: ${when}`);
     }
-    const summary = `${byProject.size} job(s) booked in the next 3 days with the client not told, ${sent} reminder(s) sent.`;
+    // the job plan's own reminders (item 92): slipped jobs, dates not confirmed, order gear, book people
+    const plan = await planReminders(admin);
+    const summary = `${byProject.size} job(s) booked in the next 3 days with the client not told, ${sent} reminder(s) sent. Plan: ${plan.count} reminder(s).`;
     console.log(`remind-client-bookings: ${summary}`);
-    return { summary, details: lines.join('; ') || null, quiet: !byProject.size };
+    return { summary, details: [...lines, ...plan.lines].join('; ') || null, quiet: !byProject.size && !plan.count };
   });
 };

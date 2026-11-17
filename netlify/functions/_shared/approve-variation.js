@@ -6,6 +6,7 @@
 
 const { startFinalizeDocuments } = require('./start-finalize-documents');
 const { stageFromFixedLines } = require('./fixed-variation-lines');
+const { addVariationWindow, labourHours } = require('./job-plan');
 const METHOD_TEXT = { email: 'by email', phone: 'by phone call', in_person: 'in person' };
 
 // how: { method: 'online' | 'email' | 'phone' | 'in_person', signedName, signature, note, approvedBy, emailThreadId }
@@ -39,6 +40,9 @@ async function approveVariation(supabaseAdmin, entry, how) {
 
   const { error: liErr } = await supabaseAdmin.from('cost_centre_line_items').insert(rows.map((r) => ({ cost_centre_id: centre.id, ...r })));
   if (liErr) { await supabaseAdmin.from('cost_centres').delete().eq('id', centre.id); await putBack(); throw liErr; }
+
+  // its own bar on the Plan, sized from its labour hours, straight after the job (item 92); best effort
+  try { await addVariationWindow(supabaseAdmin, { projectId: entry.project_id, centreId: centre.id, hours: labourHours([{ cost_centre_line_items: rows }]), actorId: how.approvedBy || null }); } catch (e) { console.error('approve-variation: could not add the variation to the plan', e.message); }
 
   const online = how.method === 'online';
   const who = online ? how.signedName : (entry.client_name || 'the client');
