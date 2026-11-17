@@ -5,6 +5,8 @@
 // Who calls it: settings.html, loadSettings() (loaded the first time Company Details is filled),
 // as loadProposalPicturesCard(settingsRow). Writes company_settings.proposal_cover_photos and
 // about_photo_url, each the moment a picture is chosen or taken off: there is no Save to press.
+// The NETCC Approved Seller logo (solar and battery proposals) is kept in the same map as
+// proposal_cover_photos.netcc_logo, so it reaches the proposal with no change to the database.
 // The client's proposal reads both through get_public_company_settings() (quote.html).
 
 // The proposal types that print a front page, keyed as projects.proposal_template, and the
@@ -19,6 +21,8 @@ const PROPOSAL_PICTURE_TYPES = [
 ];
 const PROPOSAL_PICTURE_BUILT_IN = '/img/showcase/shed-solar.jpg';
 const ABOUT_PICTURE_BUILT_IN = '/img/showcase/campus-solar.jpg';
+// The NETCC Approved Seller logo sits in proposal_cover_photos under this key (quote.html reads it).
+const NETCC_LOGO_KEY = 'netcc_logo';
 
 function loadProposalPicturesCard(settings) {
   const card = document.getElementById('proposal-pictures-card');
@@ -30,15 +34,19 @@ function loadProposalPicturesCard(settings) {
 
   // shape: the preview is cut the way the proposal cuts the picture (a whole upright sheet for
   // the front page, a wide band for About)
-  const tile = (id, label, url, builtIn, note, shape) => `
+  // A box with no built-in picture (the NETCC logo) shows an empty frame until one is chosen; fit
+  // 'contain' shows a logo whole instead of cutting it to the frame.
+  const tile = (id, label, url, builtIn, note, shape, { fit = 'cover', clearLabel = 'Use the built-in picture' } = {}) => `
     <div class="pp-tile" data-id="${escapeHtml(id)}" style="border:1px solid var(--border); border-radius:8px; padding:10px;">
       <div style="font-weight:600; font-size:13px; margin-bottom:6px;">${escapeHtml(label)}</div>
-      <img src="${escapeHtml(url ? supaImageVariant(url, 500, 70) : builtIn)}" alt="" loading="lazy" style="width:100%; aspect-ratio:${shape}; object-fit:cover; border-radius:6px; background:var(--surface-2); display:block;" />
+      ${(url || builtIn)
+        ? `<img src="${escapeHtml(url ? supaImageVariant(url, 500, 70) : builtIn)}" alt="" loading="lazy" style="width:100%; aspect-ratio:${shape}; object-fit:${fit}; border-radius:6px; background:${fit === 'contain' ? '#fff' : 'var(--surface-2)'}; display:block;" />`
+        : `<div style="width:100%; aspect-ratio:${shape}; border-radius:6px; background:var(--surface-2);"></div>`}
       <p class="subtitle" style="font-size:11.5px; margin:6px 0;">${url ? 'Your picture' : escapeHtml(note)}</p>
       <label style="display:inline-block; margin:0; font-weight:600; font-size:12px; padding:6px 10px; cursor:pointer; border:1px solid var(--border); border-radius:6px;">
         ${url ? 'Change picture' : 'Choose a picture'}<input type="file" class="pp-file" accept="image/*" style="display:none;" />
       </label>
-      ${url ? '<button type="button" class="link-quiet pp-clear" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:8px; font-size:12px; cursor:pointer;">Use the built-in picture</button>' : ''}
+      ${url ? `<button type="button" class="link-quiet pp-clear" style="background:none; border:none; padding:0; min-height:0; color:var(--link); margin-left:8px; font-size:12px; cursor:pointer;">${escapeHtml(clearLabel)}</button>` : ''}
       <div class="pp-msg" style="font-size:12px;">${failed[id] ? `<div class="error-box" style="margin-top:6px;">${escapeHtml(failed[id])}</div>` : ''}</div>
     </div>`;
 
@@ -69,6 +77,10 @@ function loadProposalPicturesCard(settings) {
       <h3 style="font-size:14px; margin:16px 0 8px;">Beside About Thomson Energy, on every proposal</h3>
       <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 300px)); gap:12px;">
         ${tile('about', 'About Thomson Energy', about, ABOUT_PICTURE_BUILT_IN, 'Built-in pictures (one of six)', '3 / 2')}
+      </div>
+      <h3 style="font-size:14px; margin:16px 0 8px;">NETCC Approved Seller logo, on every solar and battery proposal</h3>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 300px)); gap:12px;">
+        ${tile(NETCC_LOGO_KEY, 'New Energy Tech Approved Seller', covers[NETCC_LOGO_KEY], '', 'No logo yet: the proposal says it in words only', '3 / 1', { fit: 'contain', clearLabel: 'Take the logo off' })}
       </div>`;
     card.querySelectorAll('.pp-tile').forEach(el => {
       const id = el.dataset.id;
@@ -86,7 +98,7 @@ function loadProposalPicturesCard(settings) {
         change(async () => { const [url] = await uploadPhotos(files, 'proposal-pictures'); await save(id, url); }, 'Proposal picture saved.');
       });
       const clear = el.querySelector('.pp-clear');
-      if (clear) clear.addEventListener('click', () => change(() => save(id, ''), 'Back to the built-in picture.'));
+      if (clear) clear.addEventListener('click', () => change(() => save(id, ''), id === NETCC_LOGO_KEY ? 'Logo taken off.' : 'Back to the built-in picture.'));
     });
   }
   render();
