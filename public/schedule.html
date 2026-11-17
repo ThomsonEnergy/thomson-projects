@@ -1265,7 +1265,7 @@
       document.getElementById('period-badges').innerHTML = '';
       try {
         await loadJsOnce('/js/plan-calc.js?v=1', () => typeof PlanCalc !== 'undefined');
-        await loadJsOnce('/js/plan-chart.js?v=4', () => typeof PlanChart !== 'undefined');
+        await loadJsOnce('/js/plan-chart.js?v=7', () => typeof PlanChart !== 'undefined');
         await PlanChart.show({
           el: document.getElementById('plan-view'), canEdit: canEditSchedule(), isAdmin: myRole === 'admin', myId, focus: planFocus,
           onLabel: (text, start) => { document.getElementById('period-label').textContent = text; document.getElementById('period-jump').value = start; },
