@@ -185,7 +185,10 @@ async function draftClientEmail(admin, projectId) {
   const { job, rows, main } = await loadJob(admin, projectId);
   const [rec, phone] = await Promise.all([E.recipientFor(admin, job), E.companyPhone(admin)]);
   const kind = main.promised_start ? 'change' : 'confirm';
-  return { kind, to: rec.to, toName: rec.name, source: rec.source, ...clientEmailText({ kind, first: rec.first, job, main, rows, phone }) };
+  const text = clientEmailText({ kind, first: rec.first, job, main, rows, phone });
+  // a client who can log in to the portal is pointed at it, where these dates show too (item 74 PR 2)
+  if (rec.to) text.body += await require('./portal-mail').portalLine(admin, rec.to);
+  return { kind, to: rec.to, toName: rec.name, source: rec.source, ...text };
 }
 
 // The client now knows the dates on the Plan: they become the promised dates (the job's whole

@@ -94,34 +94,41 @@
   // day and time filled in. Booking a day and telling the client closes the ask by itself (a
   // database trigger), so there is no accept or decline.
   function renderAsk(ask, project) {
-    const days = document.getElementById('job-sched-days');
+    const daysBox = document.getElementById('job-sched-days');
     let el = document.getElementById('job-sched-ask');
-    if (!el) { el = document.createElement('div'); el.id = 'job-sched-ask'; days.parentNode.insertBefore(el, days); }
-    if (!ask) { el.innerHTML = ''; return; }
-    const when = `${fmtDay(ask.ask_date)}${ask.ask_time ? `, ${hhmm(ask.ask_time)}` : ', any time'}`;
+    if (!el) { el = document.createElement('div'); el.id = 'job-sched-ask'; daysBox.parentNode.insertBefore(el, daysBox); }
+    // a job the client asked to be booked in from the portal (item 74 point 9): their suggested days,
+    // until a booking from today on is marked Client informed
+    const t = today();
+    const told = S.rows.some((r) => r.assignment_date >= t && r.client_informed_at);
+    const suggested = !ask && !told ? (project.client_suggested_dates || []).filter((d) => d >= t) : [];
+    if (!ask && !suggested.length) { el.innerHTML = ''; return; }
+    const days = ask ? [{ date: ask.ask_date, time: ask.ask_time }] : suggested.map((d) => ({ date: d, time: null }));
+    const when = ask ? `${fmtDay(ask.ask_date)}${ask.ask_time ? `, ${hhmm(ask.ask_time)}` : ', any time'}` : days.map((d) => fmtDay(d.date)).join(' or ');
+    const by = ask ? `${ask.email}, in the portal ${fmtDate(ask.created_at)}` : `${project.portal_requested_by || 'the client'}, when they asked for the work`;
     el.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; margin-bottom:10px; border:1px solid var(--amber); border-radius:8px; background:var(--amber-dim);">
-        <span><strong>Client asked for ${esc(when)}</strong> <span class="subtitle" style="font-size:12px;">(${esc(ask.email)}, in the portal ${esc(fmtDate(ask.created_at))})</span>${ask.note ? `<br><span style="font-size:13px;">${esc(ask.note)}</span>` : ''}</span>
-        ${S.canEdit ? '<button type="button" id="job-sched-ask-book" style="font-size:12px; padding:6px 12px;">Book it</button>' : ''}
+        <span><strong>Client asked for ${esc(when)}</strong> <span class="subtitle" style="font-size:12px;">(${esc(by)})</span>${ask && ask.note ? `<br><span style="font-size:13px;">${esc(ask.note)}</span>` : ''}</span>
+        ${S.canEdit ? `<span style="display:flex; gap:6px; flex-wrap:wrap;">${days.map((d, i) => `<button type="button" class="job-sched-ask-book" data-i="${i}" style="font-size:12px; padding:6px 12px;">Book ${days.length > 1 ? esc(fmtDay(d.date)) : 'it'}</button>`).join('')}</span>` : ''}
       </div>`;
-    const btn = el.querySelector('#job-sched-ask-book');
-    if (btn) btn.addEventListener('click', () => {
+    el.querySelectorAll('.job-sched-ask-book').forEach((btn) => btn.addEventListener('click', () => {
+      const pick = days[Number(btn.dataset.i)];
       openScheduleStaffPanel(project);
       // fill the Book people form once it has drawn (it loads the staff list first)
       const fill = () => {
         const date = document.getElementById('sched-date');
         if (!date) return false;
-        date.value = ask.ask_date;
-        if (ask.ask_time) {
+        date.value = pick.date;
+        if (pick.time) {
           const start = document.getElementById('sched-start');
-          if (start) start.value = hhmm(ask.ask_time);
+          if (start) start.value = hhmm(pick.time);
         }
         return true;
       };
       const watch = new MutationObserver(() => { if (fill()) watch.disconnect(); });
       watch.observe(document.body, { childList: true, subtree: true });
       setTimeout(() => watch.disconnect(), 10000);
-    });
+    }));
   }
 
   function renderDays() {
