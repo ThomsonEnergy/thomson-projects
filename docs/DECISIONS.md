@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 18 Nov 2026
 
+- LIVE 18 Nov 2026 (the same "build it now and straight to main"): **item 74 PR 2.** Clients request work from the portal (Quote it makes a draft Q with their due date; Book it in makes a do and charge J with their suggested days), message us on a job (the Feed tab's Client messages card, reply by email too), and give people at their company a login (People card); client emails and the proposal and invoice pages link to the portal. Migration 20261209000000 on production and staging. Next: PR 3 (lead rewards, money and payroll). Detail: `docs/PROJECT_SPEC.md` A35.
 - LIVE 18 Nov 2026 (owner: "Yes build it, live now, all functions to do with gantt or client portal build now and straight to main"): **item 74 point 9a, clients ask for a date in the portal**; booking it and telling the client closes the ask by itself. Migration 20261208000000 on production and staging. Next in this chat, each straight to `main` as it is finished: item 74 PR 2 (requests for work, messages on the Feed tab, the People card, the portal link in client emails), then PR 3 (referral link and lead rewards; money and payroll, so a backup before its migration). Detail: `docs/PROJECT_SPEC.md` A35.
 ## 17 Nov 2026
 

@@ -376,6 +376,7 @@
           ${!s.bank_name && !s.bank_account_number && !s.payment_details_text ? '<div>Contact us for payment details.</div>' : ''}
           ${s.phone ? `<div style="margin-top:8px;">Card over the phone: <a href="${esc('tel:' + String(s.phone).replace(/[^+\d]/g, ''))}">${esc(s.phone)}</a></div>` : ''}`}
           <p class="ds-note">The full invoice is below. Use Print / Save as PDF for a copy.</p>
+          <p class="ds-note">Have a client portal login? <a href="/portal.html">See all your jobs and invoices</a>.</p>
         </div>`;
 
       // ---- build the sheets, moving rows onto a new sheet whenever one fills up ----

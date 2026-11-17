@@ -51,7 +51,7 @@
   <script src="/js/email-view.js?v=4"></script>
   <script src="/js/email-compose.js?v=13"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
-  <script src="/js/job-schedule.js?v=4"></script>
+  <script src="/js/job-schedule.js?v=5"></script>
   <script src="/js/job-contacts.js?v=3"></script>
   <script src="/js/share-with-client.js?v=1"></script>
   <script src="/js/rate-cards.js?v=2"></script>
@@ -3262,6 +3262,7 @@
               </div>
 
               <div class="card" id="qstep-1">
+                <div id="client-due-card"></div><!-- js/client-due.js: asked for in the client portal, due date and Extend (item 74) -->
                 ${stepHead(1, 'Pre-quote information', 'What you learned on the phone, by email or on site. Change it any time. Questions marked * must be answered before the quote is sent. Not shown to the client; it shapes the scope of works and the job\'s task list.')}
                 <div class="grid cols-3" style="margin-bottom:6px;">
                   <div>
@@ -4510,6 +4511,7 @@
 
             ${!editMode ? `
             <div class="settings-panel" id="panel-feed">
+              <div class="card" id="job-client-msgs"></div><!-- js/feed-client.js: the thread with the client (item 74) -->
               <div class="card">
                 <h2>Job feed</h2>
                 <p class="subtitle" style="margin-bottom:10px;">Notes about this job that everyone can like and comment on. Tag people to keep them in the loop (they get a notification on their Home page), and tick "Also show on the Home page" to share a note with the whole team.</p>
@@ -4825,6 +4827,7 @@
             feedLoaded = true;
             await mountFeedComposer(document.getElementById('job-feed-composer'), { ...feedOpts, onPosted: () => renderFeedList(document.getElementById('job-feed-list'), feedOpts) });
           }
+          loadJsOnce('/js/feed-client.js?v=1', () => typeof renderClientMessages === 'function').then(() => renderClientMessages(document.getElementById('job-client-msgs'), project)); // item 74
           await renderFeedList(document.getElementById('job-feed-list'), feedOpts);
           await renderJobChat(document.getElementById('job-chat-list'), project.id);
         });
@@ -5056,6 +5059,7 @@
       const editToggleBtn = document.getElementById('edit-toggle-btn');
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
       if (document.getElementById('panel-quote')) wireQuoteSteps(project);
+      if (document.getElementById('client-due-card') && project.portal_requested_at) loadJsOnce('/js/client-due.js?v=1', () => typeof initClientDue === 'function').then(() => initClientDue(project)); // item 74
       if (document.getElementById('job-window-card')) loadJsOnce('/js/job-window.js?v=1', () => typeof initJobWindow === 'function').then(() => initJobWindow(project)); // item 92
 
       document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {
