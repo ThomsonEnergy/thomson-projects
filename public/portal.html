@@ -55,6 +55,22 @@
   .pl-btn { display:inline-block; padding:6px 12px; font-size:13px; text-decoration:none; }
   .pl-lightbox { position:fixed; inset:0; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; z-index:50; }
   .pl-lightbox img { max-width:96vw; max-height:92vh; object-fit:contain; }
+  /* the dates chart (item 92): only dates we told the client */
+  .pc { font-size:12px; }
+  .pc-weeks { position:relative; height:16px; color:var(--muted); font-size:11px; margin-left:0; }
+  .pc-wk { position:absolute; top:0; white-space:nowrap; border-left:1px solid var(--border); padding-left:3px; }
+  .pc-row { margin:6px 0 10px; }
+  .pc-label { font-size:13px; margin-bottom:3px; }
+  .pc-label a { color:inherit; text-decoration:none; }
+  .pc-lane { position:relative; height:16px; background:var(--surface-2); border-radius:4px; }
+  .pc-bar { position:absolute; top:0; height:16px; background:#2B3990; border-radius:4px; overflow:hidden; min-width:6px; }
+  .pc-bar.var { background:#F2A53A; top:8px; height:8px; }
+  .pc-bar i { position:absolute; top:0; bottom:0; background:rgba(255,255,255,0.35); }
+  .pc-today { position:absolute; top:-3px; bottom:-3px; width:2px; background:#c0272d; z-index:1; }
+  .pc-sub { color:var(--muted); margin-top:2px; }
+  .pc-key { display:flex; gap:12px; flex-wrap:wrap; color:var(--muted); margin-top:4px; }
+  .pc-sw { display:inline-block; width:12px; height:8px; border-radius:2px; background:#2B3990; margin-right:4px; }
+  .pc-sw.var { background:#F2A53A; } .pc-sw.booked { background:#8d95c4; } .pc-sw.today { background:#c0272d; width:2px; }
   @media (max-width: 600px) { .pl-table th:nth-child(3), .pl-table td:nth-child(3) { display:none; } }
 </style>
 </head>
@@ -66,6 +82,6 @@
   <div class="wrap" id="pl-main" style="padding:12px 16px 40px;">
     <p class="subtitle">Loading...</p>
   </div>
-  <script src="/js/portal.js?v=3"></script>
+  <script src="/js/portal.js?v=4"></script>
 </body>
 </html>
