@@ -238,6 +238,56 @@
   const card = (title, body) => `<h2 class="pl-h">${esc(title)}</h2><div class="pl-card">${body}</div>`;
   const bookingLine = (b) => `${esc(b.day)}${b.start ? `, ${esc(b.start)}${b.end ? ` to ${esc(b.end)}` : ''}` : ''}${b.who.length ? `, ${esc(listNames(b.who))}` : ''}`;
 
+  // ----- ask for a date (point 9a): books nothing, the office books it and emails them -----
+  const tomorrow = () => { const d = new Date(todayYmd() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+  const askTimes = () => { const out = []; for (let m = 7 * 60; m <= 16 * 60; m += 30) out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`); return out; };
+  const timeLabel = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
+  function askHtml(d) {
+    if (!d.open) return '';
+    if (d.ask) return `<div class="pl-need" id="pl-ask" style="border-bottom:1px solid var(--border); margin-bottom:6px;"><span>You asked for <strong>${esc(d.ask.day)}${d.ask.time ? `, ${esc(d.ask.time)}` : ', any time'}</strong>. We will confirm by email.${d.ask.note ? `<br><span class="pl-muted">${esc(d.ask.note)}</span>` : ''}</span><span style="white-space:nowrap;"><button type="button" class="secondary pl-btn" id="pl-ask-change">Change</button> <button type="button" class="secondary pl-btn" id="pl-ask-withdraw">Withdraw</button></span></div>`;
+    return `<div id="pl-ask" style="margin-bottom:8px;"><button type="button" class="secondary pl-btn" id="pl-ask-open">Ask for a date</button></div>`;
+  }
+  function askForm(d) {
+    const box = document.getElementById('pl-ask');
+    const a = d.ask || {};
+    const at = a.timeValue || '';
+    box.innerHTML = `
+      <div class="pl-card" style="margin:0 0 8px;">
+        <strong>Ask for a date</strong>
+        <p class="pl-muted" style="margin:2px 0 8px;">We will check who is free and confirm by email. Nothing is booked until we do.</p>
+        <label class="pl-muted">Day</label><input type="date" id="pl-ask-date" min="${esc(tomorrow())}" value="${esc(a.date || '')}" style="width:100%; font-size:16px;" />
+        <label class="pl-muted" style="display:block; margin-top:8px;">Start</label>
+        <select id="pl-ask-time" style="width:100%; font-size:16px;"><option value="">Any time</option>${askTimes().map((t) => `<option value="${t}" ${t === at ? 'selected' : ''}>${timeLabel(t)}</option>`).join('')}</select>
+        <label class="pl-muted" style="display:block; margin-top:8px;">Anything we should know (optional)</label>
+        <textarea id="pl-ask-note" rows="3" maxlength="500" style="width:100%; font-size:16px;">${esc(a.note || '')}</textarea>
+        <div id="pl-ask-msg"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" id="pl-ask-send">Send</button><button type="button" class="secondary" id="pl-ask-cancel">Cancel</button></div>
+      </div>`;
+    box.querySelector('#pl-ask-cancel').addEventListener('click', () => showJob(d.id));
+    box.querySelector('#pl-ask-send').addEventListener('click', async (e) => {
+      const date = box.querySelector('#pl-ask-date').value;
+      const msg = box.querySelector('#pl-ask-msg');
+      if (!date || date < tomorrow()) { msg.innerHTML = '<p class="pl-muted" style="color:#c0272d;">Pick a day from tomorrow on.</p>'; return; }
+      e.target.disabled = true;
+      try {
+        await call('portal-write', { action: 'ask_date', projectId: d.id, date, time: box.querySelector('#pl-ask-time').value, note: box.querySelector('#pl-ask-note').value });
+        showJob(d.id);
+      } catch (err) { msg.innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; e.target.disabled = false; }
+    });
+  }
+  function wireAsk(d) {
+    const open = document.getElementById('pl-ask-open');
+    if (open) open.addEventListener('click', () => askForm(d));
+    const change = document.getElementById('pl-ask-change');
+    if (change) change.addEventListener('click', () => askForm(d));
+    const withdraw = document.getElementById('pl-ask-withdraw');
+    if (withdraw) withdraw.addEventListener('click', async () => {
+      if (!confirm('Withdraw your ask for this date?')) return;
+      withdraw.disabled = true;
+      try { await call('portal-write', { action: 'withdraw_ask', projectId: d.id }); showJob(d.id); } catch (err) { alert(err.message); withdraw.disabled = false; }
+    });
+  }
+
   async function showJob(id) {
     main.innerHTML = `<p class="subtitle">Loading...</p>`;
     const { job: d, email } = await call('portal-read', { action: 'job', projectId: id });
@@ -259,7 +309,7 @@
       </div>
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
       ${d.kind === 'job' && d.plan ? card('Dates', d.plan.pending ? '<span class="pl-muted">Dates to be confirmed. We will email you the dates.</span>' : `${planChart([{ bars: d.plan.bars, booked: d.plan.booked }])}<div class="pl-muted" style="margin-top:6px;">${barsText(d.plan)}</div>`) : ''}
-      ${d.kind === 'job' ? card('Bookings', `
+      ${d.kind === 'job' ? card('Bookings', `${askHtml(d)}
           ${d.bookings.length ? d.bookings.map((b) => `<div style="margin:4px 0;">${bookingLine(b)}</div>`).join('') : `<span class="pl-muted">Nothing booked yet. We will let you know when it is.</span>`}
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
       ${d.variations.length ? card('Variations', d.variations.map((v) => `
@@ -275,6 +325,7 @@
         ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener" data-open="opened_document" data-project="${esc(d.id)}" data-detail="${esc(f.name)}">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}
         ${d.ratesUrl ? `<div class="pl-need" style="border-top:1px solid var(--border);"><span>Schedule of Rates${d.agreement ? `<br><span class="pl-muted">Your commercial agreement: ${esc(d.agreement.percentOff)}% off labour</span>` : ''}</span><a href="${esc(d.ratesUrl)}" target="_blank" rel="noopener" data-open="opened_rates" data-project="${esc(d.id)}">Open</a></div>` : ''}`)}`;
     main.querySelectorAll('.pl-grid img').forEach((img) => img.addEventListener('click', () => lightbox(pictures, Number(img.dataset.i))));
+    wireAsk(d);
     if (d.hasWork) showWork(d.work);
   }
 
