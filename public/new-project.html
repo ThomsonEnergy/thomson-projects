@@ -123,6 +123,8 @@
     if (editId) window.location.replace(`/project.html?id=${encodeURIComponent(editId)}&tab=quote`);
 
     let prefillLeadId = null;
+    let prefillReferrerId = null;
+    let prefillLeadAnswers = {};
     let prefillEmailThreadId = null; // quote started from an inbox conversation
     let prefillBrief = ''; // a lead's or email's summary of the work, saved as the AI brief
     let prefillLeadNeedsVisit = false; // the lead said a site visit is needed: step 2 starts at Needed
@@ -310,13 +312,14 @@
           deposit_percent: payDefaults.deposit,
           reference_photos: [], cover_photos: coverPhotos,
           proposal_template: currentTemplate,
-          template_answers: startingAnswers({ fromLead: !!prefillLeadId, fromEmail: !!prefillEmailThreadId }),
+          template_answers: { ...startingAnswers({ fromLead: !!prefillLeadId, fromEmail: !!prefillEmailThreadId }), ...prefillLeadAnswers },
           estimate_disclaimer_text: currentTemplate === 'quick_estimate'
             ? (companySettings.default_estimate_disclaimer || 'Estimate only - the final invoice is based on actual hours and materials used, not this figure. Accepting this estimate lets us schedule the work.')
             : '',
           pipeline_stage: 'draft_quote',
         };
         if (prefillLeadId) projectFields.lead_id = prefillLeadId;
+        if (prefillReferrerId) projectFields.referrer_client_id = prefillReferrerId;
         if (prefillLeadNeedsVisit) Object.assign(projectFields, { site_visit_decision: 'needed', needs_site_visit: true });
 
         const { data: project, error: projErr } = await supabaseClient.from('projects').insert(projectFields).select().single();
@@ -409,6 +412,12 @@
             : '(no further details captured)';
           document.getElementById('p-notes').value = `Website enquiry (${sourceLabels[lead.source] || lead.source}), ${new Date(lead.created_at).toLocaleDateString('en-AU')}.\n\n${lead.ai_summary ? lead.ai_summary + '\n\n' : ''}${qanda}`;
           prefillLeadNeedsVisit = !!lead.needs_site_visit;
+          // a referred lead (item 74b): who sent it (no reward when they were already a client), and the
+          // answers given on the referral link under the quote's own question ids
+          prefillReferrerId = lead.already_client ? null : (lead.referrer_client_id || null);
+          // only these: the quote's own non-compliance questions the referral form asks (never a required check)
+          const QUOTE_ANSWER_IDS = ['roof_type', 'phases', 'existing_pv', 'fault', 'urgency'];
+          prefillLeadAnswers = lead.source === 'portal_referral' ? Object.fromEntries(QUOTE_ANSWER_IDS.map((k) => [k, (lead.details || {})[k]]).filter(([, v]) => typeof v === 'string' && v && v !== 'Not sure')) : {};
           prefillLeadAttachments = ((lead.details && lead.details.attachments) || []).filter(a => a && a.path);
           if (prefillLeadAttachments.length) document.getElementById('lead-attachments-note').innerHTML = `<p class="subtitle" style="margin-top:8px;">${prefillLeadAttachments.length} file${prefillLeadAttachments.length === 1 ? '' : 's'} came with this enquiry. Create adds them to the quote's scope of works documents, which the AI reads.</p>`;
         }

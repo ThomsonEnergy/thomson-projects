@@ -70,7 +70,7 @@
   async function sendPortalLogin(a) {
     a.textContent = 'Sending...';
     try {
-      await loadJsOnce('/js/clients-portal.js?v=3', () => typeof sendPortalLogins === 'function');
+      await loadJsOnce('/js/clients-portal.js?v=4', () => typeof sendPortalLogins === 'function');
       const r = await sendPortalLogins([a.dataset.email], { resend: true });
       showToast(r.text, { error: r.failed.length > 0, ms: 8000 });
       a.textContent = r.sent.length ? 'Portal login sent' : 'Send portal login';

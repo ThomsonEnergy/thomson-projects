@@ -73,4 +73,25 @@ async function portalLine(admin, email) {
   return `\n\nSee your jobs, bookings, photos and invoices any time in your portal: ${publicBaseUrl()}/portal.html`;
 }
 
-module.exports = { sendPortalCode, sendPortalWelcome, portalLine };
+// The referral link email (item 74b): sent when a client's lead reward is turned on, and from "Send
+// link" on the Clients page. The link only ever sends us a job in their name.
+async function sendReferralLink(admin, { to, name: toName, link, how }) {
+  const { mailbox, name, phone } = await companyAndMailbox(admin);
+  const first = String(toName || '').trim().split(/\s+/)[0] || 'there';
+  const bodyText = [
+    `Hi ${first},`,
+    '',
+    `Here is your own link for sending jobs to ${name}:`,
+    '',
+    link,
+    '',
+    `Use it for your own work, or pass on a friend, a neighbour or a business contact who needs solar, a battery, a switchboard upgrade or a fault fixed. When we win a job you sent us, you get ${how}.`,
+    '',
+    'Save it to your phone\'s home screen so it is always there, or forward it to your team. It takes under a minute: no login needed.',
+    '',
+    name + (phone ? `, ${phone}` : ''),
+  ].join('\n');
+  return sendPlain(mailbox, { fromName: name, fromAddress: GMAIL_MAILBOX, to, subject: `Your ${name} referral link`, bodyText });
+}
+
+module.exports = { sendPortalCode, sendPortalWelcome, portalLine, sendReferralLink };

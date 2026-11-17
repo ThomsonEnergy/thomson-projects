@@ -64,8 +64,10 @@ function renderClientPortal(client, { reopen } = {}) {
     <button type="button" class="secondary" id="cp-send" style="font-size:12px; padding:6px 12px;" ${logins.length && !off ? '' : 'disabled'}>Send login</button>
     <button type="button" class="secondary" id="cp-toggle" style="font-size:12px; padding:6px 12px;">${off ? 'Portal on' : 'Portal off'}</button>
     <a class="link-quiet" href="/portal.html" target="_blank" rel="noopener" style="font-size:12px; margin-left:8px;">Open the portal</a>
-    <div id="cp-msg"></div>`;
+    <div id="cp-msg"></div>
+    <div id="cp-referral" style="margin-top:12px;"></div>`;
   loadPortalUsage(client.id, el.querySelector('#cp-usage'));
+  renderClientReferral(client, el.querySelector('#cp-referral'));
   el.querySelector('#cp-send').addEventListener('click', async () => {
     const btn = el.querySelector('#cp-send');
     btn.disabled = true; btn.textContent = 'Sending...';
@@ -102,4 +104,55 @@ async function loadPortalUsage(clientId, el) {
   const line = (e) => `${portalWhenText(e.created_at)}: ${escapeHtml(e.email)} ${escapeHtml(PORTAL_EVENT_WORDS[e.action] || e.action)}${e.detail ? ` ${escapeHtml(e.detail)}` : ''}`;
   el.innerHTML = `Last 30 days: ${logins.length} login${logins.length === 1 ? '' : 's'}, ${people.size} ${people.size === 1 ? 'person' : 'people'}${looked.length ? `. Looked at ${escapeHtml(looked.join(', '))}` : ''}.
     <details style="margin-top:4px;"><summary style="cursor:pointer;">Show more (${events.length})</summary><div style="margin-top:4px; max-height:220px; overflow:auto;">${events.map((e) => `<div>${line(e)}</div>`).join('')}</div></details>`;
+}
+
+// The lead reward and referral link (item 74b, step 3a): Off, Pay or Credit; turning it on emails the
+// client their link by itself. Copy, Send link and Regenerate (the old link stops working).
+async function clientReferralCall(body) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/client-referral', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+  return data;
+}
+function renderClientReferral(client, el) {
+  if (!el) return;
+  const kind = client.lead_reward_kind || 'off';
+  const link = client.referral_token ? `${location.origin}/refer.html?r=${client.referral_token}` : '';
+  el.innerHTML = `
+    <label>Lead reward</label>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <select id="cr-kind" style="width:auto;">
+        <option value="off" ${kind === 'off' ? 'selected' : ''}>Off</option>
+        <option value="credit" ${kind === 'credit' ? 'selected' : ''}>Credit off their next invoice</option>
+        <option value="pay" ${kind === 'pay' ? 'selected' : ''}>Pay to their bank account</option>
+      </select>
+      <span class="subtitle" style="font-size:12px;">Amounts are in Settings &gt; Rewards. Turning it on emails them their link.</span>
+    </div>
+    ${link ? `<p class="subtitle" style="margin:6px 0; font-size:12px; word-break:break-all;">Their link: <a href="${escapeHtml(link)}" target="_blank" rel="noopener">${escapeHtml(link)}</a></p>
+    <button type="button" class="secondary" id="cr-copy" style="font-size:12px; padding:6px 12px;">Copy link</button>
+    <button type="button" class="secondary" id="cr-send" style="font-size:12px; padding:6px 12px;">Send link</button>
+    <button type="button" class="secondary" id="cr-regen" style="font-size:12px; padding:6px 12px;">Regenerate</button>` : ''}
+    <div id="cr-msg"></div>`;
+  const msg = (html) => { el.querySelector('#cr-msg').innerHTML = html; };
+  el.querySelector('#cr-kind').addEventListener('change', async (e) => {
+    try {
+      const out = await clientReferralCall({ action: 'set_kind', clientId: client.id, kind: e.target.value });
+      client.lead_reward_kind = e.target.value;
+      msg(out.warning ? `<div class="error-box">${escapeHtml(out.warning)}</div>` : `<div class="success-box">${out.emailed ? 'Saved, and their link has been emailed to them.' : 'Saved.'}</div>`);
+    } catch (err) { msg(`<div class="error-box">${escapeHtml(err.message)}</div>`); e.target.value = kind; }
+  });
+  const copy = el.querySelector('#cr-copy');
+  if (copy) copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(link); showToast('Link copied.'); } catch { prompt('Copy the link:', link); } });
+  const send = el.querySelector('#cr-send');
+  if (send) send.addEventListener('click', async () => {
+    send.disabled = true;
+    try { await clientReferralCall({ action: 'send', clientId: client.id }); msg('<div class="success-box">Link emailed.</div>'); } catch (err) { msg(`<div class="error-box">${escapeHtml(err.message)}</div>`); }
+    send.disabled = false;
+  });
+  const regen = el.querySelector('#cr-regen');
+  if (regen) regen.addEventListener('click', async () => {
+    if (!confirm('Make a new link? The old one stops working straight away.')) return;
+    try { const out = await clientReferralCall({ action: 'regenerate', clientId: client.id }); client.referral_token = out.token; renderClientReferral(client, el); showToast('New link made. Send it to them.'); } catch (err) { msg(`<div class="error-box">${escapeHtml(err.message)}</div>`); }
+  });
 }
