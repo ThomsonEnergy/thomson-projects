@@ -136,7 +136,7 @@ async function createRequest(admin, scope, input) {
     const dates = [...new Set((Array.isArray(input.dates) ? input.dates : []).filter((d) => DATE.test(d) && d > today))].sort().slice(0, 3);
     if (!dates.length) throw new Refused('Suggest at least one day from tomorrow on.');
     const { data, error } = await admin.from('projects').insert({
-      ...base, sow_text: need, proposal_template: 'direct_job', pipeline_stage: 'awaiting_action', status: 'in_progress', client_suggested_dates: dates,
+      ...base, sow_text: need, proposal_template: 'direct_job', pipeline_stage: 'ready_to_book', status: 'in_progress', client_suggested_dates: dates,
     }).select('id, name, quote_number, job_number').single();
     if (error) throw error;
     project = data;
