@@ -24,7 +24,9 @@ alter table public.leads
   add column if not exists already_client boolean not null default false;
 create index if not exists leads_referrer_client on public.leads (referrer_client_id);
 
-alter table public.projects add column if not exists referrer_client_id uuid references public.clients(id) on delete set null;
+-- no foreign key: projects already points at clients (client_id), and a second key breaks every
+-- projects-clients embed (see 20261212000000)
+alter table public.projects add column if not exists referrer_client_id uuid;
 create index if not exists projects_referrer_client on public.projects (referrer_client_id);
 
 alter table public.company_settings
