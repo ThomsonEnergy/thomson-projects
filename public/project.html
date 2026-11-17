@@ -3393,6 +3393,7 @@
                   </div>
                 </div>
                 </div>
+                <div id="job-window-card"></div><!-- js/job-window.js: days on site and the wait to tell the client (item 92) -->
                 <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
                 <div id="qs3-msg"></div>
               </div>
@@ -5055,6 +5056,7 @@
       const editToggleBtn = document.getElementById('edit-toggle-btn');
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
       if (document.getElementById('panel-quote')) wireQuoteSteps(project);
+      if (document.getElementById('job-window-card')) loadJsOnce('/js/job-window.js?v=1', () => typeof initJobWindow === 'function').then(() => initJobWindow(project)); // item 92
 
       document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {
         // Show or hide the rows in place: no re-render, so search text, scroll and unsaved notes stay.

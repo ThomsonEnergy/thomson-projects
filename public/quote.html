@@ -552,12 +552,15 @@
     });
 
     async function load() {
-      const [{ data: rpcData, error: rpcError }, { data: settings }] = await Promise.all([
+      const [{ data: rpcData, error: rpcError }, { data: settings }, { data: waitText }] = await Promise.all([
         variationToken
           ? supabaseClient.rpc('get_variation_by_token', { p_token: variationToken })
           : supabaseClient.rpc('get_quote_by_token', { p_token: token }),
         supabaseClient.rpc('get_public_company_settings'),
+        // the wait the quoter worked out on the quote's When card (item 92); null once approved
+        variationToken ? Promise.resolve({ data: null }) : supabaseClient.rpc('get_quote_wait', { p_token: token }).then((r) => r, () => ({ data: null })),
       ]);
+      const waitLine = waitText ? `<p class="note-line">Estimated start: ${escapeHtml(waitText)} from acceptance. We confirm the exact dates with you once you accept.</p>` : '';
       const content = document.getElementById('content');
       const vInfo = variationToken && rpcData ? rpcData : null; // { variation, quote, other_variations }
       const data = variationToken ? (rpcData ? rpcData.quote : null) : rpcData;
@@ -935,7 +938,7 @@
       // a client with a commercial agreement (item 48): the labour in this price already carries it
       const agreementLine = data.agreement && Number(data.agreement.percent_off) > 0 ? `<p class="note-line">Priced with your commercial agreement (${esc(data.agreement.percent_off)}% off labour).</p>` : '';
       const investTailHtml = paymentScheduleHtml + agreementLine
-        + (isAccepted || isDeclined || vInfo ? '' : validLine(project.valid_until, template === 'quick_estimate' ? 'estimate' : 'quote'))
+        + (isAccepted || isDeclined || vInfo ? '' : validLine(project.valid_until, template === 'quick_estimate' ? 'estimate' : 'quote') + waitLine)
         + (isAccepted || isDeclined || vInfo ? '' : `<p style="margin-top:24px;"><a class="q-btn" href="${shareOrigin()}/quote.html?token=${encodeURIComponent(token)}">View and approve this quote online &rarr;</a></p>`);
       const investHtml = `
         <section class="pg invest">

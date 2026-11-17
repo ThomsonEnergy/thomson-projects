@@ -59,6 +59,65 @@
     .cal-day { height: 80px; font-size: 10.5px; }
   }
 
+
+  /* The Plan view (item 92, js/plan-chart.js): a Gantt chart of jobs and sent quotes. */
+  #plan-view { min-height: 0; }
+  .plan-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; font-size:12px; }
+  .plan-key { display:flex; align-items:center; gap:6px; flex-wrap:wrap; color:var(--muted); }
+  .plan-sw { display:inline-block; width:14px; height:10px; border-radius:3px; margin-left:8px; }
+  .plan-sw.job { background:var(--accent); } .plan-sw.var { background:#f2a53a; }
+  .plan-sw.quote { border:1.5px dashed var(--muted); } .plan-sw.booked { background:rgba(0,0,0,0.45); }
+  .plan-sw.slip { background:var(--red); }
+  .plan-muted { color:var(--muted); font-size:12px; }
+  .plan-undated { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:8px; font-size:13px; }
+  .plan-chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--surface-2); color:var(--muted); white-space:nowrap; }
+  .plan-chip.ok { background:var(--green-dim); color:var(--green); }
+  .plan-chip.warn { background:var(--amber-dim); color:var(--amber); }
+  .plan-chip.bad { background:var(--red-dim); color:var(--red); }
+  .plan-scroll { overflow:auto; border:1px solid var(--border); border-radius:8px; }
+  .plan-head, .plan-row { display:flex; border-bottom:1px solid var(--border); }
+  .plan-head { position:sticky; top:0; z-index:3; background:var(--surface); }
+  .plan-label { flex:0 0 250px; width:250px; padding:4px 8px; border-right:1px solid var(--border); overflow:hidden; background:var(--surface); position:sticky; left:0; z-index:2; }
+  .plan-row .plan-label { cursor:pointer; }
+  .plan-row.focus .plan-label { box-shadow: inset 3px 0 0 var(--accent); }
+  .plan-name { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .plan-flags { display:flex; gap:4px; flex-wrap:wrap; margin-top:2px; }
+  .plan-lane { position:relative; flex:0 0 auto; height:44px; }
+  .plan-row.two .plan-lane { height:66px; }
+  .plan-week { position:absolute; top:0; height:20px; font-size:11px; color:var(--muted); border-left:1px solid var(--border); padding-left:3px; overflow:hidden; white-space:nowrap; }
+  .plan-load { position:absolute; top:22px; height:18px; font-size:11px; text-align:center; line-height:18px; border-left:1px solid var(--surface); overflow:hidden; }
+  .plan-load.ok { background:var(--green-dim); color:var(--green); } .plan-load.warn { background:var(--amber-dim); color:var(--amber); } .plan-load.bad { background:var(--red-dim); color:var(--red); }
+  .plan-body { position:relative; }
+  .plan-backdrop { position:absolute; top:0; bottom:0; pointer-events:none; }
+  .plan-off { position:absolute; top:0; bottom:0; background:var(--surface-2); opacity:0.7; }
+  .plan-today { position:absolute; top:0; bottom:0; width:2px; background:var(--red); opacity:0.7; }
+  .plan-bar { position:absolute; top:6px; height:22px; border-radius:5px; font-size:11px; line-height:22px; color:#fff; overflow:hidden; white-space:nowrap; cursor:pointer; touch-action:none; user-select:none; z-index:1; }
+  .plan-bar span { position:relative; padding:0 6px; }
+  .plan-bar.job { background:var(--btn-bg); }
+  .plan-bar.job.slip { background:var(--red); }
+  .plan-bar.var { background:#f2a53a; color:#1a2030; top:0; height:18px; line-height:18px; }
+  .plan-bar.quote { background:transparent; border:1.5px dashed var(--muted); color:var(--text); line-height:19px; }
+  .plan-bar.narrow { overflow:visible; }
+  .plan-bar.narrow span { position:absolute; left:100%; top:0; color:var(--text); padding-left:4px; white-space:nowrap; }
+  .plan-sub { position:absolute; left:0; right:0; top:36px; height:20px; }
+  .plan-booked { position:absolute; top:0; bottom:0; background:rgba(0,0,0,0.35); }
+  .plan-grip { position:absolute; right:0; top:0; bottom:0; width:8px; cursor:ew-resize; background:rgba(255,255,255,0.35); }
+  .plan-order { position:absolute; top:0; width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; border-top:8px solid var(--amber); z-index:1; }
+  .plan-divider { font-size:12px; color:var(--muted); padding:6px 8px; background:var(--surface-2); border-bottom:1px solid var(--border); position:sticky; left:0; }
+  .plan-note { border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px; padding:8px 12px; font-size:14px; margin:6px 0; }
+  .plan-note.ok { border-left-color:var(--green); }
+  .plan-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; align-items:end; margin-top:10px; }
+  .plan-form label { margin:0; font-size:12px; }
+  .plan-form input { width:100%; }
+  .plan-form-title { grid-column:1 / -1; font-weight:600; font-size:13px; }
+  .plan-form-title.var { color:#b7791f; }
+  .plan-people { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:2px 10px; max-height:220px; overflow-y:auto; }
+  .plan-people label { margin:0; font-weight:400; display:flex; gap:6px; align-items:center; }
+  .plan-people input { width:auto; }
+  .plan-weekhead { display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:13px; margin:12px 0 4px; }
+  .plan-card { border:1px solid var(--border); border-radius:10px; padding:8px 12px; margin:6px 0; cursor:pointer; }
+  .plan-card.focus { border-color:var(--accent); }
+
   /* item 77: on a laptop the calendar fills the window; six weeks fit without scrolling the page */
   @media (min-width: 901px) {
     #schedule-card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-bottom: 12px; }
@@ -66,6 +125,8 @@
     #cal-grid { flex: 1; min-height: 0; grid-auto-rows: minmax(0, 1fr); }
     #cal-grid .cal-day { height: auto; min-height: 0; }
     #day-view { flex: 1; min-height: 0; overflow-y: auto; }
+    #plan-view:not([style*="none"]) { flex: 1; min-height: 0; display: flex !important; flex-direction: column; }
+    #plan-view .plan-scroll { flex: 1; min-height: 0; }
   }
 
   .day-board { display: flex; gap: 16px; align-items: flex-start; }
@@ -199,6 +260,7 @@
         <div style="display:flex; gap:8px; align-items:center;">
           <button class="secondary" id="view-month-btn">Month</button>
           <button class="secondary" id="view-day-btn">Day</button>
+          <button class="secondary" id="view-plan-btn">Plan</button>
           <button class="secondary" id="next-btn">Next &rarr;</button>
         </div>
       </div>
@@ -207,6 +269,7 @@
         <div class="cal-grid" id="cal-dow-row"></div>
         <div class="cal-grid" id="cal-grid" style="margin-top:6px;"></div>
       </div>
+      <div id="plan-view" style="display:none;"></div>
       <div id="day-view" style="display:none;">
         <div id="day-board-notice"></div>
         <div id="mobile-day-list" class="mobile-day-list"></div>
@@ -1186,12 +1249,30 @@
       document.getElementById('day-view').style.display = view === 'day' ? 'block' : 'none';
       document.getElementById('view-month-btn').style.borderColor = view === 'month' ? 'var(--accent)' : '';
       document.getElementById('view-day-btn').style.borderColor = view === 'day' ? 'var(--accent)' : '';
-      if (view === 'month') loadMonth(); else loadDay();
+      document.getElementById('plan-view').style.display = view === 'plan' ? 'block' : 'none';
+      document.getElementById('view-plan-btn').style.borderColor = view === 'plan' ? 'var(--accent)' : '';
+      if (view === 'month') loadMonth(); else if (view === 'day') loadDay(); else showPlan();
     }
+    // The Plan view (item 92) is its own file, loaded the first time Plan is picked.
+    let planFocus = null; // a job or quote id from the address (?view=plan&job=), used once
+    async function showPlan() {
+      document.getElementById('period-badges').innerHTML = '';
+      try {
+        await loadJsOnce('/js/plan-calc.js?v=1', () => typeof PlanCalc !== 'undefined');
+        await loadJsOnce('/js/plan-chart.js?v=2', () => typeof PlanChart !== 'undefined');
+        await PlanChart.show({
+          el: document.getElementById('plan-view'), canEdit: canEditSchedule(), isAdmin: myRole === 'admin', myId, focus: planFocus,
+          onLabel: (text, start) => { document.getElementById('period-label').textContent = text; document.getElementById('period-jump').value = start; },
+        });
+        planFocus = null;
+      } catch (e) { showScheduleError(e, showPlan); }
+    }
+    document.getElementById('view-plan-btn').addEventListener('click', () => setView('plan'));
     document.getElementById('view-month-btn').addEventListener('click', () => setView('month'));
     document.getElementById('view-day-btn').addEventListener('click', () => setView('day'));
 
     document.getElementById('prev-btn').addEventListener('click', () => {
+      if (currentView === 'plan') { PlanChart.shift(-4); return; }
       if (currentView === 'month') {
         viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; }
         loadMonth();
@@ -1201,6 +1282,7 @@
       }
     });
     document.getElementById('next-btn').addEventListener('click', () => {
+      if (currentView === 'plan') { PlanChart.shift(4); return; }
       if (currentView === 'month') {
         viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; }
         loadMonth();
@@ -1216,7 +1298,7 @@
       if (!y || !m || !d) return;
       viewYear = y; viewMonth = m - 1;
       dayViewDate = new Date(y, m - 1, d);
-      if (currentView === 'month') loadMonth(); else loadDay();
+      if (currentView === 'plan') PlanChart.goTo(dateKey); else if (currentView === 'month') loadMonth(); else loadDay();
     }
     document.getElementById('today-btn').addEventListener('click', () => goToDate(sydneyDateKey(new Date())));
     const periodJump = document.getElementById('period-jump');
@@ -1257,7 +1339,10 @@
       renderDowRow();
       renderClockedInNowCard(document.getElementById('clocked-in-now'));
       try { await loadPickerData(); } catch (e) { /* loadDay fetches it again and shows the error with Retry */ }
-      setView('day');
+      // a link from a task, a notification or the quote's When card opens the Plan on that job or quote
+      const params = new URLSearchParams(window.location.search);
+      planFocus = params.get('job') || params.get('quote');
+      setView(params.get('view') === 'plan' ? 'plan' : 'day');
     })();
   </script>
 </body>
