@@ -30,6 +30,8 @@ const { logInvoiceEvents } = require('./invoice-events');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 const { entryHours } = require('./compute-labour-cost');
+// the job plan (item 92) is loaded only when used, inside its own try: it can never stop this path
+const jobPlan = () => require('./job-plan');
 
 // Same split as project.html's splitLabourMaterial: labour vs materials by
 // what each sells for (labour is already a sell total; materials are a
@@ -441,6 +443,10 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   // webhook for this job - move it past that stage immediately instead
   // of leaving it stuck at 'quote_approved' forever.
   if (!invoiceToken) await advanceToActionOrReady(supabaseAdmin, job.id);
+
+  // The job goes on the Plan in the first gap that fits and the quoter is asked to confirm the dates
+  // with the client (item 92). Best effort: the plan never stops a job being made.
+  try { await jobPlan().placeJobWindow(supabaseAdmin, { quote, job }); } catch (e) { console.error('create-job-from-quote: could not place the job on the plan', e.message); }
 
   // Last, so a quote still not approved while its job exists marks an attempt that stopped part way.
   await markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote);

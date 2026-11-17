@@ -8,6 +8,10 @@
 //     it is not theirs: the one check before a job is read or an open is logged against it
 //   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
 //     charge job the email may see money on)
+//   Both carry `plan` (item 92): the job's bars for the client's chart, from the dates the client
+//     was told (job_windows.promised_start and promised_end) only. Dates not yet told read "to be
+//     confirmed"; a job that moved shows its new dates only once the change email has gone. Never
+//     the crew load, other jobs, order marks or anything not yet confirmed.
 //
 // Money (invoices, hours, prices, purchase orders, the Schedule of Rates) only goes to an email on
 // the client record (scope.clients). A job contact (scope.contactJobIds) sees the job's progress,
@@ -156,6 +160,37 @@ function projectRow(p, ctx) {
   };
 }
 
+// The client's chart for these jobs: { [projectId]: { start, end, bars, booked } } for a job whose
+// dates the client was told; { pending: true } for a job on the plan with dates not yet told.
+// A variation is named by its number only (the stage name can carry our own wording).
+async function planFor(admin, jobs, bookings) {
+  const ids = jobs.filter((p) => p.job_number).map((p) => p.id);
+  if (!ids.length) return {};
+  const { data } = await admin.from('job_windows').select('project_id, cost_centre_id, promised_start, promised_end, cost_centres(name)').in('project_id', ids);
+  const out = {};
+  for (const id of ids) {
+    const rows = (data || []).filter((w) => w.project_id === id);
+    const main = rows.find((w) => !w.cost_centre_id);
+    if (!main) continue;
+    if (!main.promised_start || !main.promised_end) { out[id] = { pending: true }; continue; }
+    const vars = rows.filter((w) => w.cost_centre_id && w.promised_start && w.promised_end);
+    const varLabel = (w) => (String(w.cost_centres?.name || '').match(/^Variation \d+/) || ['Variation'])[0];
+    const bars = [
+      // the job's bar is the whole span the client was told (variations included); each variation sits under it
+      { kind: 'job', label: 'The job', start: main.promised_start, end: main.promised_end },
+      ...vars.map((w) => ({ kind: 'variation', label: varLabel(w), start: w.promised_start, end: w.promised_end })),
+    ];
+    const starts = bars.map((b) => b.start).sort();
+    const ends = bars.map((b) => b.end).sort();
+    out[id] = {
+      start: starts[0], end: ends[ends.length - 1], startText: fmtDay(starts[0]), endText: fmtDay(ends[ends.length - 1]),
+      bars: bars.map((b) => ({ ...b, startText: fmtDay(b.start), endText: fmtDay(b.end) })),
+      booked: [...new Set(bookings.filter((b) => b.projectId === id).map((b) => b.dateKey))].sort(),
+    };
+  }
+  return out;
+}
+
 async function company(admin) {
   const { data } = await admin.from('company_settings').select('company_name, phone, logo_url').eq('id', 1).maybeSingle();
   return { name: data?.company_name || 'Thomson Energy', phone: data?.phone || '', logoUrl: data?.logo_url || '' };
@@ -174,6 +209,7 @@ async function portalOverview(admin, scope) {
     company(admin),
   ]);
   const ctx = { bookings, onSite, invoices };
+  const plan = await planFor(admin, projects.filter((p) => !OPEN_STAGES_DONE.has(p.pipeline_stage)), bookings);
   // an approved quote shows as its job, not twice
   const jobsFromQuotes = new Set(projects.map((p) => p.source_quote_id).filter(Boolean));
   const rows = projects.filter((p) => !(jobsFromQuotes.has(p.id) && !p.job_number)).map((p) => projectRow(p, ctx));
@@ -189,6 +225,7 @@ async function portalOverview(admin, scope) {
   return {
     clients: scope.clients.map((c) => ({ id: c.id, name: c.name, main: c.main })),
     needsYou, jobs, quotes, company: comp,
+    plan: jobs.filter((j) => plan[j.id] && !plan[j.id].pending).map((j) => ({ id: j.id, ref: j.ref, name: j.name, ...plan[j.id] })),
   };
 }
 
@@ -208,6 +245,7 @@ async function portalProject(admin, p) {
     hasWork ? portalWork(admin, p) : Promise.resolve(null),
   ]);
   const bookings = allBookings.filter((b) => b.dateKey >= today);
+  const plan = (await planFor(admin, [p], allBookings))[p.id] || null;
   const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
   const manager = (contacts.data || []).find((c) => c.role === 'site_manager') || (contacts.data || []).find((c) => c.role === 'project_manager');
 
@@ -229,7 +267,7 @@ async function portalProject(admin, p) {
     hasWork, work,
     manager: manager ? staffFirst(manager.profiles?.full_name) || null : null,
     company: comp,
-    bookings, pastBookings, onSite,
+    bookings, pastBookings, onSite, plan,
     photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,

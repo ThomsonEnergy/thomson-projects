@@ -1439,3 +1439,60 @@ Touches: `public/js/supabase-client.js` (`openPoLineMenu`, `renderPoTickLines`: 
 - On production: `po_undo_receive`, `_po_line_take_back` and `is_pricing_role` were read first and do the same as the repo's (the stored text differs only in comments, line endings and the split word the cloud database tool needs).
 - Page code: `public/js/po-bills.js` (PO page only: `poLinesOnBills`, `deletePoLine`, `poLineDeleteMenu`, `markPoLinesNotOnBill`), not `renderPoTickLines`, to keep `supabase-client.js` small. `supabase-client.js` gained only a hook (`openPoLineMenu(..., more)`, `wirePoTickLines({ lineMenuMore })`) and `po_item_deleted` in the job log's PO group. After a delete the PO's unpaid bills are checked against the PO again.
 - Proved: the function on a local Postgres with every repo migration loaded (37 checks: staff and logged-out refused, billed line and credit note line refused, invoiced goods refused with nothing changed, closed PO refused, job cost down by the line, Warehouse count back, tool out of the register, the PO2020 repair end to end); the PO page in the offline browser (tag and Delete on the five typed lines only, none for field staff, none on a closed PO, the confirm text, the call made).
+
+## 93. NETCC Approved Seller on solar and battery proposals (built 17 Nov 2026, on staging; website line live)
+
+**Owner's ask (17 Nov 2026):** "Add NETCC approved seller to our solar and battery proposals."
+
+**What is true today:** Thomson Energy has been a New Energy Tech Approved Seller since 2 Nov 2026 (application NET-010695; the welcome email is in Gmail under the NETCC label). The proposal (`public/quote.html`) does not say so anywhere. The website has a commented-out line waiting for the approval (`index.html` line 798 in `website-updates-9e18ed`). The logo and certificate are in the Approved Seller portal (members.newenergytech.org.au), which a cloud session cannot open.
+
+**Plan:**
+
+1. **Cover.** Under the company block (legal name, ABN, address, licences), one line "New Energy Tech Approved Seller", with the Approved Seller logo beside it once the file is in the repo (`public/img/netcc-approved-seller.png`, squashed).
+2. **The project page, About panel.** One sentence after the About text: "Thomson Energy is a New Energy Tech Approved Seller: a signatory to the New Energy Tech Consumer Code (NETCC), the consumer protection code for solar and batteries authorised by the ACCC." The words "New Energy Tech Consumer Code" link to newenergytech.org.au.
+3. **By itself.** Shown on every proposal whose template is Solar or Battery (`projects.proposal_template`), on screen and in the PDF, including quotes already sent. Not on new build, quick estimate or other templates. No setting, no tick.
+4. **Website.** The waiting line goes live in the credentials list: "Consumer code: New Energy Tech Approved Seller, signatory to the New Energy Tech Consumer Code (NETCC)". `python3 build.py`, push to `main` (that deploys), then `python3 scripts/indexnow.py`.
+
+**Not in this build:** the NETCC wording rules for the quote itself (already covered by the compliance checklist, `netlify/functions/_shared/solar-compliance-rules.js`); the updated NETCC from 1 Dec 2026 (a separate check of the proposal against the new code, worth its own chat before that date).
+
+Done means (staging, admin@staging.test): (1) open a Solar quote's proposal: the cover shows "New Energy Tech Approved Seller" under the licence line. (2) The project page's About panel ends with the NETCC sentence and the link opens newenergytech.org.au. (3) Download PDF: both show, nothing pushed onto a new page (`node scripts/proposal-fits.js` passes). (4) A new build quote's proposal shows neither. (5) thomsonenergy.com.au credentials list shows the Consumer code line.
+
+Touches: `public/quote.html`, `public/img/netcc-approved-seller.png` (new, when supplied), `scripts/fixtures/proposal-solar-battery.json` (only if the fit check needs it), `docs/PROJECT_SPEC.md` (A16); website repo: `index.html`.
+
+Overlaps: items 58 (Pylon layout on the "Your system" page) and 92 (wait time printed on the proposal) will also change `public/quote.html`, both waiting on yes with no branch building; different parts of the page.
+
+**As built (17 Nov 2026):** the owner's yes added "allow me to upload the NETCC logo from Settings". The logo could not be found (not in Gmail, the portal and the NETCC site are closed to a cloud session), so Settings > Company Details > Proposal pictures has a third box, **NETCC Approved Seller logo**; the picture is kept in `company_settings.proposal_cover_photos` under the key `netcc_logo` (no migration: that map already reaches the proposal through `get_public_company_settings`). No logo file ships with the site. Without a logo the cover says it in words only.
+
+## 92. Job plan: a Gantt view that says when each job runs, when to order and when to book (built 17 Nov 2026, LIVE 18 Nov 2026; spec A36)
+
+**Building in: `claude/gantt-project-scheduling-gxrxgi`** (owner's "Build the client portal stuff too", 17 Nov 2026), one PR into `staging`. Touches the portal files that item 74 point 9a also lists: build 9a after this merges, or in this chat.
+
+Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on-site days the quoter estimates; a variation cost centre in another colour with its own dates; the quoter sees whether a job fits and what wait to tell the client; once approved the dates are confirmed with the client, and if we fall outside them the client is emailed. It must help decide when to order gear and when to book site work. (Was Tier 3 item M3 in `docs/PROJECT_SPEC.md`.)
+
+**Touches:** `project.html` (two hook lines only), `supabase-client.js` (shared reads), `style.css`, `schedule.html` (Plan view button and container), new `js/plan-chart.js`, new `js/job-window.js`, `quote.html` (wait line), `netlify/functions/accept-quote.js`, `approval-actions.js`, `create-variation.js`, `accept-variation.js`, `remind-client-bookings.js`, new `plan-email.js`, new `_shared/job-plan.js`, `portal.html`, `js/portal.js`, `portal-read.js`, `_shared/portal-data.js`, migration `20261207000000_job_plan.sql`.
+
+**Data (one new table, `job_windows`):** one row per quote or job (the main bar) and one per variation cost centre (`cost_centre_id` set). Columns: `project_id`, `cost_centre_id`, `onsite_days`, `crew_size` (default 2), `lead_weeks` (gear lead time, default 2), `start_date`, `end_date`, `promised_start`, `promised_end`, `client_confirmed_at`, `client_confirmed_by`, `confirm_email_id`, `slip_email_id`, `slip_told_at`, `updated_by`. Staff read; Admin, Finance and Sales write (one policy per action, fast RLS, FK indexes). Settings as data in `company_settings`: hours in a site day (8), default crew (2), default lead weeks (2), slip allowance in working days (2), who is on the tools (a tick per person on the Team page, defaulting to every active Staff role).
+
+**How it works**
+1. **Quoting.** The quote gets a "When" card (`js/job-window.js`). On-site days fill in by themselves: labour hours on the quote divided by crew times 8, rounded up; the quoter can type over them. Lead weeks default to 2. The card shows the first gap that fits (after the lead time, around approved jobs, leave and public holidays) and one line to say to the client: "Tell the client: 4 to 6 weeks". The same range prints on the proposal as "Estimated start: 4 to 6 weeks from acceptance". A button opens the Plan view with this quote's bar highlighted.
+2. **Plan view** (Schedule page: Month, Day, Plan; `js/plan-chart.js`). Rows are jobs, columns are days, 12 weeks on a laptop screen with week scroll. Approved jobs are solid blue, sent quotes are faint outlines (not counted in the load), variations are orange bars on the row under their job, days with people actually booked are darker ticks inside the bar. Top row is crew load per week (person-days planned against person-days available after leave and holidays): green, amber, red. A left column lists approved jobs with no dates yet, to drag on. Drag a bar to move it, drag its end to stretch it (Admin, Finance, Sales). A phone gets the same data as a list by week.
+3. **Approval.** When the client accepts (or we approve), the server places the job in the first gap that fits, the bar turns solid, and the quoter gets a task "Confirm dates with client J1234". The task opens one panel: drafted email with the dates (sent from sales@ through `send-recorded-email.js`, recorded on the job) or "Told by phone". Either way the dates are saved as the promised dates and the bar shows "Client confirmed".
+4. **Slipping.** If a bar is moved, stretched, or pushed by a variation so that the start is more than 2 working days late or the finish passes the promised finish, the bar turns red "Client not told", the quoter is notified, and a drafted email with the new dates is one tap from the bar. The 7am run (`remind-client-bookings.js`) repeats the notice daily until the client is told, and also catches jobs that simply have not started by the promised start. Sending saves the new promised dates. Not sent by itself on purpose: a date change to a client is read by a person first.
+5. **Variations.** `create-variation.js` adds a window for the variation cost centre: days from its hours, start straight after the job's finish (or today if the job is running). An orange bar, own dates, own days. If it pushes the job past the promised finish, step 4 fires.
+6. **Ordering and booking.** Each bar has an order-by mark (start less lead weeks) and a PO chip (nothing ordered, ordered, received). The 7am run tells the ops managers "Order gear for J1234 by Fri 27 Nov" when the mark is within 7 days and the job has no PO, and "Book people for J1234, starts Mon 8 Dec" when a job starts within 14 days with nobody booked in its window. Clicking either opens the PO create panel or Book people with the dates filled in.
+7. **Jobs already running.** The migration gives every approved, unfinished job a window from its first to last booking; jobs with no bookings land in the "no dates yet" column.
+8. **Client portal (owner, 17 Nov 2026).** A client sees their own jobs as bars on a small chart at the top of the portal and on each job page: the dates we confirmed with them, variations in orange, days with people booked and told, today's line. Never other clients' jobs, the crew load, order marks, or dates not yet confirmed (those read "Dates to be confirmed"). A slipped job shows the new dates only after the slip email is sent. Read through `portal-read.js` and `_shared/portal-data.js` like everything else there.
+
+**Done means**
+- On a draft quote with 64 labour hours, the When card shows 4 on-site days and a "Tell the client" range without typing anything.
+- Schedule > Plan shows that quote as a faint bar, approved jobs solid, and a load row.
+- Accept the quote on staging: the bar turns solid, a "Confirm dates" task appears, sending the email marks it "Client confirmed".
+- Drag the bar 2 weeks later: it turns red, the drafted email opens with the new dates, sending clears it.
+- Add a variation with 16 hours: an orange 1 day bar appears under the job.
+- A job starting next week with no PO and no bookings shows both flags.
+- Log in to the portal as that client: their job shows as a bar with the confirmed dates and the orange variation, and no other client's job.
+
+**Kind:** feature into `staging`; migration yes (one table, RLS); no money, stock or payroll. **Size:** large.
+
+**Built as planned**, with two additions found while proving it: moving a job's bar moves its variations by the same days, and a phone lists only the weeks with work. Proved in a browser (Plan view, drag, detail, When card, portal chart, phone and laptop) and the 7am reminders and email draft against a stand-in database; the migration ran on the staging database. Owner to do after the release: Schedule > Plan > Plan settings, tick who is on the tools.
+
