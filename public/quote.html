@@ -248,6 +248,7 @@
   .as-paper .pg { width: 794px; max-width: none; margin: 0; box-shadow: none; }
 
   @media print {
+    .portal-note { display: none !important; }
     .topbar, #accept-error, .q-approve-bar { display: none !important; }
     html, body { background: #fff !important; }
     .wrap { max-width: none !important; width: 210mm !important; margin: 0 !important; padding: 0 !important; }
@@ -1166,6 +1167,8 @@
       content.innerHTML = vInfo
         ? coverHtml + variationPageHtml
         : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + investHtml + breakdownHtml + workingHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+      // on screen only (never on the PDF): clients with a portal login see every quote and job there (item 74)
+      content.insertAdjacentHTML('beforeend', '<p class="portal-note" style="text-align:center; font-size:13px; color:var(--q-grey); margin:18px 0 30px;">Have a client portal login? <a href="/portal.html">See all your quotes and jobs</a>.</p>');
 
       content.querySelectorAll('.stage-summary-row').forEach(row => {
         row.addEventListener('click', () => {

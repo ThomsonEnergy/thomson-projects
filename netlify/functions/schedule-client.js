@@ -22,6 +22,7 @@ const { requireActiveUser } = require('./_shared/require-active-user');
 const { sendAsUser } = require('./_shared/send-recorded-email');
 const { publicBaseUrl } = require('./_shared/site-url');
 const E = require('./_shared/schedule-emails');
+const { portalLine } = require('./_shared/portal-mail');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const PRICING = ['admin', 'finance', 'sales'];
@@ -91,6 +92,8 @@ async function draftFor(admin, project, body, user) {
     const who = await E.namesFor(admin, o.staffIds);
     text = E.timeOfferBody({ first, project, start: o.start, end: o.end, days: o.days, weekdaysOnly: o.weekdaysOnly, optionDatesList: o.optionDates, who, message: o.message, phone });
   } else throw new Refused('Unknown email kind.');
+  // a client who can log in to the portal is pointed at it (item 74 PR 2)
+  if (rec.to) text += await portalLine(admin, rec.to);
   return { to: rec.to, toName: rec.name, source: rec.source, subject: E.subjectFor(kind, project), body: text };
 }
 
