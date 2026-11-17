@@ -227,6 +227,7 @@
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
       ${(d.referrals || []).length ? `<h3 class="pl-muted" style="margin:12px 0 4px; font-size:13px;">Jobs you sent us</h3>${d.referrals.map((r) => `<div class="pl-row ${r.open ? '' : 'done'}" style="cursor:default;">${r.ref ? `<div class="ref">${esc(r.ref)}</div>` : ''}<div class="name" style="font-size:15px;">${esc(r.name)}</div><div class="site">${esc(r.when)}</div><div class="status"><span class="pl-status">${esc(r.status)}</span></div></div>`).join('')}` : ''}
+      ${(d.rewards || []).length ? `<div class="pl-card" style="margin-top:10px;"><strong>Your rewards</strong>${d.rewards.map((t) => `<div class="pl-muted" style="margin-top:2px;">${esc(t)}</div>`).join('')}</div>` : ''}
       ${d.referLink ? `<p style="margin:10px 0 0;"><a class="secondary pl-btn" href="${esc(d.referLink)}" target="_blank" rel="noopener">Send us a job (your referral link)</a></p><p class="pl-muted" style="margin:4px 0 0;">Save it to your phone's home screen, or pass it to your team.</p>` : ''}
       </div></div>`;
     const reqBtn = document.getElementById('pl-req-open');
