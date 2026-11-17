@@ -72,6 +72,14 @@ const PlanChart = (() => {
       if (w.cost_centre_id) g.variations.push(w); else g.main = w;
       byProject.set(w.project_id, g);
     }
+    // every job with site work ahead is on the plan, even one made without a quote (a direct job, a job
+    // from a lead, a portal book-in): with no plan row yet it sits in No dates yet until it is placed
+    const activeJobs = await q(supabaseClient.from('projects').select('id, name, job_number, quote_number, client_name, pipeline_stage, status').not('job_number', 'is', null).in('pipeline_stage', P.ACTIVE_STAGES));
+    for (const p of activeJobs) {
+      const g = byProject.get(p.id);
+      if (g && g.main) continue;
+      byProject.set(p.id, { project: p, isJob: true, variations: (g && g.variations) || [], main: { id: null, virtual: true, project_id: p.id, cost_centre_id: null, onsite_days: 1, crew_size: settingsOut.crew, lead_weeks: 0, start_date: null, end_date: null } });
+    }
     const items = [...byProject.values()].filter((g) => g.main);
     const jobs = items.filter((g) => g.isJob);
     const load = P.buildLoad(jobs.flatMap((g) => [g.main, ...g.variations]), ctx.holidays);
@@ -81,7 +89,7 @@ const PlanChart = (() => {
       if (g.isJob) {
         g.span = P.jobSpan(g.rows);
         g.slip = P.slipFor(g.main, g.rows, settingsOut.slipDays, ctx.holidays);
-        g.bookedDays = [...new Set(bookings.filter((b) => b.project_id === g.project.id).map((b) => b.assignment_date))].sort();
+        g.bookedDays = g.main.virtual ? [] : [...new Set(bookings.filter((b) => b.project_id === g.project.id).map((b) => b.assignment_date))].sort();
         const orders = pos.filter((o) => o.project_id === g.project.id);
         g.ask = asks.find((a) => a.project_id === g.project.id) || null;
         g.po = !orders.length ? 'none' : orders.every((o) => o.received) ? 'received' : 'ordered';
@@ -107,8 +115,23 @@ const PlanChart = (() => {
     if (error) throw error;
   }
 
+  // A job with no plan row gets one, its days on site from the labour hours on its stages (as a quote's
+  // When card works them out), the usual crew, and no gear lead time (it is already a job).
+  async function ensureWindow(g) {
+    if (!g.main.virtual) return g.main;
+    const { data: centres } = await supabaseClient.from('cost_centres').select('cost_centre_line_items(item_type, quantity)').eq('project_id', g.project.id);
+    const hours = (centres || []).reduce((sum, c) => sum + (c.cost_centre_line_items || []).filter((li) => li.item_type === 'labour').reduce((h, li) => h + (Number(li.quantity) || 0), 0), 0);
+    const days = P.daysFromHours(hours, S.data.settings.crew, S.data.settings.dayHours);
+    const { data, error } = await supabaseClient.from('job_windows').insert({ project_id: g.project.id, onsite_days: days, crew_size: S.data.settings.crew, lead_weeks: 0, updated_by: S.myId }).select('*').single();
+    if (error) throw error;
+    g.main = data;
+    g.rows = [data, ...g.variations];
+    return data;
+  }
+
   // Put a job with no dates in the first gap that fits; its undated variations follow it.
   async function placeInFirstGap(g) {
+    await ensureWindow(g);
     const { ctx, load, today: t } = S.data;
     const gap = P.firstGap({ days: g.main.onsite_days, crew: g.main.crew_size, earliest: P.addDays(t, Number(g.main.lead_weeks) * 7), load, ctx });
     await saveWindow(g.main.id, { start_date: gap.start, end_date: gap.end });
@@ -151,17 +174,23 @@ const PlanChart = (() => {
     const d = S.data;
     const end = P.addDays(S.start, WEEKS * 7 - 1);
     if (S.onLabel) S.onLabel(`${P.fmtDay(S.start).replace(/^\S+ /, '')} to ${P.fmtDay(end).replace(/^\S+ /, '')} ${end.slice(0, 4)}`, S.start);
-    const undated = d.jobs.filter((g) => !g.span);
-    const dated = d.jobs.filter((g) => g.span);
+    // the search box: job or quote number, job name or client, as you type
+    const words = String(S.q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (g) => !words.length || words.every((w) => `${ref(g.project)} ${g.project.name || ''} ${g.project.client_name || ''}`.toLowerCase().includes(w));
+    const undated = d.jobs.filter((g) => !g.span && hit(g));
+    const dated = d.jobs.filter((g) => g.span && hit(g));
+    const quotesShown = d.quotes.filter(hit);
     const head = `
       <div class="plan-top">
+        <input type="search" id="plan-search" placeholder="Find a job: number, name or client" value="${esc(S.q || '')}" style="width:260px; max-width:100%; font-size:13px; padding:5px 10px;" />
+        ${words.length ? `<span class="plan-muted">${dated.length + undated.length + quotesShown.length} found${!dated.length && !undated.length && !quotesShown.length ? '. Only jobs with site work ahead (Quote approved to Job not complete) are on the plan: move a job back on the Job Pipeline to bring it here.' : ''}</span>` : ''}
         <span class="plan-key"><i class="plan-sw job"></i>Job <i class="plan-sw var"></i>Variation <i class="plan-sw quote"></i>Quote, if approved today <i class="plan-sw booked"></i>People booked <i class="plan-sw slip"></i>Client not told</span>
         <span style="flex:1"></span>
         ${d.ctx.crew.length ? `<span class="plan-muted">${d.ctx.crew.length} on the tools</span>` : '<span class="plan-chip warn">Nobody is ticked as on the tools, so the load is not measured</span>'}
         ${S.isAdmin ? '<button type="button" class="secondary btn-sm" id="plan-settings">Plan settings</button>' : ''}
       </div>
-      ${undated.length ? `<details class="plan-undated" ${S.undatedOpen ? 'open' : ''}><summary><strong>No dates yet (${undated.length})</strong> <span class="plan-muted">${S.canEdit ? 'tap one to put it in the first gap that fits' : ''}</span></summary><div class="plan-undated-list">${undated.map((g) => `<button type="button" class="secondary btn-sm" data-undated="${esc(g.project.id)}" title="${S.canEdit ? 'Put it in the first gap that fits' : ''}">${esc(ref(g.project))} ${esc(g.project.name)}, ${esc(daysText(g.main.onsite_days))}</button>`).join('')}</div></details>` : ''}`;
-    S.el.innerHTML = head + (isPhone() ? listHtml(dated, d.quotes) : chartHtml(dated, d.quotes)) + (!dated.length && !d.quotes.length && !undated.length ? '<p class="subtitle" style="padding:16px;">Nothing on the plan yet. A job appears here when its quote is approved, and a quote when it is sent.</p>' : '');
+      ${undated.length ? `<details class="plan-undated" ${S.undatedOpen || words.length ? 'open' : ''}><summary><strong>No dates yet (${undated.length})</strong> <span class="plan-muted">${S.canEdit ? 'tap one to put it in the first gap that fits' : ''}</span></summary><div class="plan-undated-list">${undated.map((g) => `<button type="button" class="secondary btn-sm" data-undated="${esc(g.project.id)}" title="${S.canEdit ? 'Put it in the first gap that fits' : ''}">${esc(ref(g.project))} ${esc(g.project.name)}, ${esc(daysText(g.main.onsite_days))}</button>`).join('')}</div></details>` : ''}`;
+    S.el.innerHTML = head + (isPhone() ? listHtml(dated, quotesShown) : chartHtml(dated, quotesShown)) + (!dated.length && !d.quotes.length && !undated.length ? '<p class="subtitle" style="padding:16px;">Nothing on the plan yet. A job appears here when its quote is approved, and a quote when it is sent.</p>' : '');
     wire();
     if (S.focus) {
       const row = S.el.querySelector(`[data-row="${S.focus}"]`);
@@ -322,14 +351,31 @@ const PlanChart = (() => {
     // the No dates yet list stays open or folded as the person left it
     const und = S.el.querySelector('.plan-undated');
     if (und) und.addEventListener('toggle', () => { S.undatedOpen = und.open; });
+    const search = S.el.querySelector('#plan-search');
+    if (search) {
+      if (S.searchFocus) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+      let t = null;
+      search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { S.q = search.value; S.searchFocus = true; render(); }, 200); });
+      search.addEventListener('blur', () => { S.searchFocus = false; });
+      // Enter on a single match opens it
+      search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const one = S.el.querySelectorAll('[data-row], [data-undated]');
+        if (one.length === 1) { const id = one[0].dataset.row || one[0].dataset.undated; openDetail(id); }
+      });
+    }
     const settingsBtn = S.el.querySelector('#plan-settings');
     if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
   }
 
   // ---------- one job or quote ----------
-  function openDetail(projectId) {
+  async function openDetail(projectId) {
     const g = find(projectId);
     if (!g) return;
+    // a job with no plan row yet gets one before it can be edited
+    if (g.main.virtual && S.canEdit) {
+      try { await ensureWindow(g); } catch (err) { showToast(friendlyError(err), { error: true }); return; }
+    }
     const p = g.project;
     const d = S.data;
     const edit = S.canEdit && g.isJob;
