@@ -34,13 +34,21 @@ const PlanChart = (() => {
   async function load() {
     const from = P.addDays(today(), -60);
     const q = (p) => p.then(({ data, error }) => { if (error) throw error; return data || []; });
-    const [settings, holidays, people, leave, windows] = await Promise.all([
+    const W = 'job_windows';
+    const WCOLS = '*, projects!inner(id, name, job_number, quote_number, client_name, pipeline_stage, status, sent_at, expired), cost_centres(name)';
+    const [settings, holidays, people, leave, jobWins, quoteWins, focusWins] = await Promise.all([
       q(supabaseClient.from('company_settings').select('plan_day_hours, plan_crew_size, plan_lead_weeks, plan_slip_days').eq('id', 1)),
       q(supabaseClient.from('public_holidays').select('holiday_date').gte('holiday_date', from)),
       q(supabaseClient.from('profiles').select('id, full_name, role, on_tools').eq('active', true).order('full_name')),
       q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').gte('end_date', from)),
-      q(supabaseClient.from('job_windows').select('*, projects!inner(id, name, job_number, quote_number, client_name, pipeline_stage, status, sent_at, expired), cost_centres(name)')),
+      // only the rows the plan draws (a request returns at most 1,000 rows, and every quote opened
+      // keeps one): jobs with site work ahead, sent quotes, and the job or quote it was opened on
+      q(supabaseClient.from(W).select(WCOLS).not('projects.job_number', 'is', null).in('projects.pipeline_stage', P.ACTIVE_STAGES)),
+      q(supabaseClient.from(W).select(WCOLS).is('projects.job_number', null).eq('projects.status', 'sent').eq('projects.expired', false)),
+      S.focus ? q(supabaseClient.from(W).select(WCOLS).eq('project_id', S.focus)) : Promise.resolve([]),
     ]);
+    const seen = new Set();
+    const windows = [...jobWins, ...quoteWins, ...focusWins].filter((w) => !seen.has(w.id) && seen.add(w.id));
     const s = settings[0] || {};
     const live = windows.filter((w) => {
       const p = w.projects;
@@ -346,6 +354,11 @@ const PlanChart = (() => {
         <div><h2 style="margin:0;">${esc(ref(p))} ${esc(p.name)}</h2><p class="subtitle" style="margin:2px 0 8px;">${esc(p.client_name || '')}</p></div>
         <button type="button" class="secondary btn-sm" data-close>Close</button>
       </div>
+      ${g.isJob ? `<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+        <label style="margin:0; font-size:13px;">Pipeline stage</label>
+        <select id="plan-stage" style="width:auto;" ${S.canEdit ? '' : 'disabled'}>${PIPELINE_STAGES.filter((st) => !['lead', 'draft_quote', 'quote_sent'].includes(st.key)).map((st) => `<option value="${esc(st.key)}" ${st.key === p.pipeline_stage ? 'selected' : ''}>${esc(st.label)}</option>`).join('')}</select>
+        <span class="plan-muted">From Client handover on, the job leaves the plan.</span>
+      </div>` : ''}
       ${statusHtml}
       ${g.isJob ? `<div class="plan-flags" style="margin:8px 0;">${g.span ? poChip(g) : ''}${g.notBooked ? '<span class="plan-chip bad">Nobody booked</span>' : ''}${g.bookedDays.length ? `<span class="plan-chip">${g.bookedDays.length} day${g.bookedDays.length === 1 ? '' : 's'} booked</span>` : ''}</div>` : ''}
       ${g.isJob ? rowInputs(g.main, 'The job') + g.variations.map((v) => rowInputs(v, (v.cost_centres && v.cost_centres.name) || 'Variation')).join('') : `<p class="subtitle">${esc(daysText(g.main.onsite_days))} on site, crew of ${Number(g.main.crew_size)}, ${Number(g.main.lead_weeks)} week gear lead. Change these on the quote, step 3.</p>`}
@@ -360,6 +373,24 @@ const PlanChart = (() => {
     const fail = (err) => { msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`; };
     const done = async (focus = true) => { overlay.remove(); await refresh(); if (focus) { const now = find(projectId); if (now && now.slip) openDetail(projectId); } };
     overlay.querySelector('[data-close]').addEventListener('click', () => overlay.remove());
+    // the same move as the Job Pipeline board: a plain stage change, the database rules still refuse
+    // one that is not allowed (the booked-job gate and the rest) and the reason shows here
+    const stageSel = overlay.querySelector('#plan-stage');
+    if (stageSel && S.canEdit) stageSel.addEventListener('change', async () => {
+      const was = p.pipeline_stage;
+      stageSel.disabled = true;
+      const { data: row, error } = await supabaseClient.from('projects').update({ pipeline_stage: stageSel.value }).eq('id', p.id).select('pipeline_stage').single();
+      stageSel.disabled = false;
+      if (error || !row) {
+        stageSel.value = was;
+        overlay.querySelector('#plan-detail-msg').innerHTML = `<div class="error-box">Could not move: ${esc(friendlyError(error || new Error('no row returned')))}</div>`;
+        return;
+      }
+      showToast(`${ref(p)} moved to ${pipelineStageLabel(row.pipeline_stage)}.`);
+      p.pipeline_stage = row.pipeline_stage;
+      if (!P.ACTIVE_STAGES.includes(row.pipeline_stage)) { overlay.remove(); await refresh(); }
+      else refresh();
+    });
     if (!edit) return;
 
     // a new start keeps the length; days on site typed with no finish work the finish out
