@@ -55,15 +55,17 @@
     S.project = project;
     const daysEl = document.getElementById('job-sched-days');
     if (!daysEl) return;
-    const [{ data: rows, error }, { data: offers }, { data: emails }] = await Promise.all([
+    const [{ data: rows, error }, { data: offers }, { data: emails }, { data: asks }] = await Promise.all([
       supabaseClient.from('schedule_assignments').select('id, staff_id, assignment_date, start_time, end_time, block_type, note, client_informed_at, time_offer_id, profiles(full_name)')
         .eq('project_id', project.id).order('assignment_date').order('start_time'),
       supabaseClient.from('schedule_time_offers').select('id, project_id, staff_ids, start_time, end_time, days, weekdays_only, option_dates, message, to_email, to_name, status, picked_date, picked_at, client_message, email_id, created_by, created_at, viewed_at, sender:profiles!schedule_time_offers_created_by_fkey(full_name)').eq('project_id', project.id).order('created_at', { ascending: false }),
       supabaseClient.from('schedule_emails').select('*, sender:profiles!schedule_emails_sent_by_fkey(full_name)').eq('project_id', project.id).order('sent_at', { ascending: false }),
+      // the client's open ask for a date from the portal (item 74 point 9a)
+      supabaseClient.from('portal_booking_requests').select('id, ask_date, ask_time, note, email, created_at').eq('project_id', project.id).is('answered_at', null).is('withdrawn_at', null),
     ]);
     if (error) { errBox(daysEl, error.message); return; }
     S.rows = rows || []; S.offers = offers || []; S.emails = emails || [];
-    renderDays(); renderOffers(); renderEmails();
+    renderAsk((asks || [])[0] || null, project); renderDays(); renderOffers(); renderEmails();
     const recEl = document.getElementById('job-sched-client');
     if (!S.canEdit) { if (recEl) recEl.textContent = ''; return; }
     if (recEl && !S.recipient) {
@@ -87,6 +89,40 @@
     if (informed.length) return `<span class="badge" style="background:rgba(245,158,11,0.14); color:#b45309; border:1px solid rgba(245,158,11,0.5);">Client told of ${informed.length} of ${dayRows.length}</span>`;
     return isPast ? '' : `<span class="badge" style="background:rgba(245,158,11,0.14); color:#b45309; border:1px solid rgba(245,158,11,0.5);">Client not informed</span>`;
   };
+
+  // "Client asked for Tue 25 Nov, 8:00am" from the portal, with Book it: Book people opens with the
+  // day and time filled in. Booking a day and telling the client closes the ask by itself (a
+  // database trigger), so there is no accept or decline.
+  function renderAsk(ask, project) {
+    const days = document.getElementById('job-sched-days');
+    let el = document.getElementById('job-sched-ask');
+    if (!el) { el = document.createElement('div'); el.id = 'job-sched-ask'; days.parentNode.insertBefore(el, days); }
+    if (!ask) { el.innerHTML = ''; return; }
+    const when = `${fmtDay(ask.ask_date)}${ask.ask_time ? `, ${hhmm(ask.ask_time)}` : ', any time'}`;
+    el.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; margin-bottom:10px; border:1px solid var(--amber); border-radius:8px; background:var(--amber-dim);">
+        <span><strong>Client asked for ${esc(when)}</strong> <span class="subtitle" style="font-size:12px;">(${esc(ask.email)}, in the portal ${esc(fmtDate(ask.created_at))})</span>${ask.note ? `<br><span style="font-size:13px;">${esc(ask.note)}</span>` : ''}</span>
+        ${S.canEdit ? '<button type="button" id="job-sched-ask-book" style="font-size:12px; padding:6px 12px;">Book it</button>' : ''}
+      </div>`;
+    const btn = el.querySelector('#job-sched-ask-book');
+    if (btn) btn.addEventListener('click', () => {
+      openScheduleStaffPanel(project);
+      // fill the Book people form once it has drawn (it loads the staff list first)
+      const fill = () => {
+        const date = document.getElementById('sched-date');
+        if (!date) return false;
+        date.value = ask.ask_date;
+        if (ask.ask_time) {
+          const start = document.getElementById('sched-start');
+          if (start) start.value = hhmm(ask.ask_time);
+        }
+        return true;
+      };
+      const watch = new MutationObserver(() => { if (fill()) watch.disconnect(); });
+      watch.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => watch.disconnect(), 10000);
+    });
+  }
 
   function renderDays() {
     const el = document.getElementById('job-sched-days');
