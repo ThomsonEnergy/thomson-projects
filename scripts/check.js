@@ -85,6 +85,30 @@ for (const file of sqlFiles) {
   }
 }
 
+// 4b. Tables read column by column (profiles, cost_centres: select is granted per column) need a
+// select grant for every column added from 11 Dec 2026's migration on, or logged-in pages get
+// "permission denied for table profiles" (it happened with profiles.on_tools, 18 Nov 2026). A
+// column staff must never read says so on the add line with "-- no grant".
+{
+  const COLUMN_GRANT_TABLES = ['profiles', 'cost_centres'];
+  const allSql = sqlFiles.map((f) => fs.readFileSync(f, 'utf8').toLowerCase()).join('\n');
+  for (const file of sqlFiles) {
+    if (path.basename(file) < '20261211000000') continue;
+    const lines = fs.readFileSync(file, 'utf8').toLowerCase().split('\n');
+    let table = null;
+    for (const line of lines) {
+      const alter = line.match(/alter\s+table\s+(?:only\s+)?(?:public\.)?(\w+)/);
+      if (alter) table = alter[1];
+      const add = line.match(/add\s+column\s+(?:if\s+not\s+exists\s+)?(\w+)/);
+      if (!add || !COLUMN_GRANT_TABLES.includes(table) || /--\s*no grant/.test(line)) continue;
+      const col = add[1];
+      const granted = new RegExp(`grant\\s+select\\s*\\([^)]*\\b${col}\\b[^)]*\\)\\s*on\\s+(?:table\\s+)?public\\.${table}\\b`).test(allSql);
+      if (!granted) fail(file, new Error(`${table}.${col} is added but never granted: add grant select (${col}) on public.${table} to authenticated (or mark the line "-- no grant")`));
+      if (/;\s*$/.test(line)) table = null;
+    }
+  }
+}
+
 // 5. Dead code (new findings only, see scripts/deadcode-baseline.json) and page weight
 // budgets (scripts/page-budgets.json). Both print their own lines.
 const dead = require('./deadcode');

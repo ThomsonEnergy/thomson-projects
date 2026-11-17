@@ -88,6 +88,7 @@
 
           <div class="card" id="proposal-pictures-card"></div>
           <div class="card" id="photo-tags-card"></div>
+          <div class="card" id="rewards-card"></div><!-- js/settings-rewards.js: lead rewards (item 74b) -->
           <div class="card" id="product-pictures-card"></div>
 
           <div class="card">
@@ -888,6 +889,7 @@
       renderLogoPreview();
       loadJsOnce('/js/settings-proposal-pictures.js?v=2', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-rewards.js?v=1', () => typeof loadRewardsCard === 'function').then(() => loadRewardsCard(data)).catch(() => {});
       loadJsOnce('/js/settings-product-pictures.js?v=1', () => typeof loadProductPicturesCard === 'function').then(() => loadProductPicturesCard()).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
