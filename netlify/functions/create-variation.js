@@ -15,6 +15,8 @@
 const { requireActiveUser } = require('./_shared/require-active-user');
 const { priceFixedLines } = require('./_shared/fixed-variation-lines');
 const { rateCardFor } = require('./_shared/rate-cards');
+// the job plan (item 92) is loaded only when used, inside its own try: it can never stop a variation
+const jobPlan = () => require('./_shared/job-plan');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -97,6 +99,8 @@ exports.handler = async (event) => {
       await supabaseAdmin.from('job_variation_entries').update({ cost_centre_id: centre.id }).eq('id', entry.id);
 
       const hrs = Number(startHours);
+      // its own bar on the Plan on the day it was worked (item 92); best effort
+      try { await jobPlan().addVariationWindow(supabaseAdmin, { projectId, centreId: centre.id, hours: hrs > 0 ? hrs : 0, onDate: date, actorId: user.id }); } catch (e) { console.error('create-variation: could not add the variation to the plan', e.message); }
       if (hrs > 0) {
         await supabaseAdmin.from('job_variation_hours').insert({
           variation_id: entry.id, project_id: projectId, staff_id: user.id, work_date: date, hours: hrs, created_by: user.id,

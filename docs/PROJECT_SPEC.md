@@ -64,7 +64,7 @@ Manual steps only a person can do (the code is live):
 9. Part I gaps: deposit vs pay in full on acceptance, auto PO suggestions, auto Ready to Book when POs received.
 
 **Tier 3: growth**
-1. Gantt-style job windows driving scheduling and ordering (M3).
+1. ~~Gantt-style job windows driving scheduling and ordering (M3).~~ Built as A36 (item 92, 17 Nov 2026).
 2. Xero Division tracking category on invoices, credit notes and job bills (H5).
 3. Formbay phases 2 to 4: process webhook events, post settlements to Xero, create Formbay jobs (Part L).
 4. Job page charts and flags (Part J).
@@ -492,6 +492,19 @@ Manual steps only a person can do (the code is live):
 - **Work so far** (a do and charge job, `proposal_template = 'direct_job'`, money scope only): labour per clocked day (first name, start and finish, hours by Schedule of Rates band, $ at the band's multiplier, invoiced yet or not), materials used at the client's price (cost plus the stage's markup), the job's purchase orders (number, supplier, "Ordered, waiting for pickup", "Part picked up, rest to come", "Ordered, part on back order", "Picked up", total at the client's price, lines), and "About $X not yet invoiced". The maths is `_shared/job-actuals.js`, the one copy that `get-invoiceable-actuals.js` (the invoice panel) also uses; `includeBilled` brings invoiced shifts and materials back marked with their invoice number. Our supplier cost price is never selected.
 - **Not yet (PR 2 and 3 of item 74):** requests for work and quotes with due dates, messages on the job's Feed tab, the main email letting other emails in, the referral link and lead rewards, staff links and KPIs, the review ask on site, the portal link in client emails.
 
+### A36. Job plan: Gantt view, wait times, client dates (backlog item 92, on `staging` 17 Nov 2026, migration 20261207000000)
+
+- **Table `job_windows`:** one row per quote or job (the main bar, `cost_centre_id` null) and one per variation cost centre. `onsite_days` (and `onsite_days_typed` when a person typed over the worked out figure), `crew_size`, `lead_weeks` (gear lead time), `start_date` and `end_date` (the plan), `promised_start` and `promised_end` (what the client was told; on the main row it is the whole job including variations), `client_confirmed_at`, `client_confirmed_by`, `client_confirmed_how` (email or phone), `wait_text` (the quote's "4 to 6 weeks"), `quoter_id`. Staff read, Admin, Finance and Sales write. Settings: `company_settings.plan_day_hours` (8), `plan_crew_size` (2), `plan_lead_weeks` (2), `plan_slip_days` (2 working days late before the client must be told). `profiles.on_tools`: who counts in the crew load; null follows the role (Staff count).
+- **One copy of the maths:** `public/js/plan-calc.js` (working days, days from hours, crew load per day less approved leave and public holidays, first gap that fits, wait range, slipped or not), used by the browser and required by `_shared/job-plan.js`.
+- **Quote, step 3 "When" card** (`js/job-window.js`, hooked in `project.html`): days on site = labour hours / (crew x 8), rounded up, typed over if needed; the first gap after the lead time; "Tell the client: 3 to 5 weeks". Saves by itself. The proposal prints "Estimated start: 3 to 5 weeks from acceptance" (`get_quote_wait(token)`, only while the quote is open).
+- **Schedule page, Plan view** (`js/plan-chart.js`): 12 weeks, jobs with site work ahead as solid bars, variations as orange bars under their job, booked days darker, sent quotes as dashed bars where they would land if approved today (not counted in the load), a crew load row per week (green, amber, red), weekends and holidays shaded, a today line, an order-by mark. Chips per job: Confirm dates with client, Client confirmed, Client not told of the change, Nothing ordered (order by), Gear ordered or received, Nobody booked. "No dates yet" lists approved jobs without dates; a tap puts one in the first gap. Admin, Finance and Sales drag a bar to move it (its variations move with it) and drag its right edge to stretch it; a tap opens the detail (dates, days, crew, lead, Save dates, First gap, Email client the dates, Told by phone, Book people, Purchase orders). Admin has Plan settings (the four numbers and who is on the tools). A phone shows the weeks with work as a list. `schedule.html?view=plan&job=<id>` (or `&quote=`) opens on that job.
+- **Approval** (`_shared/create-job-from-quote.js` calls `placeJobWindow`): the job takes the quote's days, crew and lead, goes in the first gap, and the quoter (or the ops managers and pricing roles when the quoter cannot act) gets the task "Confirm the dates with the client" and a notification.
+- **Telling the client** (`plan-email.js`, pricing roles): a drafted email (first confirmation, or a change naming the old and new dates) sent from sales@ in the sender's name, recorded on the job; or "Told by phone". Either saves the plan's dates as the promised dates, ticks the task and logs it on the job. Never sent by itself (owner's rule: a person reads a date change to a client first).
+- **Variations:** their own window, days from their labour hours. A fixed price one (`_shared/approve-variation.js`) goes straight after the job, and one with no labour hours adds no bar. A do and charge one (`create-variation.js`) sits on the day it was worked. One that takes the job past the promised finish notifies whoever chases the job. The plan code is loaded inside a try in every live path (approval, variations, the 7am run), so a plan error can never stop them.
+- **7am run** (`remind-client-bookings.js` calls `planReminders`): a job moved outside the promised dates (start more than `plan_slip_days` working days late, earlier, or finishing later) notifies the quoter daily until the client is told; dates not confirmed within 3 weeks of the start; gear to order (no PO and the order-by date within 7 days) and people to book (nobody booked in the window, starting within 14 days) to the ops managers; a planned start that passed with nobody booked and no time clocked.
+- **Client portal** (`_shared/portal-data.js` `planFor`, `js/portal.js`): "Your dates" on the overview and "Dates" on a job, a small chart of the promised dates only (the job, its variations in orange by number, booked days, today). Dates not yet told read "Dates to be confirmed"; a moved job shows its new dates only after the change email or phone call. Never the crew load, other clients' jobs, order marks or unconfirmed dates.
+- **Jobs that were running when this went in:** the migration gave each approved, unfinished job a window from its first to last booking (promised when every booking was already Client informed); jobs with no bookings sit in "No dates yet".
+
 ### A29. Scheduled functions (netlify.toml)
 | Function | Schedule |
 |---|---|
@@ -629,7 +642,7 @@ Phase 1 done (A25). Still to do: Phase 2 process webhook events and pull job sta
 
 1. **Timesheet approval** (Tier 2): each person's manager approves their timesheets and leave; Finance and above approve all.
 2. **Archive or delete superseded documents** (Tier 2, bug): duplicate signed documents clutter an employee's file.
-3. **Gantt chart** (Tier 3): job windows from hours, stages and client timeline, driving scheduling and ordering; shareable.
+3. ~~**Gantt chart** (Tier 3)~~: built as A36 (item 92, 17 Nov 2026).
 
 Done since last review: clock-out cost-centre slider (A1), overheads calculator (A24).
 

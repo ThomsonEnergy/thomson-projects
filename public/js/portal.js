@@ -173,6 +173,37 @@
       ${done.length ? `<details><summary class="pl-muted" style="cursor:pointer; margin:8px 0;">Show finished (${done.length})</summary>${done.map(rowHtml).join('')}</details>` : ''}`;
   };
 
+  // ----- the dates chart (item 92): only the dates we told the client -----
+  const dayMs = 86400000;
+  const ymdNum = (ymd) => Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10)) / dayMs;
+  const todayYmd = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const shortDay = (n) => new Date(n * dayMs).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  // rows: [{ label, sub, bars: [{ kind, start, end, startText, endText, label }], booked: [ymd] }]
+  function planChart(rows) {
+    const all = rows.flatMap((r) => r.bars);
+    const today = ymdNum(todayYmd());
+    let from = Math.min(...all.map((b) => ymdNum(b.start)), today);
+    let to = Math.max(...all.map((b) => ymdNum(b.end)), today) + 1;
+    from -= (new Date(from * dayMs).getUTCDay() + 6) % 7; // back to a Monday
+    if (to - from < 28) to = from + 28;
+    const pct = (n) => `${((n - from) / (to - from)) * 100}%`;
+    const width = (a, b) => `${((b - a) / (to - from)) * 100}%`;
+    const weeks = [];
+    for (let w = from; w < to; w += 7) weeks.push(`<span class="pc-wk" style="left:${pct(w)};">${esc(shortDay(w))}</span>`);
+    const todayLine = today >= from && today < to ? `<i class="pc-today" style="left:${pct(today + 0.5)};" title="Today"></i>` : '';
+    const lane = (r) => `
+      <div class="pc-row">
+        ${r.label ? `<div class="pc-label">${r.label}</div>` : ''}
+        <div class="pc-lane">${todayLine}${r.bars.map((b) => `
+          <div class="pc-bar ${b.kind === 'variation' ? 'var' : ''}" style="left:${pct(ymdNum(b.start))}; width:${width(ymdNum(b.start), ymdNum(b.end) + 1)};" title="${esc(b.label)}: ${esc(b.startText)} to ${esc(b.endText)}">${(r.booked || []).filter((d) => d >= b.start && d <= b.end).map((d) => `<i style="left:${((ymdNum(d) - ymdNum(b.start)) / (ymdNum(b.end) + 1 - ymdNum(b.start))) * 100}%; width:${100 / (ymdNum(b.end) + 1 - ymdNum(b.start))}%;"></i>`).join('')}</div>`).join('')}
+        </div>
+        ${r.sub ? `<div class="pc-sub">${r.sub}</div>` : ''}
+      </div>`;
+    return `<div class="pc"><div class="pc-weeks">${weeks.join('')}</div>${rows.map(lane).join('')}
+      <div class="pc-key"><span><i class="pc-sw"></i>Planned work</span>${all.some((b) => b.kind === 'variation') ? '<span><i class="pc-sw var"></i>Variation</span>' : ''}${rows.some((r) => (r.booked || []).length) ? '<span><i class="pc-sw booked"></i>Booked days</span>' : ''}<span><i class="pc-sw today"></i>Today</span></div></div>`;
+  }
+  const barsText = (pl) => pl.bars.map((b) => `${esc(b.label)}: ${esc(b.startText)}${b.start === b.end ? '' : ` to ${esc(b.endText)}`}`).join('<br>');
+
   async function showOverview() {
     main.innerHTML = `<p class="subtitle">Loading your jobs...</p>`;
     const d = await call('portal-read', { action: 'overview' });
@@ -184,6 +215,7 @@
         <h2 class="pl-h">Needs you</h2>
         <div class="pl-card">${d.needsYou.map((n) => `
           <div class="pl-need"><span>${esc(n.text)}</span>${n.url ? openLink(n.url, n.action, n.kind, n.projectId, n.detail) : ''}</div>`).join('')}</div>` : ''}
+      ${d.plan && d.plan.length ? card('Your dates', planChart(d.plan.map((j) => ({ label: `<a href="/portal.html?job=${esc(j.id)}"><strong>${esc(j.ref)}</strong> ${esc(j.name)}</a>`, bars: j.bars, booked: j.booked, sub: `${esc(j.startText)}${j.start === j.end ? '' : ` to ${esc(j.endText)}`}` })))) : ''}
       <h2 class="pl-h">Jobs</h2>
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
       <h2 class="pl-h">Quotes</h2>
@@ -226,6 +258,7 @@
         ${d.quoteUrl ? `<p style="margin:10px 0 0;">${openLink(d.quoteUrl, 'Open your quote', 'opened_quote', d.id, d.ref)}</p>` : ''}
       </div>
       ${d.onSite.length ? `<div class="pl-card"><strong>On site now</strong><br>${d.onSite.map((o) => `${esc(o.who)} since ${esc(o.since)}`).join('<br>')}</div>` : ''}
+      ${d.kind === 'job' && d.plan ? card('Dates', d.plan.pending ? '<span class="pl-muted">Dates to be confirmed. We will email you the dates.</span>' : `${planChart([{ bars: d.plan.bars, booked: d.plan.booked }])}<div class="pl-muted" style="margin-top:6px;">${barsText(d.plan)}</div>`) : ''}
       ${d.kind === 'job' ? card('Bookings', `
           ${d.bookings.length ? d.bookings.map((b) => `<div style="margin:4px 0;">${bookingLine(b)}</div>`).join('') : `<span class="pl-muted">Nothing booked yet. We will let you know when it is.</span>`}
           ${d.pastBookings.length ? `<details style="margin-top:8px;"><summary class="pl-muted" style="cursor:pointer;">Earlier visits (${d.pastBookings.length})</summary>${d.pastBookings.map((b) => `<div style="margin:4px 0;" class="pl-muted">${bookingLine(b)}</div>`).join('')}</details>` : ''}`) : ''}
