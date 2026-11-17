@@ -59,11 +59,32 @@ exports.handler = async (event) => {
       }
       lines.push(`${E.jobTitle(g.project)}: ${when}`);
     }
+    // a client's ask for a date (item 74 point 9a) still open after two working days: the office hears daily
+    let asksOpen = 0;
+    try {
+      const P = require('../../public/js/plan-calc.js');
+      const { data: holidays } = await admin.from('public_holidays').select('holiday_date').gte('holiday_date', E.addDays(today, -30));
+      const hol = new Set((holidays || []).map((h) => h.holiday_date));
+      const { data: asks } = await admin.from('portal_booking_requests').select('id, project_id, ask_date, ask_time, email, created_at, projects(id, name, job_number, quote_number)')
+        .is('answered_at', null).is('withdrawn_at', null).lt('created_at', new Date(Date.now() - 2 * 86400000).toISOString());
+      const late = (asks || []).filter((a) => a.projects && P.workDaysLate(new Date(a.created_at).toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }), today, hol) >= 2);
+      if (late.length) {
+        const office = [...new Set([...(await managerIds(admin)), ...((await admin.from('profiles').select('id').in('role', PRICING_ROLES).eq('active', true)).data || []).map((p) => p.id)])];
+        for (const a of late) {
+          for (const uid of office) {
+            await admin.rpc('create_notification', { p_user: uid, p_kind: 'booking_reminder', p_title: `Client still waiting: ${E.jobTitle(a.projects)}`, p_body: `${a.email} asked for ${E.fmtDay(a.ask_date)}${a.ask_time ? `, ${E.fmtTime(a.ask_time)}` : ''} in the portal and has not heard back. Book it from the job's Schedule tab, or call them.`, p_link: `/project.html?id=${a.project_id}&tab=schedule`, p_actor: null, p_dedupe: `portal-ask-late:${a.id}:${today}` });
+          }
+          lines.push(`${E.jobTitle(a.projects)}: client's date ask not answered`);
+        }
+        asksOpen = late.length;
+      }
+    } catch (e) { console.error('remind-client-bookings: the client date asks check failed', e.message); }
+
     // the job plan's own reminders (item 92): slipped jobs, dates not confirmed, order gear, book people
     let plan = { count: 0, lines: [] };
     try { plan = await require('./_shared/job-plan').planReminders(admin); } catch (e) { console.error('remind-client-bookings: the plan reminders failed', e.message); }
-    const summary = `${byProject.size} job(s) booked in the next 3 days with the client not told, ${sent} reminder(s) sent. Plan: ${plan.count} reminder(s).`;
+    const summary = `${byProject.size} job(s) booked in the next 3 days with the client not told, ${sent} reminder(s) sent. Plan: ${plan.count} reminder(s). Client date asks not answered: ${asksOpen}.`;
     console.log(`remind-client-bookings: ${summary}`);
-    return { summary, details: [...lines, ...plan.lines].join('; ') || null, quiet: !byProject.size && !plan.count };
+    return { summary, details: [...lines, ...plan.lines].join('; ') || null, quiet: !byProject.size && !plan.count && !asksOpen };
   });
 };

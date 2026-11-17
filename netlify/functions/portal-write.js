@@ -1,0 +1,90 @@
+// POST /.netlify/functions/portal-write   (the device's portal token is the check, see
+// _shared/portal-session.js). What a client may change from the portal (backlog item 74):
+//   ask_date      { projectId, date: 'YYYY-MM-DD', time: 'HH:MM' | '', note }   ask for a day and
+//                 time on a job of theirs (point 9a). Books nothing: the office books it and tells
+//                 them the usual way, which closes the ask by itself (a database trigger). One open
+//                 ask per job: a second one replaces the first. 5 asks an hour per device.
+//   withdraw_ask  { projectId }                                               take the open ask back
+// Every call checks the session and that the job is in the login's scope before anything is
+// written. Writes portal_booking_requests, activity_log, notifications (create_notification) and
+// the usage row (portal_events).
+
+const S = require('./_shared/portal-session');
+const D = require('./_shared/portal-data');
+const { jobRef, fmtDay, fmtTime, sydneyToday, addDays } = require('./_shared/schedule-emails');
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME = /^\d{2}:\d{2}$/;
+const ASKS_PER_HOUR = 5;
+
+// The site manager on the job, the ops managers and every active Admin, Finance and Sales person.
+async function officeIds(admin, projectId) {
+  const [{ data: contacts }, { data: settings }, { data: pricing }] = await Promise.all([
+    admin.from('job_contacts').select('profile_id, role').eq('project_id', projectId).eq('side', 'thomson').in('role', ['site_manager', 'project_manager']),
+    admin.from('company_settings').select('ops_manager_user_ids').eq('id', 1).maybeSingle(),
+    admin.from('profiles').select('id').in('role', ['admin', 'finance', 'sales']).eq('active', true),
+  ]);
+  const managers = (settings && settings.ops_manager_user_ids) || [];
+  const site = (contacts || []).map((c) => c.profile_id).filter(Boolean);
+  // the job's own people and the ops managers; everyone in the office only when nobody is named
+  const named = [...new Set([...site, ...managers])];
+  return named.length ? named : (pricing || []).map((p) => p.id);
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
+  let body = {};
+  try { body = JSON.parse(event.body || '{}'); } catch { return S.json(400, { ok: false, error: 'Bad request' }); }
+  const auth = await S.requirePortalSession(event);
+  if (!auth) return S.json(401, { ok: false, error: 'Please log in again.' });
+  if (auth.mustChange) return S.json(403, { ok: false, mustChange: true, error: 'Choose your password first.' });
+  const { admin, scope, session, log } = auth;
+  try {
+    const projectId = String(body.projectId || '');
+    if (!UUID.test(projectId)) return S.json(400, { ok: false, error: 'Which job?' });
+    const p = await D.scopedProject(admin, scope, projectId);
+    if (!p || !p.job_number) return S.json(404, { ok: false, error: 'That job is not on your account.' });
+    const now = new Date().toISOString();
+
+    if (body.action === 'withdraw_ask') {
+      await admin.from('portal_booking_requests').update({ withdrawn_at: now }).eq('project_id', p.id).is('answered_at', null).is('withdrawn_at', null);
+      await log('withdrew_date_ask', { projectId: p.id, detail: jobRef(p) });
+      return S.json(200, { ok: true });
+    }
+
+    if (body.action === 'ask_date') {
+      const date = String(body.date || '');
+      const time = String(body.time || '');
+      const note = String(body.note || '').trim().slice(0, 500) || null;
+      if (!DATE.test(date) || date <= sydneyToday()) return S.json(400, { ok: false, error: 'Pick a day from tomorrow on.' });
+      if (date > addDays(sydneyToday(), 365)) return S.json(400, { ok: false, error: 'Pick a day within the next year.' });
+      if (time && (!TIME.test(time) || time < '07:00' || time > '16:00')) return S.json(400, { ok: false, error: 'Pick a start between 7 am and 4 pm, or Any time.' });
+      const since = new Date(Date.now() - 3600 * 1000).toISOString();
+      const { count } = await admin.from('portal_booking_requests').select('id', { count: 'exact', head: true }).eq('session_id', session.id).gte('created_at', since);
+      if ((count || 0) >= ASKS_PER_HOUR) return S.json(429, { ok: false, error: 'That is a lot of asks in an hour. Please call us instead.' });
+
+      // a new ask replaces the open one (Change on the page)
+      await admin.from('portal_booking_requests').update({ withdrawn_at: now }).eq('project_id', p.id).is('answered_at', null).is('withdrawn_at', null);
+      const { error } = await admin.from('portal_booking_requests').insert({ project_id: p.id, ask_date: date, ask_time: time || null, note, email: scope.email, session_id: session.id });
+      if (error) throw error;
+
+      const when = `${fmtDay(date)}${time ? `, ${fmtTime(time)}` : ', any time'}`;
+      const who = scope.firstName || scope.email;
+      await admin.from('activity_log').insert({ entity_type: 'project', entity_id: p.id, action: 'client_asked_date', description: `${who} asked for ${when} in the client portal${note ? `: "${note}"` : ''}` });
+      for (const uid of await officeIds(admin, p.id)) {
+        await admin.rpc('create_notification', {
+          p_user: uid, p_kind: 'booking_reminder', p_title: `Client asked for a date: ${jobRef(p)} ${p.name || ''}`.trim(),
+          p_body: `${who} asked for ${when}.${note ? ` "${note.slice(0, 120)}"` : ''} Book it from the job's Schedule tab.`,
+          p_link: `/project.html?id=${p.id}&tab=schedule`, p_actor: null, p_dedupe: `portal-ask:${p.id}:${date}:${time}`,
+        });
+      }
+      await log('asked_date', { projectId: p.id, detail: `${jobRef(p)} ${date}` });
+      return S.json(200, { ok: true });
+    }
+    return S.json(400, { ok: false, error: 'Unknown action' });
+  } catch (err) {
+    console.error('portal-write failed:', err);
+    return S.json(500, { ok: false, error: 'Something went wrong. Please try again.' });
+  }
+};
