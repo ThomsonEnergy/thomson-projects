@@ -131,7 +131,8 @@ async function createRequest(admin, scope, input) {
   const { data: settings } = await admin.from('company_settings').select('default_terms, default_markup_percent').eq('id', 1).maybeSingle();
   const name = need.split(/\n/)[0].slice(0, 80);
   const base = {
-    name, client_id: cl.id, client_name: cl.name, client_email: cl.email || scope.email, client_phone: cl.phone || null,
+    // the client's own email; a portal login's when the client has none (never a label like "their referral link")
+    name, client_id: cl.id, client_name: cl.name, client_email: cl.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(scope.email) ? scope.email : null), client_phone: cl.phone || null,
     client_address: site.address, client_site_id: site.id, portal_requested_at: new Date().toISOString(), portal_requested_by: scope.email,
   };
 
@@ -245,4 +246,4 @@ async function removePerson(admin, scope, { clientId, contactId }) {
   await admin.from('activity_log').insert({ entity_type: 'client', entity_id: c.id, action: 'portal_person_removed', description: `${scope.email} took ${row.email}'s portal login away` });
 }
 
-module.exports = { Refused, requestOptions, createRequest, addToRequest, postClientMessage, peopleFor, addPerson, removePerson };
+module.exports = { Refused, requestOptions, createRequest, addToRequest, postClientMessage, peopleFor, addPerson, removePerson, officeIds };

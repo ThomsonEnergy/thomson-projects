@@ -221,6 +221,8 @@
       ${listHtml(d.jobs, { empty: 'No jobs on the go.' })}
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
+      ${(d.referrals || []).length ? `<h3 class="pl-muted" style="margin:12px 0 4px; font-size:13px;">Jobs you sent us</h3>${d.referrals.map((r) => `<div class="pl-row ${r.open ? '' : 'done'}" style="cursor:default;">${r.ref ? `<div class="ref">${esc(r.ref)}</div>` : ''}<div class="name" style="font-size:15px;">${esc(r.name)}</div><div class="site">${esc(r.when)}</div><div class="status"><span class="pl-status">${esc(r.status)}</span></div></div>`).join('')}` : ''}
+      ${d.referLink ? `<p style="margin:10px 0 0;"><a class="secondary pl-btn" href="${esc(d.referLink)}" target="_blank" rel="noopener">Send us a job (your referral link)</a></p><p class="pl-muted" style="margin:4px 0 0;">Save it to your phone's home screen, or pass it to your team.</p>` : ''}
       ${d.people && d.people.length ? `<h2 class="pl-h">People</h2><div class="pl-card" id="pl-people">${peopleHtml(d.people)}</div>` : ''}
       <p class="pl-muted" style="margin-top:24px;">Need something? Call ${esc(d.company.name)} on <a href="tel:${esc(d.company.phone)}">${esc(d.company.phone)}</a>.</p>`;
     const reqBtn = document.getElementById('pl-req-open');
