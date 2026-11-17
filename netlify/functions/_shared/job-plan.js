@@ -112,11 +112,12 @@ async function placeJobWindow(admin, { quote, job }) {
   return win;
 }
 
-// A variation became a cost centre on the job: its own window, straight after the job's
-// last planned day (or from today when that has passed). A job with no dates yet gets a
-// window with no dates, placed with the job. Tells whoever chases the job when the
-// variation takes it past what the client was told.
-async function addVariationWindow(admin, { projectId, centreId, hours, actorId = null }) {
+// A variation became a cost centre on the job: its own window. A fixed price one (onDate unset)
+// goes straight after the job's last planned day (or from today when that has passed); a do and
+// charge one is work done on site on the day it was logged (onDate), so it sits on that day. A
+// job with no dates yet gets a window with no dates, placed with the job. Tells whoever chases
+// the job when the variation takes it past what the client was told.
+async function addVariationWindow(admin, { projectId, centreId, hours, onDate = null, actorId = null }) {
   const { rows, main } = await jobWindows(admin, projectId);
   if (rows.some((w) => w.cost_centre_id === centreId)) return null;
   const plan = await planContext(admin);
@@ -124,7 +125,10 @@ async function addVariationWindow(admin, { projectId, centreId, hours, actorId =
   const days = P.daysFromHours(hours, crew, plan.settings.dayHours);
   const span = P.jobSpan(rows);
   let dates = { start_date: null, end_date: null };
-  if (span) {
+  if (onDate) {
+    const day = P.nextWorkDay(onDate, plan.ctx.holidays);
+    dates = { start_date: day, end_date: P.endAfterWorkDays(day, days, plan.ctx.holidays) };
+  } else if (span) {
     const from = P.nextWorkDay(span.end >= plan.today ? P.addDays(span.end, 1) : plan.today, plan.ctx.holidays);
     dates = { start_date: from, end_date: P.endAfterWorkDays(from, days, plan.ctx.holidays) };
   }
@@ -244,7 +248,7 @@ async function planReminders(admin) {
         projectId, dedupe: `plan-slip:${projectId}:${today}`,
       });
       lines.push(`${title}: client not told of the new dates`);
-    } else if (!main.promised_start && P.daysBetween(today, span.start) <= 21) {
+    } else if (!main.promised_start && span.start >= today && P.daysBetween(today, span.start) <= 21) {
       await notify(admin, await chasers(admin, main.quoter_id), {
         title: `Dates not confirmed with the client: ${title}`,
         body: `Planned for ${P.fmtRange(span.start, span.end)} and ${client} has not been told. Email the dates from the Plan, or mark as told by phone.`,

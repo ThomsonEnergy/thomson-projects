@@ -252,8 +252,9 @@ const PlanChart = (() => {
       const { holidays } = S.data.ctx;
       let patch;
       if (mode === 'move') {
+        // the same number of working days, so a move never ends on a weekend or holiday
         const start = P.nextWorkDay(P.addDays(w.start_date, moved), holidays);
-        patch = { start_date: start, end_date: P.addDays(start, P.daysBetween(w.start_date, w.end_date)) };
+        patch = { start_date: start, end_date: P.endAfterWorkDays(start, Math.max(1, P.workDaysIn(w.start_date, w.end_date, holidays).length), holidays) };
       } else {
         const end = P.addDays(w.end_date, moved) < w.start_date ? w.start_date : P.addDays(w.end_date, moved);
         patch = { end_date: end };
@@ -268,7 +269,7 @@ const PlanChart = (() => {
           const shiftBy = P.daysBetween(w.start_date, patch.start_date);
           for (const v of g.variations.filter((x) => x.start_date)) {
             const vs = P.nextWorkDay(P.addDays(v.start_date, shiftBy), holidays);
-            await saveWindow(v.id, { start_date: vs, end_date: P.addDays(vs, P.daysBetween(v.start_date, v.end_date)) });
+            await saveWindow(v.id, { start_date: vs, end_date: P.endAfterWorkDays(vs, Math.max(1, P.workDaysIn(v.start_date, v.end_date, holidays).length), holidays) });
           }
         }
         await refresh();

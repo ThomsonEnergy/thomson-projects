@@ -11,7 +11,6 @@
 const { getAdminClient } = require('./_shared/require-admin');
 const { runAgent, managerIds } = require('./_shared/agent-log');
 const E = require('./_shared/schedule-emails');
-const { planReminders } = require('./_shared/job-plan');
 
 const PRICING_ROLES = ['admin', 'finance', 'sales']; // the same roles as is_pricing_role()
 
@@ -61,7 +60,8 @@ exports.handler = async (event) => {
       lines.push(`${E.jobTitle(g.project)}: ${when}`);
     }
     // the job plan's own reminders (item 92): slipped jobs, dates not confirmed, order gear, book people
-    const plan = await planReminders(admin);
+    let plan = { count: 0, lines: [] };
+    try { plan = await require('./_shared/job-plan').planReminders(admin); } catch (e) { console.error('remind-client-bookings: the plan reminders failed', e.message); }
     const summary = `${byProject.size} job(s) booked in the next 3 days with the client not told, ${sent} reminder(s) sent. Plan: ${plan.count} reminder(s).`;
     console.log(`remind-client-bookings: ${summary}`);
     return { summary, details: [...lines, ...plan.lines].join('; ') || null, quiet: !byProject.size && !plan.count };
