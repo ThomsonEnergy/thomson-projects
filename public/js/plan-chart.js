@@ -48,10 +48,12 @@ const PlanChart = (() => {
       return (p.status === 'sent' && !p.expired) || p.id === S.focus;
     });
     const jobIds = [...new Set(live.filter((w) => w.projects.job_number).map((w) => w.project_id))];
-    const [bookings, pos] = jobIds.length ? await Promise.all([
+    const [bookings, pos, asks] = jobIds.length ? await Promise.all([
       q(supabaseClient.from('schedule_assignments').select('project_id, assignment_date, client_informed_at').in('project_id', jobIds).eq('block_type', 'job')),
       q(supabaseClient.from('purchase_orders').select('project_id, received').in('project_id', jobIds)),
-    ]) : [[], []];
+      // a client's open ask for a date from the portal (item 74 point 9a)
+      q(supabaseClient.from('portal_booking_requests').select('project_id, ask_date, ask_time').in('project_id', jobIds).is('answered_at', null).is('withdrawn_at', null)),
+    ]) : [[], [], []];
     const ctx = { holidays: new Set(holidays.map((h) => h.holiday_date)), crew: people.filter(P.onTools).map((p) => p.id), leave };
     const settingsOut = { dayHours: Number(s.plan_day_hours) || 8, crew: Number(s.plan_crew_size) || 2, leadWeeks: s.plan_lead_weeks == null ? 2 : Number(s.plan_lead_weeks), slipDays: s.plan_slip_days == null ? 2 : Number(s.plan_slip_days) };
 
@@ -73,6 +75,7 @@ const PlanChart = (() => {
         g.slip = P.slipFor(g.main, g.rows, settingsOut.slipDays, ctx.holidays);
         g.bookedDays = [...new Set(bookings.filter((b) => b.project_id === g.project.id).map((b) => b.assignment_date))].sort();
         const orders = pos.filter((o) => o.project_id === g.project.id);
+        g.ask = asks.find((a) => a.project_id === g.project.id) || null;
         g.po = !orders.length ? 'none' : orders.every((o) => o.received) ? 'received' : 'ordered';
         g.orderBy = g.span && Number(g.main.lead_weeks) > 0 ? P.addDays(g.span.start, -Number(g.main.lead_weeks) * 7) : null;
         g.notBooked = !!g.span && g.span.start >= t && P.daysBetween(t, g.span.start) <= 14 && !g.bookedDays.some((d) => d >= g.span.start && d <= g.span.end);
@@ -119,7 +122,8 @@ const PlanChart = (() => {
     return '<span class="plan-chip warn">Confirm dates with client</span>';
   }
   const poChip = (g) => (g.po === 'received' ? '<span class="plan-chip ok">Gear received</span>' : g.po === 'ordered' ? '<span class="plan-chip">Gear ordered</span>' : Number(g.main.lead_weeks) > 0 ? `<span class="plan-chip ${g.orderBy && g.orderBy <= P.addDays(S.data.today, 7) ? 'bad' : ''}">Nothing ordered${g.orderBy ? `, order by ${esc(P.fmtDay(g.orderBy))}` : ''}</span>` : '');
-  const flagsHtml = (g) => `${statusChip(g)}${g.isJob && g.span ? `${poChip(g)}${g.notBooked ? '<span class="plan-chip bad">Nobody booked</span>' : ''}` : ''}`;
+  const askChip = (g) => (g.ask ? `<span class="plan-chip warn">Client asked for ${esc(P.fmtDay(g.ask.ask_date))}${g.ask.ask_time ? `, ${esc(String(g.ask.ask_time).slice(0, 5))}` : ''}</span>` : '');
+  const flagsHtml = (g) => `${statusChip(g)}${g.isJob ? askChip(g) : ''}${g.isJob && g.span ? `${poChip(g)}${g.notBooked ? '<span class="plan-chip bad">Nobody booked</span>' : ''}` : ''}`;
 
   function weekLoads(weeksFrom, count) {
     const { load, ctx } = S.data;

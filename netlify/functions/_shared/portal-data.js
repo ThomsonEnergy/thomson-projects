@@ -8,6 +8,7 @@
 //     it is not theirs: the one check before a job is read or an open is logged against it
 //   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
 //     charge job the email may see money on)
+//   portalProject also carries `ask`: the client's open ask for a date on a job (point 9a), or null.
 //   Both carry `plan` (item 92): the job's bars for the client's chart, from the dates the client
 //     was told (job_windows.promised_start and promised_end) only. Dates not yet told read "to be
 //     confirmed"; a job that moved shows its new dates only once the change email has gone. Never
@@ -246,6 +247,10 @@ async function portalProject(admin, p) {
   ]);
   const bookings = allBookings.filter((b) => b.dateKey >= today);
   const plan = (await planFor(admin, [p], allBookings))[p.id] || null;
+  // the client's open ask for a date (point 9a): only on a job, and only theirs to see
+  const { data: askRow } = p.job_number ? await admin.from('portal_booking_requests').select('ask_date, ask_time, note, created_at')
+    .eq('project_id', p.id).is('answered_at', null).is('withdrawn_at', null).maybeSingle() : { data: null };
+  const ask = askRow ? { date: askRow.ask_date, day: fmtDay(askRow.ask_date), time: askRow.ask_time ? fmtTime(askRow.ask_time) : '', timeValue: askRow.ask_time ? String(askRow.ask_time).slice(0, 5) : '', note: askRow.note || '' } : null;
   const pastBookings = allBookings.filter((b) => b.dateKey < today).slice(-5).reverse();
   const manager = (contacts.data || []).find((c) => c.role === 'site_manager') || (contacts.data || []).find((c) => c.role === 'project_manager');
 
@@ -267,7 +272,7 @@ async function portalProject(admin, p) {
     hasWork, work,
     manager: manager ? staffFirst(manager.profiles?.full_name) || null : null,
     company: comp,
-    bookings, pastBookings, onSite, plan,
+    bookings, pastBookings, onSite, plan, ask,
     photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,
