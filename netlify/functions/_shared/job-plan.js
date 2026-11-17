@@ -228,8 +228,13 @@ async function planReminders(admin) {
   if (!ids.length) return { count: 0, lines: [] };
   const [{ data: pos }, { data: bookings }, { data: shifts }, { data: managerRow }] = await Promise.all([
     admin.from('purchase_orders').select('project_id').in('project_id', ids),
-    admin.from('schedule_assignments').select('project_id, assignment_date').in('project_id', ids).eq('block_type', 'job'),
-    admin.from('time_entries').select('project_id').in('project_id', ids),
+    // bookings from 90 days back on (a request returns at most 1,000 rows: old bookings are not needed)
+    admin.from('schedule_assignments').select('project_id, assignment_date').in('project_id', ids).eq('block_type', 'job').gte('assignment_date', P.addDays(today, -90)),
+    // only whether a job whose planned start has passed has any shift at all: one row each is enough
+    (() => {
+      const late = [...byJob.entries()].filter(([, g]) => { const sp = P.jobSpan(g.rows); return sp && sp.start < today; }).map(([id]) => id);
+      return late.length ? admin.from('time_entries').select('project_id').in('project_id', late) : Promise.resolve({ data: [] });
+    })(),
     admin.from('company_settings').select('ops_manager_user_ids').eq('id', 1).maybeSingle(),
   ]);
   const hasPo = new Set((pos || []).map((r) => r.project_id));

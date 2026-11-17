@@ -22,7 +22,8 @@ async function initJobWindow(project) {
       q(supabaseClient.from('public_holidays').select('holiday_date').gte('holiday_date', today)),
       q(supabaseClient.from('profiles').select('id, role, on_tools').eq('active', true)),
       q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').gte('end_date', today)),
-      q(supabaseClient.from('job_windows').select('*, projects!inner(job_number, pipeline_stage)')),
+      // only jobs with site work ahead (what the load counts); this quote's own row is read below
+      q(supabaseClient.from('job_windows').select('*, projects!inner(job_number, pipeline_stage)').not('projects.job_number', 'is', null).in('projects.pipeline_stage', PlanCalc.ACTIVE_STAGES)),
       q(supabaseClient.from('cost_centres').select('id, variation_entry_id, cost_centre_line_items(item_type, quantity)').eq('project_id', project.id)),
       supabaseClient.auth.getUser(),
     ]);
@@ -31,7 +32,8 @@ async function initJobWindow(project) {
     const ctx = { holidays: new Set(holidays.map((h) => h.holiday_date)), crew: people.filter(P.onTools).map((p) => p.id), leave };
     const load = P.buildLoad(windows.filter((w) => w.projects.job_number && P.ACTIVE_STAGES.includes(w.projects.pipeline_stage) && w.start_date), ctx.holidays);
     const hours = centres.filter((c) => !c.variation_entry_id).reduce((sum, c) => sum + (c.cost_centre_line_items || []).filter((li) => li.item_type === 'labour').reduce((h, li) => h + (Number(li.quantity) || 0), 0), 0);
-    let row = windows.find((w) => w.project_id === project.id && !w.cost_centre_id) || null;
+    const { data: own } = await supabaseClient.from('job_windows').select('*').eq('project_id', project.id).is('cost_centre_id', null).maybeSingle();
+    let row = own || null;
     const state = {
       typed: !!(row && row.onsite_days_typed),
       crew: row ? Number(row.crew_size) : Number(s.plan_crew_size) || 2,
