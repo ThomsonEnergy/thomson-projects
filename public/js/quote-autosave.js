@@ -35,9 +35,16 @@ let quoteAutosaveLive = null;      // the quote steps now on screen
 let quoteTypedEarly = false;       // something was typed before the steps were ready: save it all once
 const quoteClientsMadeHere = {};   // quote id -> the client this page made for it
 
-// Saves everything typed and waits for it. The page calls this before it reloads the quote.
+// Saves everything typed and waits for it. The page calls this before it reloads the quote, so a
+// save that would redraw the quote (a new proposal type) leaves the redraw to the caller.
+// Gives back what could not be saved, as [{ label, why, waitsForStages }]: nothing when all of it is in.
 async function quoteAutosaveFlush() {
-  if (quoteAutosaveLive) await quoteAutosaveLive.flush();
+  return quoteAutosaveLive ? quoteAutosaveLive.flush({ callerReloads: true }) : [];
+}
+
+// Save pricing has just saved the stage table: it has no unsaved changes now.
+function quoteAutosaveStagesSaved() {
+  if (quoteAutosaveLive) quoteAutosaveLive.stagesSaved();
 }
 
 // Saves everything typed, then keeps a save point of the quote as it is now.
@@ -48,9 +55,10 @@ async function quoteAutosaveSavePoint(reason) {
 window.addEventListener('beforeunload', (e) => {
   if (quoteAutosaveLive && quoteAutosaveLive.unsaved()) { e.preventDefault(); e.returnValue = ''; }
 });
-// A phone that switches app may never come back to this tab: save now, whatever box the cursor is in.
+// A phone that switches app may never come back to this tab: save now. A client name or site address
+// still being typed waits all the same, so half a name never becomes a client or a site.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && quoteAutosaveLive) quoteAutosaveLive.flush({ leaving: true });
+  if (document.visibilityState === 'hidden' && quoteAutosaveLive) quoteAutosaveLive.flush();
 });
 window.addEventListener('pagehide', () => { if (quoteAutosaveLive) quoteAutosaveLive.settleNow(); });
 window.addEventListener('online', () => { if (quoteAutosaveLive) quoteAutosaveLive.retry(); });
@@ -101,10 +109,13 @@ function quoteStepDefs(project, page) {
     Object.assign(project, fields);
   };
 
-  // A new client is only made from a name typed here while no client is linked.
-  let clientNameTyped = false;
-  if (el('p-client')) el('p-client').addEventListener('input', () => { if (!page.clientId()) clientNameTyped = true; });
-  if (el('clear-client-btn')) el('clear-client-btn').addEventListener('click', () => { clientNameTyped = false; });
+  // A quote with a client name and no client linked gets a client made from that name (as the old
+  // Save did), but never from half a name, and not straight after Clear or an Undo back to no client.
+  let clientNameTyped = false; // typed in the name box while no client is linked
+  let clientCleared = false;   // Clear was pressed: wait for a pick or a new name
+  let unlinkedByUndo = false;  // Undo went back to no client linked: saved as that until a name is typed
+  if (el('p-client')) el('p-client').addEventListener('input', () => { if (!page.clientId()) { clientNameTyped = true; clientCleared = false; unlinkedByUndo = false; } });
+  if (el('clear-client-btn')) el('clear-client-btn').addEventListener('click', () => { clientNameTyped = false; clientCleared = true; unlinkedByUndo = false; });
 
   return [
     {
@@ -114,13 +125,16 @@ function quoteStepDefs(project, page) {
         client_email: val('p-email').trim(), client_phone: val('p-phone').trim(), client_address: val('p-address').trim(),
         payment_terms: val('p-payment-terms'), notes: val('p-notes').trim(),
       }),
-      hold: (p, saved, leaving) => {
+      // Undo leaves payment terms alone: they are the client's, and may have been changed since on the Clients page
+      undoView: ({ payment_terms, ...rest }) => rest,
+      hold: (p, saved) => {
         if (!p.name || !p.client_name) return 'Not saved yet: needs a quote name and a client name';
-        // Clear was pressed: the quote keeps its client until another is picked or a new name is typed
-        if (!p.client_id && saved.client_id && !clientNameTyped) return 'Not saved yet: search for a client, or type a new client name';
-        if (leaving) return null;
         const at = (document.activeElement || {}).id;
-        if (!p.client_id && clientNameTyped && at === 'p-client') return 'A new client is made when you leave the client name box';
+        if (!p.client_id) {
+          // Clear was pressed: the quote keeps its client until another is picked or a new name is typed
+          if (clientCleared && !clientNameTyped) return 'Not saved yet: search for a client, or type a new client name';
+          if (!unlinkedByUndo && at === 'p-client') return 'A new client is made when you leave the client name box';
+        }
         if (at === 'p-address' && p.client_address !== (saved.client_address ?? '')) return 'The address saves when you leave its box';
         return null;
       },
@@ -143,7 +157,7 @@ function quoteStepDefs(project, page) {
             if (error) throw error;
             if (client) client.payment_terms = p.payment_terms;
           }
-        } else if (clientNameTyped) {
+        } else if (!unlinkedByUndo) {
           const { data, error } = await supabaseClient.from('clients').insert(details).select().single();
           if (error) throw error;
           client = data;
@@ -157,19 +171,26 @@ function quoteStepDefs(project, page) {
           name: p.name, client_id: clientId, client_name: p.client_name, client_email: p.client_email || null,
           client_phone: p.client_phone || null, client_address: p.client_address, client_site_id, notes: p.notes || null,
         });
+        if (clientId) { clientNameTyped = false; clientCleared = false; }
         return { payload: { ...p, client_id: clientId } };
       },
       after: (p, before) => page.clientSaved(p.client_address !== before.client_address),
       apply: async (p) => {
-        if ((p.client_id || null) !== (page.clientId() || null)) {
+        // back to before a client was linked: a client this page made for the quote stays with it, so no second one is made
+        const wantId = p.client_id || quoteClientsMadeHere[project.id] || null;
+        if (wantId !== (page.clientId() || null)) {
           let client = null;
-          if (p.client_id) client = (await supabaseClient.from('clients').select('*').eq('id', p.client_id).maybeSingle()).data;
+          if (wantId) client = (await supabaseClient.from('clients').select('*').eq('id', wantId).maybeSingle()).data;
+          const terms = val('p-payment-terms');
           page.linkClient(client); // fills the boxes from the client; the saved copy then goes over the top
           set('client-search-input', client ? client.name : '');
-          clientNameTyped = false;
+          if (!client) set('p-payment-terms', terms);
         }
+        clientNameTyped = false;
+        clientCleared = false;
+        unlinkedByUndo = !page.clientId();
         set('p-name', p.name); set('p-client', p.client_name); set('p-email', p.client_email); set('p-phone', p.client_phone);
-        set('p-address', p.client_address); set('p-payment-terms', p.payment_terms || 'cod'); set('p-notes', p.notes);
+        set('p-address', p.client_address); set('p-notes', p.notes);
         if (page.sitePicker()) page.sitePicker().refresh();
       },
       preview: (p) => [p.name, p.client_name, short(p.client_address, 40), p.notes ? `notes: ${short(p.notes, 50)}` : ''].filter(Boolean).join(' / '),
@@ -179,6 +200,7 @@ function quoteStepDefs(project, page) {
       read: () => ({ proposal_template: page.template(), template_answers: page.answers() }),
       // Undo puts the answers back, never the proposal type (a type change also swaps the photos, deposit and payment stages)
       undoView: (p) => p.template_answers || {},
+      redraws: (p, saved) => p.proposal_template !== saved.proposal_template,
       save: async (p) => {
         const prevTemplate = project.proposal_template || 'new_build';
         const changedTemplate = p.proposal_template !== prevTemplate;
@@ -199,8 +221,11 @@ function quoteStepDefs(project, page) {
           if (pay.milestones) newMilestones = pay.milestones;
           if (p.proposal_template === 'quick_estimate' && !(project.estimate_disclaimer_text || '').trim()) fields.estimate_disclaimer_text = page.defaultDisclaimer();
         }
-        await saveProject(fields);
+        // the quote in memory only takes the new type once its payment stages are in too, so Try again redoes all of it
+        const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+        if (error) throw error;
         if (newMilestones) await replaceQuoteMilestones(project.id, newMilestones);
+        Object.assign(project, fields);
         page.answersSaved(p.template_answers);
         // a new type redraws the whole quote: its questions, deposit, payment stages and cards
         return changedTemplate ? { reload: true } : null;
@@ -263,7 +288,7 @@ function quoteStepDefs(project, page) {
         set('q-bstc-qty', p.bstc_quantity); set('q-bstc-price', p.bstc_price_per_certificate); set('q-bstc-total', p.bstc_total || '');
         set('q-bstc-stage', p.bstc_cost_centre_id);
         if (el('q-bstc-none')) el('q-bstc-none').checked = !!p.bstc_not_claimed;
-        page.setMilestones(p.milestones || []);
+        page.setMilestones((p.milestones || []).map(m => ({ label: String(m.label || ''), percent: Number(m.percent) || 0 })));
       },
       preview: (p) => {
         const n = (p.milestones || []).length;
@@ -301,6 +326,9 @@ function mountQuoteAutosave({ project, page }) {
   const changed = new Set();   // steps saved since the PDF and ready check were last redone
   const read = (s) => { try { return s.read(); } catch (e) { console.error(`Quote autosave: could not read ${s.key}`, e); return s.saved; } };
   const dirty = (s) => quoteCanon(read(s)) !== s.savedJson;
+  // The page was redrawn: these steps are off the page, and the boxes with their ids now belong to
+  // the new steps (which may still be filling in). Nothing here reads or saves from then on.
+  const gone = () => { if (!dead && !document.body.contains(steps[0].card)) api.destroy(); return dead; };
 
   // ----- save points -----
   let points = [];       // newest first: { id, taken_at, reason, snapshot }
@@ -313,18 +341,29 @@ function mountQuoteAutosave({ project, page }) {
       points = data || [];
       if (!dead) steps.forEach(paint);
     });
+  // Gives back true when the point is kept (or there is nothing to keep), false when it should be tried again.
   function storePoint(pt) {
     pointQueue = pointQueue.then(async () => {
-      if (!pointsOk || (points[0] && quoteCanon(points[0].snapshot) === quoteCanon(pt.snapshot))) return;
+      if (!pointsOk || (points[0] && quoteCanon(points[0].snapshot) === quoteCanon(pt.snapshot))) return true;
       const { data, error } = await supabaseClient.from('quote_save_points')
         .insert({ project_id: project.id, taken_at: pt.taken_at, reason: pt.reason, snapshot: pt.snapshot })
         .select('id, taken_at, reason, snapshot').single();
-      if (error) { console.error('Quote save point not kept:', error.message); return; }
+      if (error) { console.error('Quote save point not kept:', error.message); return false; }
       points = [data, ...points].sort((a, b) => new Date(b.taken_at) - new Date(a.taken_at));
-      const gone = points.splice(QUOTE_SAVE_POINTS_KEPT);
-      if (gone.length) await supabaseClient.from('quote_save_points').delete().in('id', gone.map(p => p.id));
-    }).catch(err => console.error('Quote save point not kept:', err));
+      const old = points.splice(QUOTE_SAVE_POINTS_KEPT);
+      if (old.length) await supabaseClient.from('quote_save_points').delete().in('id', old.map(p => p.id));
+      return true;
+    }).catch(err => { console.error('Quote save point not kept:', err); return false; });
     return pointQueue;
+  }
+  // The quote as it was opened goes in the first time something saves. A failed try (no connection)
+  // is made again at the next save; until it is in, Undo still has it from memory.
+  async function keepOpened() {
+    if (opened.stored || opened.storing) return;
+    opened.storing = true;
+    const kept = await storePoint(opened);
+    opened.storing = false;
+    if (kept) opened.stored = true;
   }
 
   // ----- each step's Saving / Saved line and Undo -----
@@ -410,18 +449,21 @@ function mountQuoteAutosave({ project, page }) {
     paint(s);
   }
   function run(s, opts = {}) {
-    if (dead) return Promise.resolve();
+    if (gone()) return Promise.resolve();
     if (s.inFlight) { s.again = true; return s.promise; }
     const p = read(s);
     const json = quoteCanon(p);
     if (json === s.savedJson) { s.held = null; s.failed = null; paint(s); return Promise.resolve(); }
     if (s.failed && s.failed.json === json && !opts.force) return Promise.resolve(); // the same thing that just failed: wait for Try again or the connection
-    const why = s.hold ? s.hold(p, s.saved, !!opts.leaving) : null;
+    let why = s.hold ? s.hold(p, s.saved) : null;
+    // a save that redraws the whole quote would drop stage rows not yet saved
+    s.waitsForStages = typeof why !== 'string' && !!s.redraws && s.redraws(p, s.saved) && stagesUnsaved();
+    if (s.waitsForStages) why = 'Not saved yet: press Save pricing first, a new proposal type redraws the quote';
     if (typeof why === 'string') { s.held = why; paint(s); return Promise.resolve(); }
     s.held = null;
     s.inFlight = true;
     paint(s);
-    if (!opened.stored) { opened.stored = true; storePoint(opened); } // kept alongside, never holds the save up
+    keepOpened(); // kept alongside, never holds the save up
     s.promise = (async () => {
       let reload = false;
       try {
@@ -444,21 +486,34 @@ function mountQuoteAutosave({ project, page }) {
         s.inFlight = false;
         paint(s);
       }
-      if (reload) { await page.reload(); return; }
+      // Not awaited: the reload itself waits for every step to finish saving, this one included.
+      // A caller that is about to reload the quote anyway does it once, itself.
+      if (reload) { if (!opts.callerReloads) setTimeout(() => { if (!dead) page.reload(); }, 0); return; }
       if (s.again && !dead) { s.again = false; await run(s); }
     })();
     return s.promise;
   }
+  // Saves what can be saved and gives back what could not: [{ label, why }].
   async function flush(opts = {}) {
+    if (gone()) return [];
     steps.forEach(s => { clearTimeout(s.timer); s.timer = null; s.typing = false; });
     await Promise.all(steps.map(s => s.promise));
-    await Promise.all(steps.map(s => run(s, { force: true, leaving: !!opts.leaving })));
+    await Promise.all(steps.map(s => run(s, { force: true, callerReloads: !!opts.callerReloads })));
     await Promise.all(steps.map(s => s.promise));
+    if (gone()) return [];
+    return steps.filter(dirty).map(s => ({
+      label: s.label, waitsForStages: !!s.waitsForStages,
+      why: (s.failed ? s.failed.message : s.held || 'still saving').replace(/^Not saved yet: /, ''),
+    }));
   }
   async function savePoint(reason) {
+    if (gone()) return;
     await flush();
-    opened.stored = true; // the quote as it is now is the opened quote, or newer
-    await storePoint({ taken_at: new Date().toISOString(), reason, snapshot: snapshotNow() });
+    const now = snapshotNow();
+    // nothing has changed since the quote was opened: this point says it all, with a better reason
+    if (!opened.stored && opened.snapshot && quoteCanon(opened.snapshot) === quoteCanon(now)) opened.stored = true;
+    else await keepOpened();
+    await storePoint({ taken_at: new Date().toISOString(), reason, snapshot: now });
     if (!dead) steps.forEach(paint);
   }
 
@@ -545,7 +600,7 @@ function mountQuoteAutosave({ project, page }) {
   document.addEventListener('keydown', onDocKey);
 
   const poll = setInterval(() => {
-    if (!document.body.contains(steps[0].card)) { api.destroy(); return; } // the page was redrawn without the quote steps
+    if (gone()) return;
     steps.forEach(s => { if (!s.timer && !s.inFlight) run(s); });
     paintStages();
   }, QUOTE_AUTOSAVE_POLL_MS);
@@ -554,7 +609,8 @@ function mountQuoteAutosave({ project, page }) {
     flush,
     savePoint,
     attached: () => !dead && document.body.contains(steps[0].card),
-    unsaved: () => !dead && (steps.some(s => s.inFlight || dirty(s)) || stagesUnsaved()),
+    stagesSaved: () => { if (stagesBtn) { stagesBase = stagesText(); stagesTouched = true; paintStages(); } },
+    unsaved: () => !gone() && (steps.some(s => s.inFlight || dirty(s)) || stagesUnsaved()),
     retry: () => steps.forEach(s => { if (s.failed) run(s, { force: true }); }),
     settleNow: () => { if (settleTimer) settle(); },
     destroy() {

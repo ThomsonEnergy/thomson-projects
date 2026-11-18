@@ -3658,8 +3658,11 @@
           msg.innerHTML = '';
           busy(btn, true, 'Save pricing');
           try {
-            // the card's own boxes (deposit, credits, Pylon, payment stages) save themselves: let them land first
-            await quoteAutosaveFlush();
+            // The other boxes save themselves: let them land first. Anything that cannot save (a Pylon link
+            // without https://, no client name) stops here, because the redraw below would drop it.
+            // (A new proposal type that is waiting for this very save is not in the way.)
+            const stuck = (await quoteAutosaveFlush()).find(u => !u.waitsForStages);
+            if (stuck) throw new Error(`${stuck.label}: not saved, ${stuck.why}. Fix that first, then press Save pricing.`);
             const stagesPayload = readStagesPayload();
             const existingCentres = project.cost_centres || [];
             const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
@@ -3669,6 +3672,7 @@
               if (reasons.length) throw new Error(`Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.`);
             }
             await applyStagesPayload(project, stagesPayload, removedCentres);
+            quoteAutosaveStagesSaved(); // a waiting proposal type change saves with the reload below
             await logStageChanges(project.id, existingCentres, stagesPayload);
             await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
             showToast('Pricing saved.');
