@@ -3424,7 +3424,7 @@ function splitAtSydneyMidnight(clockInIso, clockOutIso) {
 async function findTimesheetProblems({ staffId = null, days = 45 } = {}) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   let q = supabaseClient.from('time_entries')
-    .select('id, staff_id, clock_in, clock_out, project_id, projects(name, job_number, quote_number)')
+    .select('id, staff_id, clock_in, clock_out, project_id, stayed_overnight, xero_pushed_at, projects(name, job_number, quote_number, laha_approved)')
     .is('sm8_activity_uuid', null) // ServiceM8 imports: on the job only, already paid
     .gte('clock_in', since).order('clock_in');
   if (staffId) q = q.eq('staff_id', staffId);
@@ -3449,7 +3449,20 @@ async function findTimesheetProblems({ staffId = null, days = 45 } = {}) {
       }
     }
   });
-  return { overlaps, stale };
+  // LAHA approved job, shift finished, nobody has said whether they stayed overnight (the job was
+  // ticked after the time went in, or the day was entered before the question was required).
+  // One line per person, day and job: the answer is once per day per job, the same as clock-out.
+  // Shifts already in Xero are left out, their pay has run.
+  const lahaGroups = {};
+  entries.filter(e => e.clock_out && e.projects && e.projects.laha_approved).forEach(e => {
+    const date = sydneyDateKey(new Date(e.clock_in));
+    const key = `${e.staff_id}|${date}|${e.project_id}`;
+    const g = lahaGroups[key] || (lahaGroups[key] = { staffId: e.staff_id, date, entry: e, answered: false, open: false });
+    if (e.stayed_overnight !== null && e.stayed_overnight !== undefined) g.answered = true;
+    else if (!e.xero_pushed_at) g.open = true;
+  });
+  const laha = Object.values(lahaGroups).filter(g => g.open && !g.answered);
+  return { overlaps, stale, laha };
 }
 
 // Punches (clock in/out button presses, not manual entries or later edits)
