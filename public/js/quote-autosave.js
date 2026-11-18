@@ -159,7 +159,7 @@ function quoteStepDefs(project, page) {
         });
         return { payload: { ...p, client_id: clientId } };
       },
-      after: () => page.clientSaved(),
+      after: (p, before) => page.clientSaved(p.client_address !== before.client_address),
       apply: async (p) => {
         if ((p.client_id || null) !== (page.clientId() || null)) {
           let client = null;
@@ -425,14 +425,15 @@ function mountQuoteAutosave({ project, page }) {
     s.promise = (async () => {
       let reload = false;
       try {
-        const result = (await s.save(p, s.saved)) || {};
+        const before = s.saved;
+        const result = (await s.save(p, before)) || {};
         s.saved = result.payload || p;
         s.savedJson = quoteCanon(s.saved);
         s.savedAt = new Date();
         s.failed = null;
         changed.add(s.key);
         if (s.key === 'scope') summaryDue = true;
-        if (s.after) s.after(s.saved);
+        if (s.after) s.after(s.saved, before);
         reload = !!result.reload;
         settleSoon();
       } catch (err) {

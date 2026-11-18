@@ -3713,7 +3713,7 @@
               document.getElementById('client-search-input').value = client.name;
               document.getElementById('selected-client-note').innerHTML = `New client made: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
             },
-            clientSaved: () => { setJobTitle(project); if (typeof ensureSiteSun === 'function') ensureSiteSun(); }, // a changed address gets its own sun figures
+            clientSaved: (addressChanged) => { setJobTitle(project); if (addressChanged && typeof ensureSiteSun === 'function') ensureSiteSun(); }, // a changed address gets its own sun figures
             template: () => currentTemplate,
             answers: () => {
               const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
