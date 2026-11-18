@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=141"></script>
+  <script src="/js/supabase-client.js?v=142"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -4642,7 +4642,7 @@
                 <label style="display:flex; align-items:center; gap:8px; margin-top:0; font-weight:400;">
                   <input type="checkbox" id="laha-approved-toggle" ${project.laha_approved ? 'checked' : ''} style="width:auto;" /> LAHA approved for this job
                 </label>
-                <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage covering travel/LAHA. Staff clocking out of this job are asked whether they stayed overnight, and the allowance gets added to their pay automatically.</p>
+                <p class="subtitle" style="margin-top:6px;">For jobs more than 100km from base with a Mobilisation stage covering travel/LAHA. Saves as soon as it is ticked. Staff are asked whether they stayed overnight when they clock out of this job or add its time by hand, and the allowance is added to their pay by itself.</p>
                 <div id="laha-approved-msg"></div>
               </div>
               ` : ''}
@@ -4749,6 +4749,27 @@
       };
 
       const jobActivityLog = renderJobActivityLogCapped(project.id, 'job-activity-log', 'job-activity-title');
+
+      // Wired before the edit mode return below: the Details tab shows this tick in Edit stages too,
+      // and it saves on its own, not with Save changes.
+      const lahaToggle = document.getElementById('laha-approved-toggle');
+      if (lahaToggle) lahaToggle.addEventListener('change', async (e) => {
+        const checked = e.target.checked;
+        const msgEl = document.getElementById('laha-approved-msg');
+        lahaToggle.disabled = true;
+        msgEl.innerHTML = '';
+        try {
+          const { error } = await supabaseClient.from('projects').update({ laha_approved: checked }).eq('id', project.id);
+          if (error) throw error;
+          project.laha_approved = checked;
+          msgEl.innerHTML = '<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>';
+        } catch (err) {
+          e.target.checked = !checked;
+          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${escapeHtml(friendlyError(err))}</div>`;
+        } finally {
+          lahaToggle.disabled = false;
+        }
+      });
 
       if (editMode) {
         wireEditForm(project);
@@ -5032,24 +5053,6 @@
         if (m) m.innerHTML = '<div class="success-box" style="margin-top:8px; font-size:12px;">PDF ready.</div>';
       });
 
-      const lahaToggle = document.getElementById('laha-approved-toggle');
-      if (lahaToggle) lahaToggle.addEventListener('change', async (e) => {
-        const checked = e.target.checked;
-        const msgEl = document.getElementById('laha-approved-msg');
-        lahaToggle.disabled = true;
-        msgEl.innerHTML = '';
-        try {
-          const { error } = await supabaseClient.from('projects').update({ laha_approved: checked }).eq('id', project.id);
-          if (error) throw error;
-          project.laha_approved = checked;
-          msgEl.innerHTML = '<div class="success-box" style="margin-top:6px; font-size:12px;">Saved.</div>';
-        } catch (err) {
-          e.target.checked = !checked;
-          msgEl.innerHTML = `<div class="error-box" style="margin-top:6px; font-size:12px;">${escapeHtml(friendlyError(err))}</div>`;
-        } finally {
-          lahaToggle.disabled = false;
-        }
-      });
       // the Cost Centres tab's claims tables: Open is the same invoice panel as the Invoices tab (status, history, every action)
       document.querySelectorAll('#panel-costcentres .open-invoice-btn').forEach(btn => {
         btn.addEventListener('click', () => loadInvoiceActions()
