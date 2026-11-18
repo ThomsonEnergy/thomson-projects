@@ -133,8 +133,10 @@ function renderClientReferral(client, el) {
     <button type="button" class="secondary" id="cr-copy" style="font-size:12px; padding:6px 12px;">Copy link</button>
     <button type="button" class="secondary" id="cr-send" style="font-size:12px; padding:6px 12px;">Send link</button>
     <button type="button" class="secondary" id="cr-regen" style="font-size:12px; padding:6px 12px;">Regenerate</button>` : ''}
-    <div id="cr-msg"></div>`;
+    <div id="cr-msg"></div>
+    <div id="cr-rewards" style="margin-top:10px;"></div>`;
   const msg = (html) => { el.querySelector('#cr-msg').innerHTML = html; };
+  renderLeadRewards(client, el.querySelector('#cr-rewards'));
   el.querySelector('#cr-kind').addEventListener('change', async (e) => {
     try {
       const out = await clientReferralCall({ action: 'set_kind', clientId: client.id, kind: e.target.value });
@@ -155,4 +157,47 @@ function renderClientReferral(client, el) {
     if (!confirm('Make a new link? The old one stops working straight away.')) return;
     try { const out = await clientReferralCall({ action: 'regenerate', clientId: client.id }); client.referral_token = out.token; renderClientReferral(client, el); showToast('New link made. Send it to them.'); } catch (err) { msg(`<div class="error-box">${escapeHtml(err.message)}</div>`); }
   });
+}
+
+// The client's lead rewards (item 74b step 3b part 1): owed first, then earned (waiting on the deposit),
+// then settled and cancelled. Paid (the bank reference), Credited (the invoice it went on) or Cancel
+// (why), through lead_reward_settle, which checks the role and that the reward is owed.
+async function renderLeadRewards(client, el) {
+  if (!el) return;
+  const { data, error } = await supabaseClient.from('lead_rewards')
+    .select('id, amount, kind, referral_kind, status, quote_total, earned_at, due_at, settled_at, settled_how, settled_reference, cancelled_reason, projects(job_number, name)')
+    .eq('referrer_client_id', client.id).order('earned_at', { ascending: false });
+  if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
+  const rows = data || [];
+  if (!rows.length) { el.innerHTML = ''; return; }
+  const order = { due: 0, earned: 1, settled: 2, cancelled: 3 };
+  rows.sort((a, b) => order[a.status] - order[b.status]);
+  const money = (n) => `$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const word = (r) => r.status === 'due' ? `<span class="badge sent">Owed ${r.kind === 'credit' ? '(credit)' : '(pay)'}</span>`
+    : r.status === 'earned' ? '<span class="badge draft">Earned, owed once the deposit is paid</span>'
+    : r.status === 'settled' ? `<span class="badge accepted">${r.settled_how === 'paid' ? 'Paid' : 'Credited'} ${escapeHtml(r.settled_reference || '')}</span>`
+    : `<span class="badge draft">Cancelled: ${escapeHtml(r.cancelled_reason || '')}</span>`;
+  el.innerHTML = `
+    <label>Lead rewards</label>
+    ${rows.map((r) => `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:4px 0; border-bottom:1px solid var(--border); font-size:13px;">
+        <span><strong>${money(r.amount)}</strong> for ${r.projects ? `J${escapeHtml(r.projects.job_number)} ${escapeHtml(r.projects.name || '')}` : 'a job'} <span class="subtitle" style="font-size:12px;">(${escapeHtml(r.referral_kind)}, job ${money(r.quote_total)})</span> ${word(r)}</span>
+        <span style="display:flex; gap:4px;">
+          ${r.status === 'due' ? `<button type="button" class="secondary lr-act" data-id="${r.id}" data-act="${r.kind === 'credit' ? 'credited' : 'paid'}" style="font-size:12px; padding:4px 10px;">${r.kind === 'credit' ? 'Credited' : 'Paid'}</button>` : ''}
+          ${['due', 'earned'].includes(r.status) ? `<button type="button" class="secondary lr-act" data-id="${r.id}" data-act="cancel" style="font-size:12px; padding:4px 10px;">Cancel</button>` : ''}
+        </span>
+      </div>`).join('')}
+    ${rows.some((r) => r.status === 'due' && r.kind === 'credit') ? '<p class="subtitle" style="margin:4px 0 0; font-size:12px;">A credit: take it off their next invoice as a line, then press Credited with that invoice number. (The app will do this by itself in the next step.)</p>' : ''}
+    <div id="lr-msg"></div>`;
+  el.querySelectorAll('.lr-act').forEach((b) => b.addEventListener('click', async () => {
+    const act = b.dataset.act;
+    const ask = act === 'paid' ? 'The payment reference and date (e.g. "EFT 18 Nov, ref 12345"):' : act === 'credited' ? 'The invoice number it was credited on (e.g. SI4821):' : 'Why is it cancelled? (shown on this card)';
+    const ref = prompt(ask);
+    if (ref === null) return;
+    b.disabled = true;
+    const { error: sErr } = await supabaseClient.rpc('lead_reward_settle', { p_id: b.dataset.id, p_action: act, p_reference: ref });
+    if (sErr) { el.querySelector('#lr-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(sErr))}</div>`; b.disabled = false; return; }
+    showToast(act === 'cancel' ? 'Cancelled.' : 'Saved.');
+    renderLeadRewards(client, el);
+  }));
 }
