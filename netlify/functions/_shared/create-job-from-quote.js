@@ -447,6 +447,9 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   // The job goes on the Plan in the first gap that fits and the quoter is asked to confirm the dates
   // with the client (item 92). Best effort: the plan never stops a job being made.
   try { await jobPlan().placeJobWindow(supabaseAdmin, { quote, job }); } catch (e) { console.error('create-job-from-quote: could not place the job on the plan', e.message); }
+  // A referred quote earns its referrer's lead reward now, the amount fixed (item 74b, lead_reward_earn).
+  // Best effort: it never stops a job being made, and calling it twice does nothing.
+  try { const { error: lrErr } = await supabaseAdmin.rpc('lead_reward_earn', { p_job: job.id }); if (lrErr) throw lrErr; } catch (e) { console.error('create-job-from-quote: lead reward not recorded', e.message); }
 
   // Last, so a quote still not approved while its job exists marks an attempt that stopped part way.
   await markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote);
