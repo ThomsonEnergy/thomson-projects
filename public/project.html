@@ -100,6 +100,8 @@
     }
 
     async function loadProject() {
+      // anything typed on the quote steps is saved before the quote is read again (js/quote-autosave.js, loaded with a quote)
+      if (typeof quoteAutosaveFlush === 'function') await quoteAutosaveFlush();
       // Item 96: the slow accrued-labour function starts straight away, alongside the
       // job itself, instead of after it. Its own failure is logged and skipped below.
       const accruedPromise = fetchAccruedLabourCost([projectId]).then(byProject => ({ byProject }), err => ({ err }));
@@ -751,6 +753,9 @@
       return lines;
     }
 
+    // The AI scope button: the notes are kept, so once a scope exists the same button rewrites it.
+    function scopeButtonLabel(scopeText) { return String(scopeText || '').trim() ? 'Regenerate with AI' : 'Generate scope of works with AI'; }
+
     function renderCustomerGets() {
       const el = document.getElementById('customer-gets');
       if (!el) return;
@@ -768,7 +773,7 @@
         document.getElementById('p-phone').value = client.phone || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
-        note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
+        note.textContent = 'No client selected: search above, or type a client name below and a new client is made when you leave that box.';
       }
       if (sitePicker) sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
@@ -1831,6 +1836,7 @@
         btn.disabled = true;
         msg.innerHTML = '';
         try {
+          await quoteAutosaveSavePoint('ai_scope'); // the notes typed and the scope as it stands are saved, and kept for Undo
           btn.textContent = 'Drafting stage names and descriptions...';
           const { data: { session: aiSession } } = await supabaseClient.auth.getSession();
           const aiHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${aiSession.access_token}` };
@@ -1874,7 +1880,7 @@
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false;
-          btn.textContent = 'Generate scope of works with AI';
+          btn.textContent = scopeButtonLabel(document.getElementById('p-sow').value);
         }
       });
 
@@ -3217,7 +3223,7 @@
 
               <div class="card" id="qstep-client">
                 <h2 style="margin:0 0 4px;">Quote and client</h2>
-                <p class="subtitle" style="margin:0 0 12px;">The quote's name, who it is for and where the work is. Notes stay internal.</p>
+                <p class="subtitle" style="margin:0 0 12px;">The quote's name, who it is for and where the work is. Notes stay internal. Saves itself as you type.</p>
                 <label style="margin-top:0">Quote name</label>
                 <input id="p-name" placeholder="e.g. 14 Miller St - New Build" value="${escapeHtml(project.name || '')}" />
 
@@ -3229,7 +3235,7 @@
                   </div>
                   <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
                 </div>
-                <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
+                <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected: search above, or type a client name below and a new client is made when you leave that box.</p>
 
                 <div class="grid cols-3" style="margin-top:14px;">
                   <div><label style="margin-top:0">Client name</label><input id="p-client" value="${escapeHtml(project.client_name || '')}" /></div>
@@ -3257,8 +3263,6 @@
 
                 <label>Internal notes</label>
                 <textarea id="p-notes" placeholder="Background that should stick around, e.g. what a lead originally asked for. Not shown to the client.">${escapeHtml(project.notes || '')}</textarea>
-                <div style="margin-top:14px;"><button type="button" id="qs0-save">Save quote and client</button></div>
-                <div id="qs0-msg"></div>
               </div>
 
               <div class="card" id="qstep-1">
@@ -3270,7 +3274,7 @@
                     <select id="qs1-template">
                       ${Object.keys(TEMPLATE_INFO).map(t => `<option value="${t}" ${t === template ? 'selected' : ''}>${TEMPLATE_INFO[t].label}</option>`).join('')}
                     </select>
-                    <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new type takes effect on Save answers, with its deposit and payment stages.</p>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new type takes effect straight away, with its deposit and payment stages.</p>
                   </div>
                 </div>
                 <div class="grid cols-2" id="template-questions"></div>
@@ -3301,11 +3305,7 @@
                   <div id="roi-estimate"></div>
                   <div id="bc-plans"></div>
                 </div>
-                <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <button type="button" id="qs1-save">Save answers</button>
-                  <span class="subtitle" id="qs1-missing" style="font-size:12px;"></span>
-                </div>
-                <div id="qs1-msg"></div>
+                <p class="subtitle" id="qs1-missing" style="margin:14px 0 0; font-size:12px;"></p>
               </div>
 
               <div class="card" id="qstep-2">
@@ -3319,8 +3319,6 @@
                   <input id="qs2-reason" placeholder="e.g. Standard tin roof, photos from the client are enough" value="${escapeHtml(project.site_visit_reason || '')}" />
                 </div>
                 <div id="qs2-inspection-area" style="margin-top:10px;"></div>
-                <div style="margin-top:14px;"><button type="button" id="qs2-save">Save site visit</button></div>
-                <div id="qs2-msg"></div>
               </div>
 
               <div class="card" id="qstep-3">
@@ -3406,12 +3404,13 @@
                 <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
 
                 <label style="margin-top:14px; font-weight:600;">Write the scope of works with AI</label>
+                <p class="subtitle" style="margin:2px 0 6px;">Your notes to the AI are kept. To change the scope, change or add a sentence here and press the button again.</p>
                 <textarea id="p-brief" placeholder="A few rough notes, e.g. 10 kW on the north face, hybrid inverter, 13.5 kWh battery in the garage, backup for fridge and lights">${escapeHtml(project.sow_brief || '')}</textarea>
                 <label>Supporting documents (optional)</label>
                 <div id="sow-doc-list" style="margin-bottom:8px;"></div>
                 <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
                 <div id="sow-doc-msg"></div>
-                <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
+                <button type="button" id="generate-scope-btn" style="margin-top:10px;">${scopeButtonLabel(project.sow_text)}</button>
                 <div id="generate-msg"></div>
 
                 <div class="qs-pair">
@@ -3427,8 +3426,6 @@
                 </div>
 
                 <div id="quote-pictures"></div>
-                <div style="margin-top:14px;"><button type="button" id="qs4-save">Save scope of works</button></div>
-                <div id="qs4-msg"></div>
               </div>
 
               <div class="card" id="qstep-5">
@@ -3458,7 +3455,7 @@
             </div>`;
     }
 
-    // The Quote tab's "Quote and client" card: client search, site picker and its Save. The typed
+    // The Quote tab's "Quote and client" card: client search and site picker (it saves itself, js/quote-autosave.js). The typed
     // name, email and phone apply to this quote only for an existing client; payment terms are the
     // client's (the deposit invoice's due date reads them), so a change there saves to the client.
     async function wireQuoteClientCard(project) {
@@ -3511,53 +3508,12 @@
         }
       }
       loadEditAddressAutocomplete(companySettings.google_maps_api_key);
-
-      document.getElementById('qs0-save').addEventListener('click', async () => {
-        const btn = document.getElementById('qs0-save');
-        const msg = document.getElementById('qs0-msg');
-        const name = document.getElementById('p-name').value.trim();
-        const client_name = document.getElementById('p-client').value.trim();
-        const client_email = document.getElementById('p-email').value.trim();
-        const client_phone = document.getElementById('p-phone').value.trim();
-        const client_address = document.getElementById('p-address').value.trim();
-        const notes = document.getElementById('p-notes').value.trim() || null;
-        const payment_terms = document.getElementById('p-payment-terms').value;
-        msg.innerHTML = '';
-        if (!name || !client_name) { msg.innerHTML = `<div class="error-box">Fill in the quote name and client name.</div>`; return; }
-        btn.disabled = true; btn.textContent = 'Saving...';
-        try {
-          let clientId = selectedClientId;
-          if (clientId) {
-            const currentTerms = (sitePicker.client() || {}).payment_terms || 'cod';
-            if (payment_terms && payment_terms !== currentTerms) {
-              const { error: termsErr } = await supabaseClient.from('clients').update({ payment_terms }).eq('id', clientId);
-              if (termsErr) throw termsErr;
-            }
-          } else {
-            // A new client's first site is the best guess for their office address until it is set on the Clients page.
-            const { data: newClient, error: clientErr } = await supabaseClient.from('clients')
-              .insert({ name: client_name, email: client_email || null, phone: client_phone || null, payment_terms, address: client_address || null }).select().single();
-            if (clientErr) throw clientErr;
-            clientId = newClient.id;
-            selectedClientId = clientId;
-            await sitePicker.setClient(newClient);
-          }
-          const client_site_id = await resolveClientSite(clientId, client_address, (sitePicker.client() || {}).address || client_address);
-          const fields = { name, client_id: clientId, client_name, client_email: client_email || null, client_phone: client_phone || null, client_address, client_site_id, notes };
-          const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-          if (error) throw error;
-          Object.assign(project, fields);
-          setJobTitle(project);
-          showToast('Quote and client saved.');
-          if (typeof ensureSiteSun === 'function') ensureSiteSun(); // a changed address gets its own sun figures
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-        } finally { btn.disabled = false; btn.textContent = 'Save quote and client'; }
-      });
     }
 
     async function wireQuoteSteps(project) {
       try {
+        // the steps save themselves: that file loads while the rest is wired, and is mounted last
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=1', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
@@ -3610,62 +3566,6 @@
           if (billCard) billCard.style.display = ['solar', 'battery'].includes(currentTemplate) ? '' : 'none';
         });
         wireBillCard(project, qEl, showMissing, refreshBar);
-        document.getElementById('qs1-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs1-save');
-          busy(btn, true, 'Save answers');
-          try {
-            const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
-            // blanked answers drop out
-            Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; });
-            const prevTemplate = project.proposal_template || 'new_build';
-            const changedTemplate = currentTemplate !== prevTemplate;
-            const fields = { template_answers: answers, proposal_template: currentTemplate };
-            let newMilestones = null;
-            if (changedTemplate) {
-              // A new proposal type gets that type's photos (Settings > portfolio photos), its deposit and
-              // payment stages where the quote still has the old type's defaults, and the estimate wording.
-              const [{ data: settings }, { data: milestones, error: msReadErr }] = await Promise.all([
-                supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single(),
-                supabaseClient.from('payment_milestones').select('label, percent').eq('project_id', project.id).order('sort_order'),
-              ]);
-              if (msReadErr) throw msReadErr;
-              const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
-              fields.cover_photos = ((settings && settings.portfolio_photos) || []).filter(ph => (ph.category || 'general') === wantCategory);
-              const pay = paymentDefaultsOnTypeChange(prevTemplate, currentTemplate, { deposit_percent: project.deposit_percent, milestones: milestones || [] });
-              if ('deposit_percent' in pay) fields.deposit_percent = pay.deposit_percent;
-              if (pay.milestones) newMilestones = pay.milestones;
-              if (currentTemplate === 'quick_estimate' && !(project.estimate_disclaimer_text || '').trim()) fields.estimate_disclaimer_text = companySettings.default_estimate_disclaimer || '';
-            }
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-            if (newMilestones) {
-              const { error: delErr } = await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
-              if (delErr) throw delErr;
-              if (newMilestones.length) {
-                const { error: insErr } = await supabaseClient.from('payment_milestones').insert(newMilestones.map((m, i) => ({ label: m.label, percent: m.percent, sort_order: i, project_id: project.id })));
-                if (insErr) throw insErr;
-              }
-            }
-            project.template_answers = answers;
-            templateAnswers = answers;
-            showToast('Answers saved.');
-            if (changedTemplate) {
-              project.proposal_template = currentTemplate;
-              const refreshed = await loadProject();
-              if (refreshed) {
-                render(refreshed, true);
-                if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
-              }
-              return;
-            }
-            const h = document.getElementById('qstep-1-head');
-            if (h) h.innerHTML = `${quoteStepTicks(project, centres)[1] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}1. Pre-quote information`;
-            refreshBar();
-            refreshReadyCheck(project);
-          } catch (err) {
-            say('qs1-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save answers'); }
-        });
 
         // ----- step 2: site visit -----
         const inspArea = document.getElementById('qs2-inspection-area');
@@ -3697,23 +3597,6 @@
           refreshInspectionArea();
         }));
         refreshInspectionArea();
-        document.getElementById('qs2-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs2-save');
-          const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || null;
-          if (!decision) { say('qs2-msg', `<div class="error-box">Pick one: needs a site visit, or not needed.</div>`); return; }
-          busy(btn, true, 'Save site visit');
-          try {
-            const reason = decision === 'not_needed' ? (document.getElementById('qs2-reason').value.trim() || null) : null;
-            const { error } = await supabaseClient.from('projects').update({ site_visit_decision: decision, site_visit_reason: reason, needs_site_visit: decision === 'needed' }).eq('id', project.id);
-            if (error) throw error;
-            project.site_visit_decision = decision; project.site_visit_reason = reason; project.needs_site_visit = decision === 'needed';
-            showToast('Saved.');
-            say('qs2-msg', '');
-            await refreshInspectionArea();
-          } catch (err) {
-            say('qs2-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save site visit'); }
-        });
 
         // ----- step 3: pricing -----
         centres.forEach(stage => {
@@ -3775,8 +3658,8 @@
           msg.innerHTML = '';
           busy(btn, true, 'Save pricing');
           try {
-            const pylonLinkTyped = document.getElementById('p-pylon-link').value.trim();
-            if (pylonLinkTyped && !safePylonLink(pylonLinkTyped)) throw new Error('The Pylon link must start with https://');
+            // the card's own boxes (deposit, credits, Pylon, payment stages) save themselves: let them land first
+            await quoteAutosaveFlush();
             const stagesPayload = readStagesPayload();
             const existingCentres = project.cost_centres || [];
             const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
@@ -3787,30 +3670,6 @@
             }
             await applyStagesPayload(project, stagesPayload, removedCentres);
             await logStageChanges(project.id, existingCentres, stagesPayload);
-
-            const num = (id) => { const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v) ? v : null; };
-            const fields = {
-              deposit_percent: parseFloat(document.getElementById('p-deposit').value) || 0,
-              show_investment_breakdown: document.getElementById('p-breakdown').checked,
-              pylon_link: document.getElementById('p-pylon-link').value.trim(),
-              pylon_project_id: document.getElementById('p-pylon-id').value.trim(),
-              stc_quantity: num('q-stc-qty'), stc_system_kw: num('q-stc-kw'), stc_zone_rating: num('q-stc-zone') || 1.382,
-              stc_install_year: parseInt(document.getElementById('q-stc-year').value, 10) || null,
-              stc_price_per_certificate: num('q-stc-price'), stc_total: num('q-stc-total') || 0,
-              stc_cost_centre_id: document.getElementById('q-stc-stage').value || null,
-              bstc_quantity: num('q-bstc-qty'), bstc_price_per_certificate: num('q-bstc-price'), bstc_total: num('q-bstc-total') || 0,
-              bstc_cost_centre_id: document.getElementById('q-bstc-stage').value || null,
-              bstc_not_claimed: document.getElementById('q-bstc-none').checked,
-            };
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-
-            await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
-            const milestonesPayload = readMilestones();
-            if (milestonesPayload.length) {
-              const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: project.id })));
-              if (msErr) throw msErr;
-            }
             await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
             showToast('Pricing saved.');
             if (stagesPayload.some(st => st.quoted_amount > 0)) autoGenerateQuotePdf(project);
@@ -3829,31 +3688,6 @@
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
-        document.getElementById('qs4-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs4-save');
-          busy(btn, true, 'Save scope of works');
-          try {
-            const fields = {
-              sow_text: document.getElementById('p-sow').value,
-              sow_brief: document.getElementById('p-brief').value.trim(),
-              terms_text: document.getElementById('p-terms').value,
-              sow_documents: sowDocs,
-            };
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-            Object.assign(project, fields);
-            showToast('Scope of works saved.');
-            if (fields.sow_text.trim()) { try { await requestInstallerSummary(project.id, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
-            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
-            const h = document.getElementById('qstep-4-head');
-            if (h) h.innerHTML = `${fields.sow_text.trim() ? '<span style="color:var(--green);">&#10003;</span> ' : ''}4. Scope of works`;
-            refreshBar();
-            refreshReadyCheck(project);
-            say('qs4-msg', '');
-          } catch (err) {
-            say('qs4-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save scope of works'); }
-        });
 
         // ----- step 5: send ----- (the email and PDF buttons are wired with the rest of the page)
         wireComplianceCard(project);
@@ -3864,6 +3698,54 @@
           const el = document.getElementById(`qstep-${a.dataset.step}`);
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }));
+
+        // Every step saves itself as it is typed, with Undo (js/quote-autosave.js). These are the
+        // things only this page knows; the saving itself lives in that file.
+        await autosaveReady;
+        mountQuoteAutosave({
+          project,
+          page: {
+            clientId: () => selectedClientId,
+            sitePicker: () => sitePicker,
+            linkClient: (client) => setSelectedEditClient(client),
+            clientMade: (client) => {
+              selectedClientId = client.id;
+              document.getElementById('client-search-input').value = client.name;
+              document.getElementById('selected-client-note').innerHTML = `New client made: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+            },
+            clientSaved: () => { setJobTitle(project); if (typeof ensureSiteSun === 'function') ensureSiteSun(); }, // a changed address gets its own sun figures
+            template: () => currentTemplate,
+            answers: () => {
+              const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
+              Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; }); // blanked answers drop out
+              return answers;
+            },
+            answersSaved: (answers) => { templateAnswers = answers; },
+            setAnswers: (answers) => { templateAnswers = { ...answers }; renderTemplateQuestions(qEl, currentTemplate, templateAnswers); showMissing(); renderCustomerGets(); },
+            defaultDisclaimer: () => companySettings.default_estimate_disclaimer || '',
+            visitSaved: () => refreshInspectionArea(),
+            pylonLinkOk: (link) => !!safePylonLink(link),
+            milestones: readMilestones,
+            setMilestones: (list) => {
+              document.getElementById('milestone-rows').innerHTML = list.map(m => milestoneRowHtml(m)).join('');
+              wireMilestoneRows();
+              refreshMilestoneTotal();
+            },
+            scopeButtonLabel,
+            sowDocs: () => sowDocs,
+            setSowDocs: (list) => { sowDocs = list.slice(); renderEditSowDocList(); },
+            stages: () => readStagesPayload().map(({ rowEl, ...stage }) => stage),
+            ticks: () => quoteStepTicks(project, project.cost_centres || []),
+            refreshBar,
+            readyCheck: () => refreshReadyCheck(project),
+            reload: async () => {
+              const refreshed = await loadProject();
+              if (!refreshed) return;
+              render(refreshed, true);
+              if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
+            },
+          },
+        });
       } catch (err) {
         console.error('wireQuoteSteps failed:', err);
         const bar = document.getElementById('quote-steps-bar');
