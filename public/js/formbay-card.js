@@ -216,6 +216,7 @@ async function fbDrawCreate(panel, project, changed) {
       ${pick('panel_brand', 'Panel brand', plain(o.brands.panel), p.panel_brand)}
       ${pick('panel_model', 'Panel model', [], '', 'Pick the brand first', 'style="grid-column:span 2;"')}
       ${box('panel_count', 'Number of panels', '', 'type="number" min="1" inputmode="numeric"')}
+      ${pick('optimisers', 'Optimisers', [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }], 'no', 'Pick one')}
     </div>
     <div id="fbc-inverters">${equip('inverter', '')}</div>
     <p style="margin:6px 0 0;"><button type="button" class="secondary" id="fbc-add-inverter" style="padding:4px 10px; font-size:12px;">Add another inverter</button></p>
@@ -223,6 +224,7 @@ async function fbDrawCreate(panel, project, changed) {
       <div id="fbc-batteries">${equip('battery', '')}</div>
       <p style="margin:6px 0 0;"><button type="button" class="secondary" id="fbc-add-battery" style="padding:4px 10px; font-size:12px;">Add another battery</button></p>
       <div style="${grid} margin-top:10px;">
+      ${pick('battery_location', 'Battery goes', [{ value: 'indoor', label: 'Indoor' }, { value: 'outdoor', label: 'Outdoor' }], '')}
       ${pick('pv_first', 'Solar is commissioned before or with the battery', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '', 'Pick one', 'style="grid-column:span 2;"')}
       </div>
     </div>

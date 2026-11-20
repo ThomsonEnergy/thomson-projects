@@ -13,7 +13,7 @@
 // Never writes money: a sale's price comes from the payment advice import on the STCs page.
 // Signing and Submit stay in Formbay's own app: they are the installer's declaration.
 
-const { formbayCall, formbayFile } = require('./formbay');
+const { formbayCall, formbayPatch, formbayFile } = require('./formbay');
 
 // Formbay's form status -> the STC line status the rest of the app uses (STC_STATUSES).
 const STC_STATUS = {
@@ -93,11 +93,30 @@ async function syncForm(db, token, { formId, ftype = null, projectId = null, use
   const { data: row, error } = await write.select('*').single();
   if (error) return { ok: false, error: error.message };
 
+  // A form the Clean Energy Regulator rejects needs a person: say so once, when it happens.
+  if (existing && form.status === 'rejected' && existing.job_status !== 'rejected') {
+    await needsYou(db, row, `Formbay ${kind.label} form ${id} was rejected by the Clean Energy Regulator. Open Formbay to see why and fix it.`, 'rejected');
+  }
   try { await applyToJob(db, row); } catch (err) {
     await db.from('formbay_forms').update({ sync_error: String(err.message || err) }).eq('id', row.id);
     return { ok: false, error: String(err.message || err), row };
   }
   return { ok: true, row };
+}
+
+// Something only a person in Formbay can do (the app aims for there to be none): a task on the job
+// for whoever made or linked the form, and a notification to their phone. `key` keeps it to once.
+async function needsYou(db, row, words, key) {
+  try {
+    const { data: job } = await db.from('projects').select('job_number').eq('id', row.project_id).maybeSingle();
+    await db.from('job_tasks').insert({ project_id: row.project_id, description: words, assigned_to_user_id: row.created_by, created_by: row.created_by, task_type: 'prejob' });
+    if (row.created_by) {
+      await db.rpc('create_notification', {
+        p_user: row.created_by, p_kind: 'formbay', p_title: `${job && job.job_number ? `J${job.job_number}: ` : ''}Formbay needs you`,
+        p_body: words, p_link: `/project.html?id=${row.project_id}`, p_actor: null, p_dedupe: `formbay:${row.formbay_job_id}:${key}`,
+      });
+    }
+  } catch (err) { console.error('Formbay needsYou:', err.message || err); }
 }
 
 // The job side of a form: its STC line, the job's NMI and Formbay status, and (once the installer
@@ -581,13 +600,36 @@ async function createForm(db, token, { projectId, userId, f }) {
     }
     warning = warning || `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
   }
+  // Answers Formbay takes only once the form exists (plan 101b): where the battery is, and optimisers.
+  // Each is sent as an edit, kept for reading later, and checked by reading the form back.
+  const notes = [];
+  const idOf = (t) => (made.find(m => m[0] === t) || [])[1];
+  const edit = async (path, mediaType, change) => {
+    const e = await formbayPatch(token, path, mediaType, change);
+    await db.from('formbay_webhook_events').insert({ event_type: 'patch.attempt', formbay_job_id: path, payload: { status: e.status, sent: change, answer: e.json || e.text } });
+    return e.status >= 200 && e.status < 300;
+  };
+  if (battery && idOf('bstc') && ['indoor', 'outdoor'].includes(f.battery_location)) {
+    const code = f.battery_location === 'outdoor' ? 1 : 0;   // as Formbay's own page orders them: Indoor, Outdoor
+    await edit(`job_details_prcs/${idOf('bstc')}`, 'application/vnd.fb.patch_job_details_prcs+json;v=1', { battery_location: code });
+    const back = await formbayCall(token, `bstc_form?formid=${idOf('bstc')}`);
+    if (!back.json || String(back.json.battery_location) !== String(code)) notes.push(`the battery location (${f.battery_location})`);
+  }
+  if (solar && idOf('pv') && ['yes', 'no'].includes(f.optimisers)) {
+    const took = await edit(`job_details/${idOf('pv')}`, 'application/vnd.fb.patch_job_details+json;v=1', { optimiserInstalled: f.optimisers === 'yes' });
+    if (!took && f.optimisers === 'yes') notes.push('that optimisers are installed');
+  }
+
   // What Formbay kept is checked against what was asked for, so a question it did not take is not missed.
   const kept = read.find((x, i) => x.ok && made[i][0] === 'bstc');
-  const notes = [];
-  if (dropped.includes('urref')) notes.push('the job reference');
+  if (dropped.includes('urref')) notes.push(`the job reference (J${job.job_number})`);
   if (dropped.includes('existingPvSystem') || dropped.includes('isExistingSolarPvWorking')) notes.push('the existing solar question');
   if (what === 'bstc' && f.battery_install !== 'first' && kept && String(kept.row.form.install_type) === '0') notes.push(`the battery installation type (Formbay shows First time, you picked ${f.battery_install})`);
-  if (notes.length) warning = `${warning ? `${warning} ` : ''}The form is made. Formbay did not take ${notes.join(' or ')} from here: set that in Formbay.`;
+  if (notes.length) {
+    const words = `Formbay form ${made[0][1]}: Formbay did not take ${notes.join(', ')} from the app. Set it in Formbay.`;
+    await needsYou(db, { project_id: projectId, created_by: userId, formbay_job_id: made[0][1] }, words, 'create');
+    warning = `${warning ? `${warning} ` : ''}The form is made. ${words.replace(/^Formbay form \d+: /, '')} A task is on the job.`;
+  }
   return warning ? { ok: true, warning } : { ok: true };
 }
 
