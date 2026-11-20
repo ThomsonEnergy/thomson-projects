@@ -19,6 +19,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 87 | A bill line that is the same item as a hand-typed PO line takes that line over instead of adding another (PO2020 doubled: the bill's five lines were added beside the five typed ones); the reader pairs by quantity and price when wording and part number do not, a Same as... choice for the rest, PO2020 repaired | Found 13 Nov 2026, planned, waiting on yes | Y (one function, one column) | None |
 | 89 | Sparky draws on plans: markup saved as objects that reopen and move, Sparky reads the plan and drafts an aircon, battery or rough-in layout from a one-line brief, people move, delete and add, ask Sparky to add more or clean up, the symbol schedule becomes quote lines | Planned 14 Nov 2026, waiting on yes | N | Item 90 first (same files) |
 | 99 | The quote saves itself: every box on the quote steps saves as you type, Undo back to the last save point, the AI scope prompt is kept and can be re-run | PR 1 built 18 Nov 2026, on `staging` (`docs/PROJECT_SPEC.md`, "The quote steps save themselves"); PR 2 (the stage table) waiting on yes to its SQL | N | None |
+| 104 | One waterfall across the whole day in Timesheets: slide time between a day's jobs (and the halves of a split stage), the day's start and finish and its gaps stay put | Building (owner's yes 20 Nov 2026) | N | None |
 | 100 | Overheads made plain and accurate: each person's own direct cost on their rate (no averages), indirect as one figure per job hour from the Xero Profit and Loss and real timesheet hours, the % of job profit and its typed-in figure gone | Planned 18 Nov 2026, waiting on yes | N | Xero custom connection needs `accounting.reports.read` |
 | 90 | Sparky changes things from the app: knows the page you are on, one edit tool over a field registry (jobs, quotes, clients, contacts, suppliers, tasks, leads, materials, assets, fleet; never money, stock, status or settings), every change proposed then confirmed, Undo for 24 hours, the same powers for @Sparky in team chat | Planned 14 Nov 2026, waiting on yes | N | None |
 | 91 | Sparky changes the app when told to: an admin's ask becomes an Updates board row and a Claude Code build in GitHub Actions on its own branch, a PR with the check and a preview link, the owner's "merge it" merges it; no migrations, secrets or deletes that way | Planned 14 Nov 2026, waiting on yes | N | Owner: Anthropic key as a GitHub secret, wider GitHub token |
@@ -784,6 +785,21 @@ Owner's ask (18 Nov 2026): "Go over the overheads calc and make it clear and eas
 **Done means:** (1) Overheads page: each person's row reads pay rate + direct = true cost, and the breakdown adds up to the direct figure. (2) Open a job with hours from two people: Labour equals each person's hours x their own true cost, to the cent, against the Overheads page. (3) The same job shows "incl. overheads" with the indirect amount equal to job hours x the indirect figure. (4) Mark one Xero account "Not a running cost": the indirect figure drops by that account's yearly amount over the job hours. (5) A quote with 10 hours on one labour tier shows a labour cost of 10 x that tier's true cost. (6) The Xero check line shows both wage totals and warns when they differ by more than 5%.
 
 Touches: `public/project.html` (the estimate sum, the "incl. overheads" notes, `applyOverheadsToCosts` removed), `public/overheads.html` (rebuilt), `public/projects.html`, `public/js/jobs-columns.js`, `netlify/functions/_shared/compute-labour-cost.js`, `netlify/functions/_shared/overheads-xero.js`, `netlify/functions/get-accrued-labour-cost.js`, `netlify/functions/get-itemised-labour-cost.js`, `netlify/functions/sync-overheads.js`, `netlify/functions/get-overhead-xero-accounts.js`, one migration (20261216000000 if item 74b part 2 has not taken it: `overhead_people_calc`, `compute_overhead_rates`, `get_monthly_net_summary` rewritten, `get_project_overheads` dropped, `overhead_xero_map.bucket` values, unused `overhead_settings` and `overhead_people` columns dropped).
+
+## 104. One waterfall across the whole day in Timesheets (owner, 20 Nov 2026; building)
+
+Owner (20 Nov 2026): "in timesheets for the whole day you should be able to use that waterfall toggle between different jobs for the whole timesheet". Same chat fixed the clock-out sliders first (bug, live 20 Nov 2026, `public/js/split-sliders.js`).
+
+Building in: a cloud session branch off `staging` (the chat that fixed the clock-out sliders).
+
+- The day editor in Timesheets gets one waterfall under the blocks when the day has two or more blocks with a start and a finish: one slider per block, each showing its job (and stage) and its hours.
+- Sliding moves time between blocks. The day's first start and last finish stay put, the gaps between blocks (lunch, travel) stay the length they are, the blocks stay in their order, and each block's start and finish boxes update as you slide. Typing a time in a block still works and the waterfall follows it.
+- A block whose hours are already in Xero is locked: its slider does not move and the others work around it.
+- Times land on whole minutes; Save saves them as typed times always have.
+
+**Done means:** (1) Open a day with two jobs in Timesheets: one waterfall shows under the blocks. (2) Drag it: both blocks' start and finish change, the day's first start and last finish do not, and a lunch gap between them stays the same length. (3) A block already in Xero: its slider is locked. (4) Save, reopen the day: the new times are there.
+
+Touches: `public/timesheets.html` (the day editor), `public/js/split-sliders.js`. No migration. Payroll: hours per job and stage change; total paid hours for the day do not.
 
 ## 90. Sparky changes things from the app (planned 14 Nov 2026, waiting on yes)
 
