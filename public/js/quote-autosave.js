@@ -142,7 +142,13 @@ function quoteStepDefs(project, page) {
         const picker = page.sitePicker();
         let clientId = p.client_id;
         let client = picker ? picker.client() : null;
-        const details = { name: p.client_name, email: p.client_email || null, phone: p.client_phone || null, payment_terms: p.payment_terms, address: p.client_address || null };
+        // The address in parts, from Google's lookup (item 103). An address left as it was keeps the
+        // parts it has; one put back by Undo (the box no longer matches) is saved with none, and is
+        // looked up again the next time it is needed.
+        const box = document.getElementById('p-address');
+        const addressCols = p.client_address === String(project.client_address || '').trim() && project.address_parts ? {}
+          : box && box.value.trim() === p.client_address ? await addressColumnsFor(box) : { address_parts: null };
+        const details = { name: p.client_name, email: p.client_email || null, phone: p.client_phone || null, payment_terms: p.payment_terms, address: p.client_address || null, ...addressCols };
         if (clientId && quoteClientsMadeHere[project.id] === clientId) {
           // The client this page made keeps taking what is typed here, the same as if it had all
           // been typed before one Save. Its office address follows the site until the page is left.
@@ -166,10 +172,10 @@ function quoteStepDefs(project, page) {
           page.clientMade(client);
           if (picker) await picker.setClient(client);
         }
-        const client_site_id = clientId ? await resolveClientSite(clientId, p.client_address, (client || {}).address || p.client_address) : null;
+        const client_site_id = clientId ? await resolveClientSite(clientId, p.client_address, (client || {}).address || p.client_address, { columns: addressCols }) : null;
         await saveProject({
           name: p.name, client_id: clientId, client_name: p.client_name, client_email: p.client_email || null,
-          client_phone: p.client_phone || null, client_address: p.client_address, client_site_id, notes: p.notes || null,
+          client_phone: p.client_phone || null, client_address: p.client_address, client_site_id, notes: p.notes || null, ...addressCols,
         });
         if (clientId) { clientNameTyped = false; clientCleared = false; }
         return { payload: { ...p, client_id: clientId } };
