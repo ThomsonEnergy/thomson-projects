@@ -61,7 +61,7 @@ async function rewardTerms(admin, client) {
   if (!client || client.lead_reward_kind === 'off') return null;
   const { data: s } = await admin.from('company_settings').select('lead_reward_tiers, lead_reward_quick_amount, lead_reward_min_job').eq('id', 1).maybeSingle();
   const tiers = ((s && s.lead_reward_tiers) || []).slice().sort((a, b) => a.from - b.from);
-  const how = client.lead_reward_kind === 'credit' ? 'a credit off your next invoice' : 'paid to your account';
+  const how = 'a credit off your next invoice with us'; // credits only (owner, 20 Nov 2026)
   return {
     how,
     quick: `${money(s && s.lead_reward_quick_amount)} when we win the job (jobs over ${money(s && s.lead_reward_min_job)})`,

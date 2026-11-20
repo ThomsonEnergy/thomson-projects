@@ -1,10 +1,10 @@
-11.11.2026
+20.11.2026
 Thomson Energy Referral Rewards (Clients)
 
 Draft for the owner's read. The amounts below are today's settings; the live document the client receives prints the amounts from TEops Settings on the day it is sent, so this file is the wording, not the figures.
 
 Purpose
-Thomson Energy rewards clients who send us work. When you pass on someone who needs solar, a battery, a switchboard upgrade, a fault fixed or any other electrical work, and we win that job, you get a payment or a credit. This document explains how it works.
+Thomson Energy rewards clients who send us work. When you pass on someone who needs solar, a battery, a switchboard upgrade, a fault fixed or any other electrical work, and we win that job, you get a credit off your next Thomson Energy invoice. This document explains how it works.
 
 1. Who it is for
 * Clients Thomson Energy has turned the Referral Rewards option on for. You will know because you have received your personal referral link.
@@ -28,20 +28,21 @@ Thomson Energy rewards clients who send us work. When you pass on someone who ne
 * One reward per job. If the same person is referred twice, the first referral counts.
 
 4. When you earn it
-* The reward is earned the day the customer approves our quote, and becomes payable once they have paid their deposit (or their first invoice, when the job has no deposit). Nothing is earned for a quote that is declined or expires, or for a job that falls over before the deposit is paid.
-* You can see every referral and its progress in your Thomson Energy client portal: Received, Being quoted, Quoted, Won, Credit due, Credited or Paid, or Not won.
+* The reward is earned the day the customer approves our quote, and becomes yours once they have paid their deposit (or their first invoice, when the job has no deposit). Nothing is earned for a quote that is declined or expires, or for a job that falls over before the deposit is paid.
+* You can see every referral and its progress in your Thomson Energy client portal: Received, Being quoted, Quoted, Won, Credit waiting, Credited, or Not won.
 
 5. How you receive it
-* As a credit: the amount is taken off your next Thomson Energy invoice as its own line. This is the usual way.
-* As a payment: paid to your nominated bank account, if Thomson Energy has set your account up that way. A business that is registered for GST sends us a tax invoice for the amount; a credit needs nothing.
+* Always as a credit: the amount is taken off a Thomson Energy invoice as its own line, by itself. If you have an unpaid invoice with us it comes off that one; otherwise it waits and comes off the next invoice we send you, for any work we do for you.
+* We email you when the credit is yours and say which invoice it came off, or that it is waiting.
+* A reward is a credit off our work. It is not paid out as cash.
 * You never see the referred customer's quote or price. Their job is theirs.
 
 6. What does not earn a reward
 * Your own jobs, or a job at an address where you already have a quote or job with us.
 * A person who is already a Thomson Energy client with an open quote or job for that work.
 * A referral made by a Thomson Energy employee.
-* Rewards are paid to the client's account only, never to an individual who works for the client. If your staff send us work through your link, the reward is yours.
+* Rewards are credited to the client's account only, never to an individual who works for the client. If your staff send us work through your link, the reward is yours.
 
 7. Changes
-* Thomson Energy can change the amounts, the tiers or the rules, or withdraw this scheme, at any time and without notice, for any referral not yet won. A referral already won is still paid, at the amounts that applied on the day the quote was approved.
+* Thomson Energy can change the amounts, the tiers or the rules, or withdraw this scheme, at any time and without notice, for any referral not yet won. A referral already won is still credited, at the amounts that applied on the day the quote was approved.
 * Questions: sales@thomsonenergy.com.au or 0455 415 464.

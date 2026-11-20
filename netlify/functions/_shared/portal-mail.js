@@ -5,6 +5,8 @@
 //   sendPortalCode(admin, { to, code }) -> { ok } or throws
 //   sendPortalWelcome(admin, { to, password, name }) -> { ok } or throws
 //   portalLine(admin, email) -> the 'see it in your portal' line for a client email, or ''
+//   sendReferralLink(admin, { to, name, link, how }) -> { ok } or throws
+//   sendRewardEarned(admin, { to, name, amount, person, invoice, referralToken }) -> { ok } or throws
 // Reads mailboxes and company_settings; writes nothing.
 
 const { gmailRequest, GMAIL_MAILBOX } = require('./google-client');
@@ -94,4 +96,28 @@ async function sendReferralLink(admin, { to, name: toName, link, how }) {
   return sendPlain(mailbox, { fromName: name, fromAddress: GMAIL_MAILBOX, to, subject: `Your ${name} referral link`, bodyText });
 }
 
-module.exports = { sendPortalCode, sendPortalWelcome, portalLine, sendReferralLink };
+// A lead reward is theirs (item 74b part 2): the referred job's deposit is paid. Says what for and where
+// the credit went: off an invoice they have now (its number and new balance), or waiting for their next one.
+async function sendRewardEarned(admin, { to, name: toName, amount, person, invoice, referralToken }) {
+  const { mailbox, name, phone } = await companyAndMailbox(admin);
+  const first = String(toName || '').trim().split(/\s+/)[0] || 'there';
+  const dollars = (n) => `$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const base = publicBaseUrl();
+  const bodyText = [
+    `Hi ${first},`,
+    '',
+    `Thanks for sending us ${person ? String(person).trim() : 'that job'}. We won it, so you have earned a ${dollars(amount)} credit with ${name}.`,
+    '',
+    invoice
+      ? `It has come off invoice ${invoice.number}, which now has ${dollars(invoice.balance)} to pay: ${base}/invoice.html?token=${invoice.token}`
+      : 'It comes off your next invoice with us by itself. There is nothing you need to do.',
+    '',
+    `You can see your referrals and credits any time in your portal: ${base}/portal.html`,
+    ...(referralToken ? ['', `Know someone else who needs solar, a battery or an electrician? Your link: ${base}/refer.html?r=${referralToken}`] : []),
+    '',
+    name + (phone ? `, ${phone}` : ''),
+  ].join('\n');
+  return sendPlain(mailbox, { fromName: name, fromAddress: GMAIL_MAILBOX, to, subject: `You have earned a ${dollars(amount)} credit with ${name}`, bodyText });
+}
+
+module.exports = { sendPortalCode, sendPortalWelcome, portalLine, sendReferralLink, sendRewardEarned };

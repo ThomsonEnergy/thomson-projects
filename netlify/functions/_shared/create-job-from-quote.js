@@ -27,6 +27,7 @@
 const crypto = require('crypto');
 const { computeDueDate } = require('./compute-due-date');
 const { logInvoiceEvents } = require('./invoice-events');
+const { creditNewInvoice } = require('./lead-rewards');
 const { createDefaultJobTasks } = require('./create-default-job-tasks');
 const { advanceToActionOrReady } = require('./advance-job-stage');
 const { entryHours } = require('./compute-labour-cost');
@@ -133,6 +134,8 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
     { invoiceId: insertedInvoice.id, kind: 'created', actorId: approvedBy, actorLabel: approvedBy ? null : 'the quote approval', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` },
     approvedBy ? null : { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', actorLabel: 'the quote approval', detail: 'Shown to the client on the quote approval page' },
   ]);
+  // a lead reward credit this client has waiting comes off the deposit invoice by itself (item 74b part 2); never throws
+  await creditNewInvoice(supabaseAdmin, insertedInvoice.id);
   return invoiceToken;
 }
 
