@@ -4,7 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 21 Nov 2026
 
-- Website prices, owner 21 Nov 2026: the website's old battery and off-grid ranges are retired. The rule is $1,000 per kW of solar and $500 per kWh of battery after the rebates, a small job carries a minimum $1,800 labour charge (so 9 kWh on its own is $8,000 before the rebate, about $5,750 after), 27 kWh is $19,000 before the rebate, and every off-grid tier is $15,000 lower (`docs/BUSINESS_FACTS.md`, "Where we work"). The website branch `claude/affectionate-davinci-1wsvms` carries them, not live until the owner says go.
+- Website prices, owner 21 Nov 2026: the website's old battery and off-grid ranges are retired. The rule is $1,000 per kW of solar and $500 per kWh of battery after the rebates, a small job carries a minimum $1,800 labour charge (so 9 kWh on its own is $8,000 before the rebate, about $5,750 after), 27 kWh is $19,000 before the rebate, and off-grid is from $15,000 for a weekender, $25,000 to $55,000 for a full-time home and from $65,000 for a large property (`docs/BUSINESS_FACTS.md`, "Where we work"). The website branch `claude/affectionate-davinci-1wsvms` carries them, not live until the owner says go.
 - Planned (waiting on yes), owner 21 Nov 2026: **item 105, website prices set in TEops** (a Website prices card in Settings, the website rebuilds itself, a dated rebate change takes effect by itself). Until it is built, the reminder to redo the website battery prices by 1 January 2027 is in the owner to-dos at the top of `docs/IDEAS_BACKLOG.md`.
 
 ## 20 Nov 2026

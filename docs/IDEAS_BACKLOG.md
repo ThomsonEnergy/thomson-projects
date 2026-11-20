@@ -961,7 +961,7 @@ Owner, 21 Nov 2026: "Put a reminder somewhere either in the repo or in the app f
 
 Today every price on the public website (repo `website-updates-9e18ed`) is typed into about 40 places across 12 pages, the home page cards, the FAQ answers and `llms.txt`, and a chat has to change them all. The website already reads and writes this app's database (leads, call-back slots), so it can read its prices from here too.
 
-The owner's rule the numbers come from (21 Nov 2026): solar $1,000 per kW and batteries $500 per kWh, after the rebates; a small job carries a minimum $1,800 labour charge, so a 9 kWh battery on its own is dearer ($8,000 before the rebate); off-grid from $10,000 (weekender), $25,000 to $55,000 (full-time home), from $65,000 (large property).
+The owner's rule the numbers come from (21 Nov 2026): solar $1,000 per kW and batteries $500 per kWh, after the rebates; a small job carries a minimum $1,800 labour charge, so a 9 kWh battery on its own is dearer ($8,000 before the rebate); off-grid from $15,000 (weekender), $25,000 to $55,000 (full-time home), from $65,000 (large property).
 
 Two parts, website first:
 
