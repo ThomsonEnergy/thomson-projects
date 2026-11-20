@@ -381,6 +381,9 @@ const LISTS = {
   panel_models: (q) => `pv_panel_models?${new URLSearchParams({ brand: q.brand })}`,
   inverter_series: (q) => `pv_inverter_series?${new URLSearchParams({ brand: q.brand })}`,
   inverter_models: (q) => `pv_inverter_models?${new URLSearchParams({ brand: q.brand, series: q.series })}`,
+  // With a battery on the form Formbay lists only the inverters it accepts for battery STCs.
+  battery_inverter_series: (q) => `pv_inverter_series?${new URLSearchParams({ brand: q.brand, bstc: 1 })}`,
+  battery_inverter_models: (q) => `pv_inverter_models?${new URLSearchParams({ brand: q.brand, series: q.series, bstc: 1 })}`,
 };
 const names = (json) => (Array.isArray(json) ? json : []).map(b => (typeof b === 'string' ? b : (b && (b.model || b.series || b.brand || b.name)) || '')).filter(Boolean);
 async function equipmentList(token, list, q) {
@@ -445,17 +448,18 @@ async function createForm(db, token, { projectId, userId, f }) {
   const whole = (v, min) => Math.max(min, Math.round(Number(v)) || min);
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean(f.date));
   const need = { 'First name': f.fname, 'Last name': f.sname, 'Street number': f.street_number, 'Street name': f.street_name, Suburb: f.city, State: f.state, Postcode: f.postcode, Installer: f.installer, 'Install date': date };
-  if (solar) Object.assign(need, { 'Panel brand': f.panel_brand, 'Panel model': f.panel_model, 'Number of panels': Number(f.panel_count) > 0, 'Inverter brand': f.inverter_brand, 'Inverter model': f.inverter_model });
+  // The inverter goes on every form, a battery one too, even when it is already on site (owner,
+  // 20 Nov 2026; Formbay refuses a battery form without one: "At least one of Battery or Inverter must be smart").
+  Object.assign(need, { 'Inverter brand': f.inverter_brand, 'Inverter model': f.inverter_model });
+  if (solar) Object.assign(need, { 'Panel brand': f.panel_brand, 'Panel model': f.panel_model, 'Number of panels': Number(f.panel_count) > 0 });
   if (battery) Object.assign(need, { 'Battery brand': f.battery_brand, 'Battery model': f.battery_model });
   const missing = Object.keys(need).filter(k => !need[k] || !clean(need[k]));
   if (missing.length) return { ok: false, error: `Still needed: ${missing.join(', ')}.` };
 
   const person = Number(clean(f.installer));
   const equipment = [];
-  if (solar) {
-    equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
-    equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
-  }
+  if (solar) equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
+  equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
   if (battery) {
     equipment.push({
       type: 3, brand: clean(f.battery_brand), series: clean(f.battery_series), model: clean(f.battery_model), count: whole(f.battery_count, 1),

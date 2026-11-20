@@ -203,7 +203,9 @@ async function fbDrawCreate(panel, project, changed) {
       ${pick('panel_brand', 'Panel brand', plain(o.brands.panel), p.panel_brand)}
       ${pick('panel_model', 'Panel model', [], '', 'Pick the brand first', 'style="grid-column:span 2;"')}
       ${box('panel_count', 'Number of panels', '', 'type="number" min="1" inputmode="numeric"')}
-      ${pick('inverter_brand', 'Inverter brand', plain(o.brands.inverter), p.inverter_brand)}
+    </div>
+    <div style="${grid} margin-top:10px;">
+      ${pick('inverter_brand', 'Inverter brand (new, or the one already there)', plain(o.brands.inverter), p.inverter_brand)}
       ${pick('inverter_series', 'Inverter series', [], '', 'Pick the brand first')}
       ${pick('inverter_model', 'Inverter model', [], '', 'Pick the series first', 'style="grid-column:span 2;"')}
       ${box('inverter_count', 'Number of inverters', '1', 'type="number" min="1" inputmode="numeric"')}
@@ -224,11 +226,13 @@ async function fbDrawCreate(panel, project, changed) {
     $('solar').style.display = $('what').value === 'bstc' ? 'none' : 'grid';
     $('battery').style.display = $('what').value === 'pv' ? 'none' : 'grid';
   };
-  $('what').addEventListener('change', show);
+  $('what').addEventListener('change', () => { show(); if ($('inverter_brand').value) $('inverter_brand').dispatchEvent(new Event('change')); });
   show();
   // Picking a brand fills the next list from Formbay, and so on down to the model.
   const fill = async (list, target, body) => {
     target.innerHTML = `<option value="">Loading...</option>`;
+    // With a battery on the form the inverter lists are the ones Formbay accepts for battery STCs.
+    if (list.startsWith('inverter_') && $('what').value !== 'pv') list = `battery_${list}`;
     try {
       const r = await fbCall('formbay-create-form', { action: 'list', list, ...body });
       target.innerHTML = opts(plain(r.list.map(String)), r.list.length === 1 ? String(r.list[0]) : '', r.list.length ? 'Pick one' : 'None listed');

@@ -5847,7 +5847,7 @@
 
     async function loadJobStcs(project, centres) {
       const el = document.getElementById('job-stcs-list');
-      loadJsOnce('/js/formbay-card.js?v=3', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
+      loadJsOnce('/js/formbay-card.js?v=4', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
       const [r, s] = await Promise.all([
         supabaseClient.from('job_stcs').select('*, formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').eq('project_id', project.id).order('created_at'),
         jobStcSettings ? Promise.resolve({ data: jobStcSettings }) : supabaseClient.from('company_settings').select('stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),
