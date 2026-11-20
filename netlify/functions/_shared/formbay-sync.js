@@ -171,14 +171,13 @@ async function makeEquipment(db, row, project) {
     if (form.model) wanted.push({ asset_type: 'solar', make: form.brand, model: form.model, quantity: Number(form.npanels) || 1, serials: panelSerials, notes: `${Number(form.ratedpower) || ''} kW. ${from}` });
     if (form.modeli) wanted.push({ asset_type: 'inverter', make: form.brandi, model: form.modeli, quantity: 1, serials: inverterSerials, notes: from });
   } else {
-    const battery = (form.batteries || [])[0];
-    if (battery) {
-      wanted.push({
-        asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
-        serials: unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]),
-        notes: `${Number(battery.usable_capacity) || ''} kWh usable. ${from}`,
-      });
-    }
+    // Each battery model on the form is its own row; Formbay lists the serial numbers for the form as
+    // a whole, so they sit on the first.
+    (form.batteries || []).forEach((battery, i) => wanted.push({
+      asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
+      serials: i === 0 ? unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]) : [],
+      notes: `${Number(battery.usable_capacity) || ''} kWh usable. ${from}`,
+    }));
     (form.inverters || []).forEach((inv, i) => wanted.push({
       asset_type: 'inverter', make: inv.brand_short_name || inv.brand, model: inv.model, quantity: Number(inv.quantity) || 1,
       serials: i === 0 ? inverterSerials : [], notes: from,
@@ -392,6 +391,24 @@ async function equipmentList(token, list, q) {
   return Array.isArray(r.json) ? { ok: true, list: names(r.json) } : { ok: false, error: 'Formbay did not send its list. Try again.' };
 }
 
+// Who may be put on a form, from Formbay's own list of the company's people. Formbay shows each
+// person's accreditations: grid connected, stand-alone (off-grid) and the battery endorsement.
+// A battery on the grid needs the battery endorsement; anything off-grid needs the stand-alone one.
+function people(json) {
+  return (Array.isArray(json) ? json : []).map(i => ({
+    id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' '),
+    grid: String(i.grid_connected_install) === '1', gridDesign: String(i.grid_connected_design) === '1',
+    offGrid: String(i.sps_install) === '1', offGridDesign: String(i.sps_design) === '1',
+    battery: /battery/i.test(String(i.endorsement || '')),
+  }));
+}
+// role: 'installer' or 'designer'. The same rule the panel uses to offer people.
+function mayDo(person, role, { offGrid, battery }) {
+  if (offGrid) return role === 'designer' ? person.offGridDesign : person.offGrid;
+  if (battery) return person.battery && (role === 'designer' ? person.gridDesign : person.grid);
+  return role === 'designer' ? person.gridDesign : person.grid;
+}
+
 // What the Create panel opens with: who can be the installer, Formbay's brand lists, and the job's
 // own details. `what` is the kind of form the job looks like: 'pv' (solar), 'pv_bstc' (solar and
 // battery) or 'bstc' (battery), from the quote's STC and battery STC counts and its template.
@@ -421,7 +438,7 @@ async function createOptions(db, token, projectId) {
   const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,
-    installers: installers.json.map(i => ({ id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' ') })),
+    installers: people(installers.json), reference: project.job_number ? `J${project.job_number}` : '',
     brands: lists, streetTypes: types,
     prefill: {
       what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
@@ -453,24 +470,48 @@ async function createForm(db, token, { projectId, userId, f }) {
   Object.assign(need, { 'Inverter brand': f.inverter_brand, 'Inverter model': f.inverter_model });
   if (solar) Object.assign(need, { 'Panel brand': f.panel_brand, 'Panel model': f.panel_model, 'Number of panels': Number(f.panel_count) > 0 });
   if (battery) Object.assign(need, { 'Battery brand': f.battery_brand, 'Battery model': f.battery_model });
+  // Formbay's battery STC questions, answered by the person making the form (owner, 20 Nov 2026:
+  // "we didn't answer these questions with the form"). Never answered by the app itself.
+  if (battery) Object.assign(need, { 'Solar is commissioned before or with the battery': f.pv_first });
+  if (what === 'bstc') Object.assign(need, { 'First time, additional or replacement battery': f.battery_install, 'Solar already at this address': f.pv_working, 'Total solar 100 kW or less': f.pv_limit });
   const missing = Object.keys(need).filter(k => !need[k] || !clean(need[k]));
   if (missing.length) return { ok: false, error: `Still needed: ${missing.join(', ')}.` };
 
-  const person = Number(clean(f.installer));
+  // The people on the form must hold the accreditation for this kind of job (owner, 20 Nov 2026):
+  // checked here against Formbay's list, not only in the panel.
+  const offGrid = f.off_grid === true || f.off_grid === 'yes';
+  const staff = people((await formbayCall(token, 'pv_installers')).json);
+  const team = { installer: clean(f.installer), designer: clean(f.designer) || clean(f.installer), electrician: clean(f.electrician) || clean(f.installer) };
+  for (const role of ['installer', 'designer']) {
+    const who = staff.find(x => x.id === team[role]);
+    if (!who) return { ok: false, error: `Pick the ${role} from the list.` };
+    if (!mayDo(who, role, { offGrid, battery })) {
+      return { ok: false, error: `${who.name} is not accredited in Formbay as the ${role} for ${offGrid ? 'an off-grid' : battery ? 'a grid connected battery' : 'a grid connected'} job. Pick someone else.` };
+    }
+  }
+  if (!staff.some(x => x.id === team.electrician)) return { ok: false, error: 'Pick the electrician from the list.' };
+  const { data: job } = await db.from('projects').select('job_number').eq('id', projectId).maybeSingle();
   const equipment = [];
   if (solar) equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
-  equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
-  if (battery) {
-    equipment.push({
-      type: 3, brand: clean(f.battery_brand), series: clean(f.battery_series), model: clean(f.battery_model), count: whole(f.battery_count, 1),
-      setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: 0,
-    });
+  // Up to four inverters and four batteries (the panel's Add another): the first has no number, then 2, 3, 4.
+  // An added row counts once its model is picked.
+  for (const n of ['', '2', '3', '4']) {
+    if (clean(f[`inverter${n}_model`])) equipment.push({ type: 1, brand: clean(f[`inverter${n}_brand`]), series: clean(f[`inverter${n}_series`]), model: clean(f[`inverter${n}_model`]), count: whole(f[`inverter${n}_count`], 1) });
+  }
+  for (const n of ['', '2', '3', '4']) {
+    if (battery && clean(f[`battery${n}_model`])) {
+      equipment.push({
+        type: 3, brand: clean(f[`battery${n}_brand`]), series: clean(f[`battery${n}_series`]), model: clean(f[`battery${n}_model`]), count: whole(f[`battery${n}_count`], 1),
+        setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: 0,
+      });
+    }
   }
   const body = {
     v: 2, type: solar ? 'pv' : 'bstc', date: `${date[3]}/${date[2]}/${date[1]}`,
-    // 1: on the grid with no battery, 2: on the grid with a battery (as on the forms made in Formbay so far)
-    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: battery ? 2 : 1, meter_no: '' },
-    team: { designer: person, installer: person, electrician: person },
+    // Formbay's grid codes, read off the forms made in its own app: 0 on the grid with no battery
+    // (J7088), 2 on the grid with a battery (J7009, J7081). 1 is taken to be off-grid: not yet seen on a real form.
+    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: offGrid ? 1 : battery ? 2 : 0, meter_no: '' },
+    team: { designer: Number(team.designer), installer: Number(team.installer), electrician: Number(team.electrician) },
     address: {
       city: clean(f.city).toUpperCase(), state: clean(f.state, 3).toUpperCase(), postcode: clean(f.postcode, 4),
       unit_type: clean(f.unit_number) ? 'UNIT' : '', unit_number: clean(f.unit_number, 10),
@@ -481,6 +522,21 @@ async function createForm(db, token, { projectId, userId, f }) {
     commercial: f.commercial ? 1 : 0,
   };
   if (solar) body.installation = Math.min(3, Math.max(0, Math.round(Number(f.installation)) || 0));   // 0 new, 1 replacement, 2 additional, 3 extension
+  if (battery) {
+    if (f.pv_first !== 'yes') return { ok: false, error: 'Battery STCs need the solar commissioned before or with the battery. Formbay will not take the form otherwise.' };
+    body.isPvInstalledBeforeBattery = true;
+  }
+  if (what === 'bstc') {
+    if (f.pv_limit !== 'yes') return { ok: false, error: 'Battery STCs need the total solar at the address to be 100 kW or less. Formbay will not take the form otherwise.' };
+    body.isPvCapacityWithinLimit = true;
+    body.installation = { first: 0, replacement: 1, additional: 2 }[f.battery_install] || 0;
+    // Formbay asks one of these two, depending on whether it already knows of solar at the address;
+    // both are sent and the one it does not want is dropped if it says so (see the retry below).
+    body.isExistingSolarPvWorking = f.pv_working !== 'replacing';
+    if (f.pv_working !== 'replacing') body.existingPvSystem = true;
+  } else if (what === 'pv_bstc' && body.installation > 0 && f.pv_limit === 'yes') {
+    body.isPvCapacityWithinLimit = true;
+  }
   if (what === 'pv_bstc') { body.is_bstc = 1; body.battery_installation = { type: 0, comment: '', additional_wattage: '' }; }
   // NSW: Formbay makes the CCEW with the form, under the company's contractor licence.
   if (body.address.state === 'NSW') {
@@ -491,7 +547,17 @@ async function createForm(db, token, { projectId, userId, f }) {
     if (c) body.ccew = { licence_id: c.licence_id, associated_person_id: Number(c.associated_person_id), special_conditions: { generator: 0, high_voltage: 0, over_100_amps: 0, hazardous_area: 0, unmetered_supply: 0 } };
   }
 
-  const r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  // Our job number goes on as Formbay's "Your job reference". It, and the two either-or solar
+  // questions, are extras: if Formbay refuses the form naming one of them, the form is made without
+  // that one rather than not at all (the question is then answered in Formbay).
+  if (job && job.job_number) body.urref = `J${job.job_number}`;
+  let r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  const dropped = [];
+  if (r.status === 400) {
+    const said = JSON.stringify(r.json || r.text || '');
+    for (const key of ['urref', 'existingPvSystem', 'isExistingSolarPvWorking']) if (key in body && said.includes(key)) { delete body[key]; dropped.push(key); }
+    if (dropped.length) r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  }
   // Kept so a refusal can be read later (finance roles): what Formbay was sent and what it said.
   await db.from('formbay_webhook_events').insert({ event_type: 'create.attempt', formbay_job_id: `project ${projectId}`, payload: { status: r.status, sent: body, answer: r.json || r.text } });
   const made = [];
@@ -515,6 +581,13 @@ async function createForm(db, token, { projectId, userId, f }) {
     }
     warning = warning || `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
   }
+  // What Formbay kept is checked against what was asked for, so a question it did not take is not missed.
+  const kept = read.find((x, i) => x.ok && made[i][0] === 'bstc');
+  const notes = [];
+  if (dropped.includes('urref')) notes.push('the job reference');
+  if (dropped.includes('existingPvSystem') || dropped.includes('isExistingSolarPvWorking')) notes.push('the existing solar question');
+  if (what === 'bstc' && f.battery_install !== 'first' && kept && String(kept.row.form.install_type) === '0') notes.push(`the battery installation type (Formbay shows First time, you picked ${f.battery_install})`);
+  if (notes.length) warning = `${warning ? `${warning} ` : ''}The form is made. Formbay did not take ${notes.join(' or ')} from here: set that in Formbay.`;
   return warning ? { ok: true, warning } : { ok: true };
 }
 
