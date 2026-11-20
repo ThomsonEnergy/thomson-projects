@@ -43,18 +43,19 @@ function mountSplitSliders(section, { rows, percentages, totalMin, intro, onChan
   const numbers = [...section.querySelectorAll('.split-number')];
   const labels = [...section.querySelectorAll('.split-label')];
   const segs = [...section.querySelectorAll('.split-bar-seg')];
-  const paint = () => rows.forEach((_, i) => {
+  // typing: every box but the one being typed in follows (it keeps what was typed until it is left)
+  const paint = (typing = -1) => rows.forEach((_, i) => {
     sliders[i].value = percentages[i];
-    if (document.activeElement !== numbers[i]) numbers[i].value = percentages[i];
+    if (i !== typing) numbers[i].value = percentages[i];
     labels[i].textContent = splitMinutesText(totalMin * percentages[i] / 100);
     segs[i].style.width = `${percentages[i]}%`;
   });
   const all = rows.map((_, i) => i);
-  function rebalance(idx, value) {
+  function rebalance(idx, value, typing = -1) {
     // the rows that give and take: those after this one, or (for the last free row) those before it
     const later = all.filter(i => i > idx && !rows[i].locked);
     const flex = later.length ? later : all.filter(i => i < idx && !rows[i].locked);
-    if (!flex.length) { paint(); return; }
+    if (!flex.length) { paint(typing); return; }
     const fixed = all.filter(i => i !== idx && !flex.includes(i)).reduce((sum, i) => sum + percentages[i], 0);
     const v = Math.max(0, Math.min(100 - fixed, Math.round(value)));
     percentages[idx] = v;
@@ -67,11 +68,14 @@ function mountSplitSliders(section, { rows, percentages, totalMin, intro, onChan
       percentages[i] = Math.max(0, share);
       given += percentages[i];
     });
-    paint();
+    paint(typing);
     if (onChange) onChange(percentages);
   }
   sliders.forEach(el => el.addEventListener('input', () => rebalance(Number(el.dataset.index), Number(el.value))));
-  numbers.forEach(el => el.addEventListener('input', () => { const v = parseInt(el.value, 10); if (!isNaN(v)) rebalance(Number(el.dataset.index), v); }));
+  numbers.forEach(el => {
+    el.addEventListener('input', () => { const v = parseInt(el.value, 10); if (!isNaN(v)) rebalance(Number(el.dataset.index), v, Number(el.dataset.index)); });
+    el.addEventListener('change', () => paint()); // left the box: it shows what was kept (a number too big is cut back)
+  });
 }
 
 // Even whole-number shares that add to exactly 100 (the first takes what rounding leaves).
