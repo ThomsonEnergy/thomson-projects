@@ -233,7 +233,7 @@ async function fbDrawCreate(panel, project, changed) {
       ${pick('pv_working', 'Solar already at this address', [{ value: 'yes', label: 'Yes, and it is working' }, { value: 'replacing', label: 'Yes, but we are replacing it' }], '', 'Pick one', 'style="grid-column:span 2;"')}
       ${pick('pv_limit', 'Total solar here is 100 kW or less', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '')}
     </div>
-    <p class="subtitle" style="margin:8px 0 0;">Only people Formbay has accredited for this kind of job can be picked. ${o.reference ? `Formbay's job reference is set to ${escapeHtml(o.reference)}.` : ''}</p>
+    <p class="subtitle" style="margin:8px 0 0;">Only people Formbay has accredited for this kind of job can be picked.</p>
     <div style="display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap;">
       <button type="button" id="fbc-go">Create in Formbay</button>
       <div id="fbc-msg" style="flex:1; min-width:200px;"></div>

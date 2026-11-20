@@ -387,6 +387,13 @@ function parseAddress(text, streetTypes = {}) {
     const last = words[words.length - 1].replace(/\./g, '');
     const code = Object.keys(streetTypes).find(k => k === last || String(streetTypes[k]).toUpperCase() === last);
     if (code && words.length > 1) { out.street_type = code; words.pop(); }
+    // Some saved addresses have lost the break after the street ("328 Back Creek RoadPumpenbil"): a
+    // last word that starts with a street type is split into the type and the suburb.
+    if (!code && words.length > 1) {
+      const glued = Object.keys(streetTypes).map(k => [k, String(streetTypes[k]).toUpperCase()])
+        .filter(([, name]) => name.length >= 4 && last.startsWith(name) && last.length > name.length + 2).sort((x, y) => y[1].length - x[1].length)[0];
+      if (glued) { out.street_type = glued[0]; words.pop(); if (!out.city) out.city = last.slice(glued[1].length); }
+    }
     out.street_name = words.join(' ');
   }
   return out;
@@ -457,7 +464,7 @@ async function createOptions(db, token, projectId) {
   const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,
-    installers: people(installers.json), reference: project.job_number ? `J${project.job_number}` : '',
+    installers: people(installers.json),
     brands: lists, streetTypes: types,
     prefill: {
       what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
@@ -509,7 +516,6 @@ async function createForm(db, token, { projectId, userId, f }) {
     }
   }
   if (!staff.some(x => x.id === team.electrician)) return { ok: false, error: 'Pick the electrician from the list.' };
-  const { data: job } = await db.from('projects').select('job_number').eq('id', projectId).maybeSingle();
   const equipment = [];
   if (solar) equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
   // Up to four inverters and four batteries (the panel's Add another): the first has no number, then 2, 3, 4.
@@ -566,15 +572,14 @@ async function createForm(db, token, { projectId, userId, f }) {
     if (c) body.ccew = { licence_id: c.licence_id, associated_person_id: Number(c.associated_person_id), special_conditions: { generator: 0, high_voltage: 0, over_100_amps: 0, hazardous_area: 0, unmetered_supply: 0 } };
   }
 
-  // Our job number goes on as Formbay's "Your job reference". It, and the two either-or solar
-  // questions, are extras: if Formbay refuses the form naming one of them, the form is made without
-  // that one rather than not at all (the question is then answered in Formbay).
-  if (job && job.job_number) body.urref = `J${job.job_number}`;
+  // Formbay asks one of the two existing-solar questions, not both: if it refuses the form naming one,
+  // the form is made without that one rather than not at all (it is then answered in Formbay).
+  // (Formbay refuses a job reference on this call, and the owner does not need one: 20 Nov 2026.)
   let r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
   const dropped = [];
   if (r.status === 400) {
     const said = JSON.stringify(r.json || r.text || '');
-    for (const key of ['urref', 'existingPvSystem', 'isExistingSolarPvWorking']) if (key in body && said.includes(key)) { delete body[key]; dropped.push(key); }
+    for (const key of ['existingPvSystem', 'isExistingSolarPvWorking']) if (key in body && said.includes(key)) { delete body[key]; dropped.push(key); }
     if (dropped.length) r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
   }
   // Kept so a refusal can be read later (finance roles): what Formbay was sent and what it said.
@@ -622,7 +627,6 @@ async function createForm(db, token, { projectId, userId, f }) {
 
   // What Formbay kept is checked against what was asked for, so a question it did not take is not missed.
   const kept = read.find((x, i) => x.ok && made[i][0] === 'bstc');
-  if (dropped.includes('urref')) notes.push(`the job reference (J${job.job_number})`);
   if (dropped.includes('existingPvSystem') || dropped.includes('isExistingSolarPvWorking')) notes.push('the existing solar question');
   if (what === 'bstc' && f.battery_install !== 'first' && kept && String(kept.row.form.install_type) === '0') notes.push(`the battery installation type (Formbay shows First time, you picked ${f.battery_install})`);
   if (notes.length) {
