@@ -48,11 +48,13 @@ const formAddress = (f) => [[f.punitnum, f.pstreetnum].filter(Boolean).join('/')
 async function syncForm(db, token, { formId, ftype = null, projectId = null, userId = null, confirmed = false }) {
   const id = String(formId).trim();
   if (!ftype) {
+    let unanswered = false;
     for (const t of Object.keys(KINDS)) {
       const list = await formbayCall(token, KINDS[t].list);
-      if (Array.isArray(list.json) && list.json.map(String).includes(id)) { ftype = t; break; }
+      if (!Array.isArray(list.json)) unanswered = true;
+      else if (list.json.map(String).includes(id)) { ftype = t; break; }
     }
-    if (!ftype) return { ok: false, error: `Formbay has no solar or battery form ${id}.` };
+    if (!ftype) return { ok: false, error: unanswered ? 'Formbay did not answer. Try again.' : `Formbay has no solar or battery form ${id}.` };
   }
   const kind = KINDS[ftype];
   if (!kind) return { ok: false, error: 'Unknown kind of Formbay form.' };
@@ -70,6 +72,11 @@ async function syncForm(db, token, { formId, ftype = null, projectId = null, use
   if (existing && projectId && existing.project_id !== projectId) return { ok: false, error: 'This Formbay form is already linked to another job.' };
   // The poll, the tab opening and Check now can land together: one read in 15 seconds is enough.
   if (existing && existing.synced_at && !existing.sync_error && Date.now() - new Date(existing.synced_at).getTime() < 15000) return { ok: true, row: existing };
+  if (!existing) {
+    // One form of each kind per job: a second would add a second STC line at the job's full count.
+    const { data: sameKind } = await db.from('formbay_forms').select('formbay_job_id').eq('project_id', projectId).eq('ftype', ftype).limit(1);
+    if (sameKind && sameKind.length) return { ok: false, error: `This job already has Formbay ${kind.label} form ${sameKind[0].formbay_job_id}.` };
+  }
   if (!existing && !confirmed) {
     const { data: job } = await db.from('projects').select('client_address').eq('id', projectId).maybeSingle();
     if (!job) return { ok: false, error: 'Job not found.' };
@@ -106,7 +113,7 @@ async function applyToJob(db, row) {
   const kind = KINDS[row.ftype];
   const { data: stcs, error: sErr } = await db.from('job_stcs').select('id, stc_type, status, formbay_job_id, sold_on').eq('project_id', project.id).order('created_at');
   if (sErr) throw sErr;
-  let line = stcs.find(s => s.id === row.job_stc_id) || stcs.find(s => s.formbay_job_id === row.formbay_job_id)
+  let line = stcs.find(s => s.id === row.job_stc_id) || stcs.find(s => s.stc_type === row.ftype && s.formbay_job_id === row.formbay_job_id)
     || stcs.find(s => s.stc_type === row.ftype && !s.formbay_job_id);
   const status = row.job_status === 'sold' ? 'sold' : STC_STATUS[form.status];
   const linePatch = { formbay_job_id: row.formbay_job_id, commercial: String(form.commercial) === '1', updated_at: new Date().toISOString() };
@@ -189,6 +196,18 @@ async function makeEquipment(db, row, project) {
     const mine = sameKind.find(a => a.formbay_form_id === row.id)
       || sameKind.find(a => !a.formbay_form_id && lines(a.serial_numbers).some(s => w.serials.includes(s)))
       || (sameKind.length === 1 && !sameKind[0].formbay_form_id ? sameKind[0] : null);
+    // A hybrid inverter is on both a job's solar form and its battery form: the row the other form
+    // made (a shared serial number, or the same model) gets this form's serials and stays one row.
+    const shared = mine ? null : onJob.find(a => a.asset_type === w.asset_type && a.formbay_form_id && a.formbay_form_id !== row.id
+      && (lines(a.serial_numbers).some(x => w.serials.includes(x)) || (!!w.model && a.model === w.model)));
+    if (shared) {
+      const merged = unique([...lines(shared.serial_numbers), ...w.serials]);
+      if (merged.length > lines(shared.serial_numbers).length) {
+        const { error: e } = await db.from('customer_assets').update({ serial_numbers: merged.join('\n') }).eq('id', shared.id);
+        if (e) throw e;
+      }
+      continue;
+    }
     if (mine) taken.add(mine.id);
     if (mine) {
       const patch = { formbay_form_id: row.id, serial_numbers: unique([...lines(mine.serial_numbers), ...w.serials]).join('\n') };
@@ -312,22 +331,20 @@ function sameAddress(form, jobAddress) {
 async function findForms(db, token, projectId) {
   const { data: project, error } = await db.from('projects').select('client_address').eq('id', projectId).single();
   if (error) return { ok: false, error: error.message };
-  const { data: linked } = await db.from('formbay_forms').select('ftype, formbay_job_id');
+  const { data: linked } = await db.from('formbay_forms').select('project_id, ftype, formbay_job_id');
   const taken = new Set((linked || []).map(l => `${l.ftype} ${l.formbay_job_id}`));
-  const forms = [];
-  for (const ftype of Object.keys(KINDS)) {
-    const list = await formbayCall(token, KINDS[ftype].list);
-    if (!Array.isArray(list.json)) return { ok: false, error: `Formbay did not answer (${list.status || list.text}).` };
-    for (const id of list.json.map(String).filter(i => !taken.has(`${ftype} ${i}`)).slice(-10).reverse()) {
-      const r = await formbayCall(token, `${KINDS[ftype].form}?formid=${encodeURIComponent(id)}`);
-      const f = r.json;
-      if (!f || !f.status) continue;
-      forms.push({
-        formId: id, ftype, kind: KINDS[ftype].label, address: formAddress(f), owner: [f.ofname, f.osname].filter(Boolean).join(' '),
-        status: f.status, installDate: isoDate(f.idate), model: f.model || '', match: sameAddress(f, project.client_address),
-      });
-    }
-  }
+  // A job takes one form of each kind, so a kind it already has is left out.
+  const has = new Set((linked || []).filter(l => l.project_id === projectId).map(l => l.ftype));
+  const kinds = Object.keys(KINDS).filter(t => !has.has(t));
+  const lists = await Promise.all(kinds.map(t => formbayCall(token, KINDS[t].list)));
+  const bad = lists.find(l => !Array.isArray(l.json));
+  if (bad) return { ok: false, error: `Formbay did not answer (${bad.status || bad.text}).` };
+  const wanted = kinds.flatMap((ftype, i) => lists[i].json.map(String).filter(id => !taken.has(`${ftype} ${id}`)).slice(-10).reverse().map(id => ({ ftype, id })));
+  const read = await Promise.all(wanted.map(w => formbayCall(token, `${KINDS[w.ftype].form}?formid=${encodeURIComponent(w.id)}`)));
+  const forms = wanted.map((w, i) => ({ ...w, f: read[i].json })).filter(x => x.f && x.f.status).map(({ ftype, id, f }) => ({
+    formId: id, ftype, kind: KINDS[ftype].label, address: formAddress(f), owner: [f.ofname, f.osname].filter(Boolean).join(' '),
+    status: f.status, installDate: isoDate(f.idate), model: f.model || '', match: sameAddress(f, project.client_address),
+  }));
   forms.sort((x, y) => Number(y.match) - Number(x.match));
   return { ok: true, forms };
 }
@@ -394,14 +411,17 @@ async function createOptions(db, token, projectId) {
   const client = project.clients || {};
   const person = String(client.name || '').trim().split(/\s+/);
   const lastForm = last.data && last.data[0] ? last.data[0].form : null;
-  const solar = Number(project.stc_quantity) > 0 || project.proposal_template === 'solar';
-  const battery = Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery';
+  // A kind of form the job already has is not offered again ("Add a battery form" on a job with a solar one).
+  const { data: has } = await db.from('formbay_forms').select('ftype').eq('project_id', projectId);
+  const got = new Set((has || []).map(h => h.ftype));
+  const solar = !got.has('pv') && (got.has('bstc') || Number(project.stc_quantity) > 0 || project.proposal_template === 'solar');
+  const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,
     installers: installers.json.map(i => ({ id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' ') })),
     brands: lists, streetTypes: types,
     prefill: {
-      what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc',
+      what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
       fname: person[0] || '', sname: person.slice(1).join(' '), email: client.email || '', phone: String(client.phone || '').replace(/\s+/g, ''),
       ...parseAddress(project.client_address, types), nmi: project.nmi || '',
       battery_brand: guess(lists.battery), panel_brand: guess(lists.panel), inverter_brand: guess(lists.inverter),
@@ -479,13 +499,17 @@ async function createForm(db, token, { projectId, userId, f }) {
     const said = (r.json && (r.json.error || r.json.error_message || r.json.message)) || r.text || 'no answer';
     return { ok: false, error: `Formbay did not make the form: ${said}${detail ? ` (${detail})` : ''}` };
   }
-  let warning = '';
-  for (const [ftype, formId] of made) {
-    const synced = await syncForm(db, token, { formId, ftype, projectId, userId, confirmed: true });
-    if (synced.ok) continue;
+  let warning = what === 'pv_bstc' && made.length < 2 ? 'Formbay made the solar form but did not say which battery form goes with it. Use Add a battery form to find it.' : '';
+  const read = await Promise.all(made.map(([ftype, formId]) => syncForm(db, token, { formId, ftype, projectId, userId, confirmed: true })));
+  for (let i = 0; i < made.length; i++) {
+    if (read[i].ok) continue;
+    const [ftype, formId] = made[i];
     // Formbay made the form but reading it back failed: keep the link, the 15 minute check fills it in.
-    if (!synced.row) await db.from('formbay_forms').insert({ project_id: projectId, ftype, formbay_job_id: formId, created_by: userId, sync_error: synced.error });
-    warning = `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
+    if (!read[i].row) {
+      const { error: linkErr } = await db.from('formbay_forms').insert({ project_id: projectId, ftype, formbay_job_id: formId, created_by: userId, sync_error: read[i].error });
+      if (linkErr) { warning = `Formbay made ${KINDS[ftype].label} form ${formId}, but it could not be put on this job. Use Find this job in Formbay, do not create it again.`; continue; }
+    }
+    warning = warning || `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
   }
   return warning ? { ok: true, warning } : { ok: true };
 }

@@ -187,7 +187,8 @@ async function fbDrawCreate(panel, project, changed) {
   panel.innerHTML = `
     <p class="subtitle" style="margin:0 0 10px;">Filled in from the job. Check it, pick the equipment, then Create. It lands in Formbay as a draft: signing and Submit stay in Formbay's app.</p>
     <div style="${grid}">
-      ${pick('what', 'What is going in', [{ value: 'pv', label: 'Solar' }, { value: 'pv_bstc', label: 'Solar and battery' }, { value: 'bstc', label: 'Battery' }], p.what)}
+      ${pick('what', 'What is going in', [{ value: 'pv', label: 'Solar' }, { value: 'pv_bstc', label: 'Solar and battery' }, { value: 'bstc', label: 'Battery' }]
+    .filter(w => !(p.has || []).length || w.value === p.what), p.what)}
       ${box('fname', 'Owner first name', p.fname)}${box('sname', 'Owner last name', p.sname)}
       ${box('email', 'Owner email', p.email, 'type="email"')}${box('phone', 'Owner phone', p.phone, 'inputmode="tel"')}
       ${box('unit_number', 'Unit (if any)', p.unit_number)}${box('street_number', 'Street number', p.street_number)}
@@ -230,14 +231,19 @@ async function fbDrawCreate(panel, project, changed) {
     target.innerHTML = `<option value="">Loading...</option>`;
     try {
       const r = await fbCall('formbay-create-form', { action: 'list', list, ...body });
-      target.innerHTML = opts(plain(r.list.map(String)), r.list.length === 1 ? String(r.list[0]) : '', 'Pick one');
-      if (r.list.length === 1) target.dispatchEvent(new Event('change'));
+      target.innerHTML = opts(plain(r.list.map(String)), r.list.length === 1 ? String(r.list[0]) : '', r.list.length ? 'Pick one' : 'None listed');
+      if (r.list.length !== 1) return r.list.length;
+      target.dispatchEvent(new Event('change'));
+      return 1;
     } catch (err) { target.innerHTML = `<option value="">${escapeHtml(err.message)}</option>`; }
   };
   const chain = (brand, series, model, lists) => {
-    $(brand).addEventListener('change', () => {
+    $(brand).addEventListener('change', async () => {
       if (series) $(model).innerHTML = `<option value="">Pick the series first</option>`;
-      if ($(brand).value) fill(lists[0], $(series || model), { brand: $(brand).value });
+      if (!$(brand).value) return;
+      const found = await fill(lists[0], $(series || model), { brand: $(brand).value });
+      // A brand with no series listed: its models are asked for without one.
+      if (series && found === 0) fill(lists[1], $(model), { brand: $(brand).value, series: '' });
     });
     if (series) $(series).addEventListener('change', () => { if ($(series).value) fill(lists[1], $(model), { brand: $(brand).value, series: $(series).value }); });
     if ($(brand).value) $(brand).dispatchEvent(new Event('change'));
