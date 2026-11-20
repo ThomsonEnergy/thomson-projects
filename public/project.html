@@ -4949,6 +4949,7 @@
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
       loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
       loadJsOnce('/js/job-type.js?v=1', () => typeof renderJobType === 'function').then(() => renderJobType(project, 'job-type-area')).catch(err => console.error('job type:', err.message));
+      loadJsOnce('/js/job-stage.js?v=1', () => typeof initJobStagePicker === 'function').then(() => initJobStagePicker(project)).catch(err => console.error('job stage:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
@@ -6525,7 +6526,7 @@
             const badge = document.getElementById('pipeline-stage-badge');
             if (badge) {
               const { data: p } = await supabaseClient.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();
-              if (p && p.pipeline_stage) badge.textContent = pipelineStageLabel(p.pipeline_stage);
+              if (p && p.pipeline_stage) { if (badge.tagName === 'SELECT') badge.value = p.pipeline_stage; else badge.textContent = pipelineStageLabel(p.pipeline_stage); } // a dropdown for pricing roles (js/job-stage.js)
             }
           } catch (e) { console.error('Task follow-up failed:', e); }
         })();
