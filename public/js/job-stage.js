@@ -2,8 +2,8 @@
 // stage badge becomes a dropdown, so a job is moved along the pipeline without leaving it.
 // The same plain move as the Job Pipeline board and Schedule > Plan: the database rules still
 // refuse a move that is not allowed and the reason shows in a toast. Everyone else keeps the badge.
-// Loaded on demand by project.html (render). Writes projects.pipeline_stage, then reloads the job
-// so every card that follows the stage is right.
+// Loaded on demand by project.html (render). Writes projects.pipeline_stage, then loads and draws
+// the job again (loadProject, render) so every card that follows the stage is right.
 
 const JOB_STAGE_QUOTE_KEYS = ['lead', 'draft_quote', 'quote_sent'];
 
@@ -41,7 +41,13 @@ async function initJobStagePicker(project) {
       return;
     }
     was = row.pipeline_stage;
+    sel.disabled = false;
     showToast(`${projectNumberOnly(project)} moved to ${pipelineStageLabel(row.pipeline_stage)}.`);
-    await loadProject();
+    // Draw the job again (render always opens Summary) and go back to the tab that was open.
+    const onTab = document.querySelector('#job-tabs .settings-tab.active')?.dataset.panel;
+    const refreshed = await loadProject();
+    if (!refreshed || (typeof editMode !== 'undefined' && editMode)) return;
+    render(refreshed, true);
+    if (onTab && onTab !== 'summary') document.querySelector(`#job-tabs .settings-tab[data-panel="${onTab}"]`)?.click();
   });
 }
