@@ -171,14 +171,13 @@ async function makeEquipment(db, row, project) {
     if (form.model) wanted.push({ asset_type: 'solar', make: form.brand, model: form.model, quantity: Number(form.npanels) || 1, serials: panelSerials, notes: `${Number(form.ratedpower) || ''} kW. ${from}` });
     if (form.modeli) wanted.push({ asset_type: 'inverter', make: form.brandi, model: form.modeli, quantity: 1, serials: inverterSerials, notes: from });
   } else {
-    const battery = (form.batteries || [])[0];
-    if (battery) {
-      wanted.push({
-        asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
-        serials: unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]),
-        notes: `${Number(battery.usable_capacity) || ''} kWh usable. ${from}`,
-      });
-    }
+    // Each battery model on the form is its own row; Formbay lists the serial numbers for the form as
+    // a whole, so they sit on the first.
+    (form.batteries || []).forEach((battery, i) => wanted.push({
+      asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
+      serials: i === 0 ? unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]) : [],
+      notes: `${Number(battery.usable_capacity) || ''} kWh usable. ${from}`,
+    }));
     (form.inverters || []).forEach((inv, i) => wanted.push({
       asset_type: 'inverter', make: inv.brand_short_name || inv.brand, model: inv.model, quantity: Number(inv.quantity) || 1,
       serials: i === 0 ? inverterSerials : [], notes: from,
@@ -494,12 +493,18 @@ async function createForm(db, token, { projectId, userId, f }) {
   const { data: job } = await db.from('projects').select('job_number').eq('id', projectId).maybeSingle();
   const equipment = [];
   if (solar) equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
-  equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
-  if (battery) {
-    equipment.push({
-      type: 3, brand: clean(f.battery_brand), series: clean(f.battery_series), model: clean(f.battery_model), count: whole(f.battery_count, 1),
-      setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: 0,
-    });
+  // Up to four inverters and four batteries (the panel's Add another): the first has no number, then 2, 3, 4.
+  // An added row counts once its model is picked.
+  for (const n of ['', '2', '3', '4']) {
+    if (clean(f[`inverter${n}_model`])) equipment.push({ type: 1, brand: clean(f[`inverter${n}_brand`]), series: clean(f[`inverter${n}_series`]), model: clean(f[`inverter${n}_model`]), count: whole(f[`inverter${n}_count`], 1) });
+  }
+  for (const n of ['', '2', '3', '4']) {
+    if (battery && clean(f[`battery${n}_model`])) {
+      equipment.push({
+        type: 3, brand: clean(f[`battery${n}_brand`]), series: clean(f[`battery${n}_series`]), model: clean(f[`battery${n}_model`]), count: whole(f[`battery${n}_count`], 1),
+        setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: 0,
+      });
+    }
   }
   const body = {
     v: 2, type: solar ? 'pv' : 'bstc', date: `${date[3]}/${date[2]}/${date[1]}`,
