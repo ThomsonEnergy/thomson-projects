@@ -297,7 +297,7 @@
   </div>
 
 
-  <script src="/js/supabase-client.js?v=142"></script>
+  <script src="/js/supabase-client.js?v=143"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -871,6 +871,8 @@
           const projectData = e.dataTransfer.getData('text/plain');
           if (!projectData) return;
           const project = JSON.parse(projectData);
+          // who must be on site for the Formbay photos, as an FYI above the board (item 101d)
+          loadFormbayNote().then(() => formbayInstallerNote(project.id, document.getElementById('day-board-notice'))).catch(() => {});
           const blocking = await requiredTasksBlockingSchedule(project.id);
           if (blocking.length) {
             alert(`This job can't be scheduled yet - required task${blocking.length > 1 ? 's' : ''} not done:\n${blocking.map(d => '- ' + d).join('\n')}`);

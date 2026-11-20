@@ -66,6 +66,8 @@
     if (error) { errBox(daysEl, error.message); return; }
     S.rows = rows || []; S.offers = offers || []; S.emails = emails || [];
     renderAsk((asks || [])[0] || null, project); renderDays(); renderOffers(); renderEmails();
+    // the Formbay accredited installer, for whoever books (item 101d)
+    loadFormbayNote().then(() => formbayInstallerNote(project.id, daysEl)).catch(() => {});
     const recEl = document.getElementById('job-sched-client');
     if (!S.canEdit) { if (recEl) recEl.textContent = ''; return; }
     if (recEl && !S.recipient) {
