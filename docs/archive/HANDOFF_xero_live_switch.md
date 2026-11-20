@@ -51,7 +51,7 @@ Recommended Xero coding (to be confirmed by the accountant):
 **Decisions made:**
 - Owner's idea to split the customer invoice so GST on the STC part is invoiced later was analysed and NOT adopted for now. For individuals Formbay's credit is GST-free, so splitting would permanently remove about $159 GST per job, not defer it; for companies the netted invoice already defers it. If the accountant approves a different timing, build it as a per-company setting ("GST on STC portion: on invoice / on sale"), not hard-wired.
 - Owner said not to bother with a written accountant brief for now.
-- STC tracking, the STC page and the Formbay side are handled by another chat (see `HANDOFF_formbay_stc.md`). Coordinate on the asset account and the settlement postings (Phase 3 there needs your Xero pieces).
+- STC tracking, the STC page and the Formbay side are handled by another chat (see `docs/archive/HANDOFF_formbay_stc.md`). Coordinate on the asset account and the settlement postings (Phase 3 there needs your Xero pieces).
 
 ## How Formbay actually pays (from 3 real payments the owner shared, 14 Oct 2026)
 Each sale produces two PDFs with matching numbers: a **Payment Advice** (reference N) and a **Tax Invoice - Fees** (invoice FEEN). The bank deposit is the advice total less the fee invoice total.

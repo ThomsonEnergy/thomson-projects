@@ -12,10 +12,8 @@ create table if not exists public.formbay_forms (
   job_stc_id uuid references public.job_stcs(id) on delete set null,
   ftype text not null default 'bstc' check (ftype in ('pv', 'bstc', 'swh')),
   formbay_job_id text not null,
-  -- Formbay's own stage word: waiting_to_commence, in_progress, ready_to_submit, formbay_checking,
-  -- cer_processing, cer_approved, failed, sold, deleted.
+  -- Formbay's own status word (new, in_progress, installed, submitted, uploaded, approved, rejected), or sold.
   job_status text,
-  summary jsonb not null default '{}'::jsonb,  -- the form's line in Formbay's list: signatures, requirements, CER, sale, payment
   form jsonb not null default '{}'::jsonb,     -- the form's details as Formbay sent them
   docs jsonb not null default '[]'::jsonb,     -- the form's documents as Formbay listed them
   filed jsonb not null default '{}'::jsonb,    -- Formbay file id -> where it was filed on the job

@@ -1,10 +1,10 @@
-// Formbay (STC forms): the one place that logs in and reads from Formbay.
-// Called by formbay-read-background.js. Read only: nothing here changes a Formbay form.
-// Writes nothing itself; the caller decides what to keep.
+// Formbay (STC forms): the one place that talks to Formbay's Server API (trading.formbay.com.au).
+// Called by _shared/formbay-sync.js. Takes plain inputs, returns plain results, writes nothing.
+// The API list was read from Formbay's own documentation page on 20 Nov 2026 (item 101).
 //
-// Login (worked out 14 Oct 2026, docs/HANDOFF_formbay_stc.md): OAuth2 password grant at
-// oauth2.formbay.com.au/token, the account's API key as the Basic header, the Formbay username and
-// password in the body. Keys formbay, formbay_username, formbay_password (Settings > API Keys).
+// Login (worked out 14 Oct 2026): OAuth2 password grant at oauth2.formbay.com.au/token, the account's
+// API key as the Basic header, the Formbay username and password in the body. Keys formbay,
+// formbay_username, formbay_password (Settings > API Keys).
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
@@ -26,28 +26,31 @@ async function formbayLogin() {
   return json.access_token;
 }
 
-// GET one address. Returns { status, json, text }: json when the answer is JSON, else text
-// (cut to maxText characters). Never throws: a failed request comes back with status null.
-// `form` turns it into a form POST: Formbay's document lists are read that way (they change nothing).
-// A redirect is not followed (a document address redirects to the file itself); it comes back as text.
-async function formbayGet(url, token, { maxText = 400000, form = null } = {}) {
+// One request to client_api. Returns { status, json, text }; never throws (a failed request has
+// status null). `form` sends a form POST (Formbay's document lists are read that way), `json` a JSON POST.
+async function formbayCall(token, path, { form = null, json = null, timeout = 20000 } = {}) {
   try {
-    const headers = { Accept: 'application/json, text/html;q=0.8' };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const opts = { headers, timeout: 20000, size: 5 * 1024 * 1024, redirect: 'manual' };
+    const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` };
+    const opts = { headers, timeout, size: 5 * 1024 * 1024 };
     if (form) { opts.method = 'POST'; headers['Content-Type'] = 'application/x-www-form-urlencoded'; opts.body = new URLSearchParams(form).toString(); }
-    const res = await fetch(url, opts);
-    const type = res.headers.get('content-type') || '';
-    if (res.status >= 300 && res.status < 400) return { status: res.status, json: null, text: `redirect to ${res.headers.get('location')} (${type}, ${res.headers.get('content-length')} bytes)` };
-    if (!/json|text|xml|html/i.test(type)) return { status: res.status, json: null, text: `(not text: ${type}, ${res.headers.get('content-length')} bytes)` };
+    if (json) { opts.method = 'POST'; headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(json); }
+    const res = await fetch(`${TRADING}/client_api/${path}`, opts);
     const text = await res.text();
-    let json = null;
-    try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
-    return { status: res.status, json, text: json === null ? text.slice(0, maxText) : null };
+    let body = null;
+    try { body = JSON.parse(text); } catch (e) { /* not JSON */ }
+    return { status: res.status, json: body, text: body === null ? text.slice(0, 2000) : null };
   } catch (err) {
     return { status: null, json: null, text: String(err.message || err) };
   }
 }
 
+// One document or photo off a battery form, as bytes. Formbay answers with the address of the file.
+async function formbayFile(token, fileId) {
+  const res = await fetch(`${TRADING}/client_api/bstc_doc?fileid=${encodeURIComponent(fileId)}`, {
+    headers: { Authorization: `Bearer ${token}` }, timeout: 45000, size: 30 * 1024 * 1024,
+  });
+  if (!res.ok) throw new Error(`Formbay file ${fileId}: HTTP ${res.status}`);
+  return { bytes: await res.buffer(), type: (res.headers.get('content-type') || '').split(';')[0] };
+}
 
-module.exports = { TRADING, formbayLogin, formbayGet };
+module.exports = { formbayLogin, formbayCall, formbayFile };
