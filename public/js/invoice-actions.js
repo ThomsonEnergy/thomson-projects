@@ -449,14 +449,13 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
     const btn = q('#id-save'), msg = q('#id-msg');
     const body = { invoiceId: invoice.id, invoiceDate: q('#id-date').value, dueDate: q('#id-due').value, description: q('#id-name').value };
     if (billToId && billToId !== (invoice.bill_to_client_id || ownId)) body.billToClientId = billToId;
-    if (project) {
-      body.jobName = q('#id-job-name').value; body.siteAddress = q('#id-site').value;
-      body.siteAddressParts = (await addressColumnsFor(q('#id-site'))).address_parts || null;   // the address in parts, from Google (item 103)
-    }
+    if (project) { body.jobName = q('#id-job-name').value; body.siteAddress = q('#id-site').value; }
     if (!body.invoiceDate) { msg.innerHTML = '<div class="error-box">Pick the invoice date.</div>'; return; }
     invoiceBusy(btn, inXero ? 'Saving and updating Xero...' : 'Saving...');
     msg.innerHTML = '';
     try {
+      // the address in parts, from Google (item 103); looked up after the button is busy so Save cannot be pressed twice
+      if (project) body.siteAddressParts = (await addressColumnsFor(q('#id-site'))).address_parts || null;
       const d = await saveInvoiceDetails(body);
       if (!d.changed) { overlay.remove(); showToast('Nothing changed'); return; }
       overlay.remove();

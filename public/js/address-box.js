@@ -59,24 +59,30 @@ function addressPartsFromPlace(place) {
   };
 }
 
-// A typed address looked up, or null. Kept only when the street number and the postcode Google
-// found are both in the typed text.
+// Letters and digits only, single spaced: how two spellings of an address are compared ("12-14" as "12 14").
+const addressPlain = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+// A typed address looked up. Returns the parts; false when Google was asked and has no such address
+// (or its answer is another street number or postcode); null when it could not be asked (no key,
+// offline, too slow, refused), so "could not ask" is never taken for "does not exist".
 async function addressLookUp(text) {
-  const typed = ` ${String(text || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
-  if (typed.trim().length < 6) return null;
+  const typed = ` ${addressPlain(text)} `;
+  if (typed.trim().length < 6) return false;
   const places = await addressMaps();
   if (!places) return null;
   return new Promise((resolve) => {
     setTimeout(() => resolve(null), 8000);
     try {
       new places.AutocompleteService().getPlacePredictions({ input: text, componentRestrictions: { country: 'au' }, types: ['address'] }, (list, status) => {
+        if (status === 'ZERO_RESULTS') { resolve(false); return; }
         const first = status === 'OK' && (list || [])[0];
         if (!first) { resolve(null); return; }
         new places.PlacesService(document.createElement('div')).getDetails({ placeId: first.place_id, fields: ['formatted_address', 'address_components', 'geometry', 'place_id'] }, (place, st) => {
-          const parts = st === 'OK' && place ? addressPartsFromPlace(place) : null;
-          const same = parts && parts.street_number && parts.postcode
-            && typed.includes(` ${parts.street_number.toUpperCase()} `) && typed.includes(` ${parts.postcode} `);
-          resolve(same ? parts : null);
+          if (st !== 'OK' || !place) { resolve(null); return; }
+          const parts = addressPartsFromPlace(place);
+          const same = parts.street_number && parts.postcode
+            && typed.includes(` ${addressPlain(parts.street_number)} `) && typed.includes(` ${parts.postcode} `);
+          resolve(same ? parts : false);
         });
       });
     } catch (err) { resolve(null); }
@@ -113,7 +119,7 @@ async function addressBoxParts(input) {
   const text = String((input && input.value) || '').trim();
   if (!text) return null;
   if (input.addressParts && input.addressFor === text) return input.addressParts;
-  const found = await addressLookUp(text);
+  const found = (await addressLookUp(text)) || null;
   if (String(input.value || '').trim() !== text) return null;   // changed while looking
   input.addressParts = found;
   input.addressFor = found ? text : null;
@@ -121,10 +127,10 @@ async function addressBoxParts(input) {
 }
 
 // The database columns for an address box, to spread into a save: the parts and the map point. An
-// address with no parts clears the parts and leaves the map point to whoever else sets it.
+// address with no parts clears both, so a changed address never keeps the old house's map point.
 async function addressBoxColumns(input) {
   const parts = await addressBoxParts(input);
-  return parts ? { address_parts: parts, lat: parts.lat, lng: parts.lng } : { address_parts: null };
+  return parts ? { address_parts: parts, lat: parts.lat, lng: parts.lng } : { address_parts: null, lat: null, lng: null };
 }
 
 // A job saved before addresses were kept in parts: looked up once and saved, so Formbay, Pylon and
@@ -133,8 +139,10 @@ async function addressBoxColumns(input) {
 async function addressKeepJob(project) {
   if (!project || project.address_parts || !String(project.client_address || '').trim()) return (project && project.address_parts) || null;
   const found = await addressLookUp(project.client_address);
+  if (found === null) return null;   // could not ask Google just now: try again next time
   const fields = found ? { address_parts: found, lat: found.lat, lng: found.lng } : { address_parts: { unknown: true, formatted: String(project.client_address).trim() } };
-  const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+  // only while the job still has that address and no parts (another tab or person may have changed it)
+  const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id).is('address_parts', null).eq('client_address', project.client_address);
   if (!error) Object.assign(project, fields);
-  return found;
+  return found || null;
 }

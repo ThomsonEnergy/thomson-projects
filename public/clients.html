@@ -196,7 +196,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=146"></script>
+  <script src="/js/supabase-client.js?v=147"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -519,7 +519,7 @@
         phone: document.getElementById('c-phone').value.trim(),
         address: document.getElementById('c-address').value.trim(),
         // the address in parts, from Google's lookup (item 103)
-        ...(await addressColumnsFor(document.getElementById('c-address'), editingClientId ? (allClients.find(x => x.id === editingClientId) || {}).address : undefined)),
+        ...(await (async (c) => addressColumnsFor(document.getElementById('c-address'), c ? c.address : undefined, !!(c && c.address_parts)))(editingClientId ? allClients.find(x => x.id === editingClientId) : null)),
         abn: document.getElementById('c-abn').value.trim() || null,
         payment_terms: document.getElementById('c-terms').value,
         ...(rateCardsLoaded ? { rate_card_id: document.getElementById('c-rate-card').value || null } : {}),
@@ -575,7 +575,7 @@
         label: row.querySelector('.st-label').value.trim() || null,
         address: row.querySelector('.st-address').value.trim(),
         // the address in parts, from Google's lookup (item 103); a site left as it was keeps its own
-        parts: await addressColumnsFor(row.querySelector('.st-address'), row.dataset.id ? (before.find(b => b.id === row.dataset.id) || {}).address : undefined),
+        parts: await (async (b) => addressColumnsFor(row.querySelector('.st-address'), b ? b.address : undefined, !!(b && b.address_parts)))(row.dataset.id ? before.find(x => x.id === row.dataset.id) : null),
       })))).filter(st => st.address);
       const keptIds = siteRows.filter(st => st.id).map(st => st.id);
       const removedIds = before.map(st => st.id).filter(id => !keptIds.includes(id));

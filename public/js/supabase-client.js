@@ -7028,17 +7028,19 @@ function loadJsOnce(src, isLoaded) {
 // Address boxes (item 103): any <input data-address> gets Google's address suggestions the first
 // time it is focused, on every page, and addressColumnsFor(input) gives the parts to save beside
 // its text ({ address_parts, lat, lng }). The how is in /js/address-box.js.
-const loadAddressBox = () => loadJsOnce('/js/address-box.js?v=2', () => typeof wireAddressBox === 'function');
+const loadAddressBox = () => loadJsOnce('/js/address-box.js?v=3', () => typeof wireAddressBox === 'function');
 document.addEventListener('focusin', (e) => {
   if (e.target && e.target.matches && e.target.matches('input[data-address]')) loadAddressBox().then(() => wireAddressBox(e.target)).catch(() => {});
 });
 // `was`: the address text already saved, when editing. An address left as it was and not known to
 // Google keeps whatever parts it has (returns {}); a changed one always follows its new text.
-async function addressColumnsFor(input, was) {
+// `has`: true when that saved address already has its parts, so an unchanged one is not looked up again.
+async function addressColumnsFor(input, was, has = false) {
   try {
+    const same = was !== undefined && String(was || '').trim() === String(input.value || '').trim();
+    if (same && has && !input.addressParts) return {};
     await loadAddressBox();
     const cols = await addressBoxColumns(input);
-    const same = was !== undefined && String(was || '').trim() === String(input.value || '').trim();
     return !cols.address_parts && same ? {} : cols;
   } catch (err) { return {}; }   // no lookup: the text still saves
 }
@@ -7055,7 +7057,7 @@ const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof
 const loadInvoiceActions = () => Promise.all([
   loadJsOnce('/js/email-compose.js?v=14', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
-  loadJsOnce('/js/invoice-actions.js?v=7', () => typeof openInvoicePanel === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=8', () => typeof openInvoicePanel === 'function'),
 ]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.

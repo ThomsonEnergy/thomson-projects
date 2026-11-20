@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=146"></script>
+  <script src="/js/supabase-client.js?v=147"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -4649,7 +4649,8 @@
       initJobContacts(project, pricingVisible);
       initJobStcs(project, centres);
       // a job saved before addresses were kept in parts gets them once, by itself (item 103)
-      if (!project.address_parts && project.client_address) loadAddressBox().then(() => addressKeepJob(project)).catch(() => {});
+      // (pricing roles: a field role may not change those columns, so it is left for the office to open)
+      if (pricingVisible && !project.address_parts && project.client_address) loadAddressBox().then(() => addressKeepJob(project)).catch(() => {});
 
       const hdSaveBtn = document.getElementById('hd-save-btn');
       if (hdSaveBtn) hdSaveBtn.addEventListener('click', async () => {

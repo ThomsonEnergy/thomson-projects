@@ -114,7 +114,7 @@ exports.handler = async (event) => {
         projectChange.client_address = a;
         projectChange.client_site_id = await siteIdFor(admin, project.client_id, a);
         // the new address in parts when the browser's lookup found them, else cleared: they follow the text
-        Object.assign(projectChange, { address_parts: null }, addressColumns(body.siteAddressParts, a));
+        Object.assign(projectChange, { address_parts: null, lat: null, lng: null }, addressColumns(body.siteAddressParts, a));
         said.push(`Job site ${quoted(project.client_address)} to ${quoted(a)}`);
       }
     }

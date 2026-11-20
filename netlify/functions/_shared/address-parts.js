@@ -17,9 +17,12 @@ function addressColumns(input, address) {
     postcode: text(input.postcode, 4), lat: coord(input.lat, -45, -9), lng: coord(input.lng, 110, 156),
     place_id: text(input.place_id, 200) || null, formatted: text(input.formatted, 300),
   };
-  const line = ` ${String(address || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
-  if (!parts.street_number || !/^\d{4}$/.test(parts.postcode)) return {};
-  if (!line.includes(` ${parts.street_number.toUpperCase()} `) || !line.includes(` ${parts.postcode} `)) return {};
+  // compared as letters and digits only, so "12-14" matches "12 - 14"
+  const plain = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const line = ` ${plain(address)} `;
+  const number = plain(parts.street_number);
+  if (!number || !/^\d{4}$/.test(parts.postcode) || number === parts.postcode) return {};
+  if (!line.includes(` ${number} `) || !line.includes(` ${parts.postcode} `)) return {};
   return { address_parts: parts, lat: parts.lat, lng: parts.lng };
 }
 
