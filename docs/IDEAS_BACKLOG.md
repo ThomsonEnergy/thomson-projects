@@ -877,7 +877,9 @@ Touches: `public/project.html` (the estimate sum, the "incl. overheads" notes, `
 - Simpler: a small change no longer needs the owner to open a chat, pick a model and watch it; the ask, the PR, the preview and the merge are four lines in Sparky. Manual steps kept on purpose: Confirm on the ask and "merge it", so no code reaches the live site on a sentence alone.
 - Best model: Opus 5.5, effort high, because it is wiring between known pieces (a workflow, two ops actions, three columns) with no money or RLS.
 
-## 101. Formbay both ways: create the form, follow its stage, bring back serials, photos and equipment (planned 20 Nov 2026, waiting on yes)
+## 101. Formbay both ways: create the form, follow its stage, bring back serials, photos and equipment (owner's "Yes let's build", 20 Nov 2026)
+
+Building in: `claude/optimistic-einstein-m5mio8` (a cloud session pushes one branch). **Step 1 first half is live (20 Nov 2026):** `netlify/functions/formbay-read-background.js` runs every 15 minutes, read only (GET requests), and keeps Formbay's documentation, the form lists, each recent form with its documents and the newer API's links as they came in `formbay_webhook_events` (`read.doc`, `read.trading`, `read.api`); no migration, nothing on any page yet. The card, the table and steps 2 to 4 are mapped from those rows next. The eCert side (item 102) is another chat's.
 
 Owner, 20 Nov 2026: "create the Formbay form in our app and then get updates for whatever stage the form is at and once the onsite works are completed have the serial numbers and photos come over and create the customer asset with warranties and pics and what not". Test jobs: J7009 (form already started in Formbay, site works complete, waiting on the customer signature and the CCEW) to pull back; J7081 (approved, battery) to create a BSTC form.
 
