@@ -41,14 +41,6 @@ insert into public.xero_account_mapping (category, label, xero_account_code, xer
 select 'lead_reward', 'Lead rewards (credit notes to referrers)', '', 'EXEMPTEXPENSES'
 where not exists (select 1 from public.xero_account_mapping where category = 'lead_reward');
 
--- Two history kinds on an invoice (the constraint is replaced through dynamic SQL: the database tool
--- stops on a plain drop).
-do $$
-begin
-  execute 'alter table public.invoice_events dr' || 'op constraint if exists invoice_events_kind_check';
-  execute 'alter table public.invoice_events add constraint invoice_events_kind_check check (kind in (''created'', ''edited'', ''emailed'', ''reminder'', ''sent_elsewhere'', ''pushed_to_xero'', ''paid'', ''credit_note'', ''credit_note_pushed'', ''notes'', ''interest_on'', ''interest_off'', ''interest_charged'', ''quote_lines_on'', ''quote_lines_off'', ''lead_reward_on'', ''lead_reward_off''))';
-end $$;
-
 -- What an invoice still owes: now less any lead reward credit taken off it. Otherwise unchanged.
 create or replace function public.get_invoice_balance_due(p_invoice_id uuid)
 returns numeric
@@ -133,7 +125,7 @@ begin
   where id = p_reward;
   select job_number into v_job from projects where id = r.project_id;
   insert into invoice_events (invoice_id, kind, detail, actor_label)
-  values (p_invoice, 'lead_reward_on', format('$%s for J%s, balance now $%s', r.amount, v_job, v_balance - r.amount), 'the lead reward');
+  values (p_invoice, 'edited', format('Lead reward credit $%s for J%s taken off, balance now $%s', r.amount, v_job, v_balance - r.amount), 'the lead reward');
   insert into activity_log (entity_type, entity_id, action, description)
   values ('client', r.referrer_client_id, 'lead_reward_credited', format('Lead reward $%s for J%s taken off invoice %s', r.amount, v_job, inv.invoice_number));
   return true;
@@ -210,7 +202,7 @@ begin
   end loop;
   if n > 0 then
     insert into invoice_events (invoice_id, kind, detail, actor_label)
-    values (p_invoice, 'lead_reward_off', format('$%s (%s)', v_total, coalesce(nullif(btrim(p_why), ''), 'the invoice changed')), 'the lead reward');
+    values (p_invoice, 'edited', format('Lead reward credit $%s put back to owed (%s)', v_total, coalesce(nullif(btrim(p_why), ''), 'the invoice changed')), 'the lead reward');
   end if;
   return n;
 end;
@@ -317,38 +309,6 @@ exception when others then
 end;
 $$;
 revoke execute on function public.lead_reward_due_on_paid() from public, anon, authenticated;
-
--- The job Activity tab's words for the two new history kinds. Otherwise unchanged.
-create or replace function public.invoice_events_to_activity_log()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare
-  v_inv invoices%rowtype;
-  v_project uuid;
-  v_label text;
-begin
-  select * into v_inv from invoices where id = new.invoice_id;
-  if not found then return new; end if;
-  v_project := coalesce(v_inv.project_id, (select cc.project_id from cost_centres cc where cc.id = v_inv.cost_centre_id));
-  if v_project is null then return new; end if;
-  v_label := case new.kind
-    when 'created' then 'created' when 'edited' then 'edited' when 'emailed' then 'emailed to the client'
-    when 'reminder' then 'reminder sent' when 'sent_elsewhere' then 'sent another way' when 'pushed_to_xero' then 'pushed to Xero'
-    when 'paid' then 'paid' when 'credit_note' then 'credit note issued' when 'credit_note_pushed' then 'credit note pushed to Xero'
-    when 'notes' then 'notes changed'
-    when 'interest_on' then 'interest charging turned on' when 'interest_off' then 'interest charging turned off'
-    when 'interest_charged' then 'interest invoiced'
-    when 'quote_lines_on' then 'quoted lines shown' when 'quote_lines_off' then 'quoted lines hidden'
-    when 'lead_reward_on' then 'lead reward credit taken off' when 'lead_reward_off' then 'lead reward credit put back'
-    else new.kind end;
-  insert into activity_log (entity_type, entity_id, action, description, changed_by)
-  values ('project', v_project, 'invoice_' || new.kind,
-    'Invoice ' || v_inv.invoice_number || ' ' || v_label || coalesce(': ' || new.detail, '')
-      || case when new.actor_id is null and new.actor_label is not null then ' (by ' || new.actor_label || ')' else '' end,
-    new.actor_id);
-  return new;
-end;
-$$;
-revoke execute on function public.invoice_events_to_activity_log() from public, anon, authenticated;
 
 -- The client's invoice page: lead_reward_credits, one named line per reward taken off. Otherwise unchanged.
 create or replace function public.get_invoice_by_token_v3(p_token uuid)
