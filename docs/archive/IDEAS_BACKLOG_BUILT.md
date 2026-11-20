@@ -1496,3 +1496,17 @@ Owner, 17 Nov 2026: a Gantt chart of every project with start, finish and the on
 
 **Built as planned**, with two additions found while proving it: moving a job's bar moves its variations by the same days, and a phone lists only the weeks with work. Proved in a browser (Plan view, drag, detail, When card, portal chart, phone and laptop) and the 7am reminders and email draft against a stand-in database; the migration ran on the staging database. Owner to do after the release: Schedule > Plan > Plan settings, tick who is on the tools.
 
+## 104. One waterfall across the whole day in Timesheets (owner, 20 Nov 2026; built 20 Nov 2026, on `staging`)
+
+Owner (20 Nov 2026): "in timesheets for the whole day you should be able to use that waterfall toggle between different jobs for the whole timesheet". Same chat fixed the clock-out sliders first (bug, live 20 Nov 2026, `public/js/split-sliders.js`).
+
+Built in `feat/day-waterfall`, on `staging` until release. Detail in `docs/PROJECT_SPEC.md` A1. As built, beyond the plan: if a locked block sits between two free ones, or two blocks overlap, the waterfall says why and leaves the times to the blocks.
+
+- The day editor in Timesheets gets one waterfall under the blocks when the day has two or more blocks with a start and a finish: one slider per block, each showing its job (and stage) and its hours.
+- Sliding moves time between blocks. The day's first start and last finish stay put, the gaps between blocks (lunch, travel) stay the length they are, the blocks stay in their order, and each block's start and finish boxes update as you slide. Typing a time in a block still works and the waterfall follows it.
+- A block whose hours are already in Xero is locked: its slider does not move and the others work around it.
+- Times land on whole minutes; Save saves them as typed times always have.
+
+**Done means:** (1) Open a day with two jobs in Timesheets: one waterfall shows under the blocks. (2) Drag it: both blocks' start and finish change, the day's first start and last finish do not, and a lunch gap between them stays the same length. (3) A block already in Xero: its slider is locked. (4) Save, reopen the day: the new times are there.
+
+Touches: `public/timesheets.html` (the day editor), `public/js/split-sliders.js`. No migration. Payroll: hours per job and stage change; total paid hours for the day do not.
