@@ -20,7 +20,7 @@ async function fbCall(fn, body) {
   });
   const json = await res.json().catch(() => null);
   if (!json) throw new Error('No answer from the server. Try again.');
-  if (!json.ok) throw new Error(json.error || 'Formbay did not answer. Try again.');
+  if (!json.ok) throw Object.assign(new Error(json.error || 'Formbay did not answer. Try again.'), { confirm: !!json.confirm });
   return json;
 }
 const fbDate = (v) => (/^\d{2}\/\d{2}\/\d{4}$/.test(String(v || '')) ? v : '');
@@ -130,8 +130,15 @@ async function fbDrawFind(panel, project, changed) {
   const link = async (formId, btn) => {
     btn.disabled = true;
     panel.querySelector('#fb-find-msg').innerHTML = `<p class="subtitle">Reading form ${escapeHtml(formId)}...</p>`;
-    try { await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId }); await changed(); }
-    catch (err) { panel.querySelector('#fb-find-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; btn.disabled = false; }
+    try {
+      try { await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId }); }
+      catch (err) {
+        // A form at another address needs a person's yes: linking puts its NMI, serials and photos on this job.
+        if (!err.confirm || !confirm(`${err.message} Link it to this job anyway?`)) throw err;
+        await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId, confirmed: true });
+      }
+      await changed();
+    } catch (err) { panel.querySelector('#fb-find-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; btn.disabled = false; }
   };
   panel.innerHTML = `
     ${failed ? `<div class="error-box">${escapeHtml(failed)}</div>` : ''}

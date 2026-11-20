@@ -36,10 +36,11 @@ const formAddress = (f) => [[f.punitnum, f.pstreetnum].filter(Boolean).join('/')
 
 // formId: Formbay's number. projectId is needed only the first time (it links the form to the job).
 // Returns { ok, row } or { ok: false, error }.
-async function syncForm(db, token, { formId, projectId = null, userId = null }) {
+// confirmed: a person said yes to a form whose address is not the job's (linking only).
+async function syncForm(db, token, { formId, projectId = null, userId = null, confirmed = false }) {
   const id = String(formId).trim();
   const r = await formbayCall(token, `bstc_form?formid=${encodeURIComponent(id)}`);
-  const form = r.json && !Array.isArray(r.json) && r.json.status ? r.json : null;
+  const form = r.status === 200 && r.json && !Array.isArray(r.json) && STC_STATUS[r.json.status] ? r.json : null;
 
   const { data: existing, error: exErr } = await db.from('formbay_forms').select('*').eq('ftype', 'bstc').eq('formbay_job_id', id).maybeSingle();
   if (exErr) return { ok: false, error: exErr.message };
@@ -50,6 +51,13 @@ async function syncForm(db, token, { formId, projectId = null, userId = null }) 
   }
   if (!existing && !projectId) return { ok: false, error: 'This Formbay form is not linked to a job yet.' };
   if (existing && projectId && existing.project_id !== projectId) return { ok: false, error: 'This Formbay form is already linked to another job.' };
+  // The poll, the tab opening and Check now can land together: one read in 15 seconds is enough.
+  if (existing && existing.synced_at && !existing.sync_error && Date.now() - new Date(existing.synced_at).getTime() < 15000) return { ok: true, row: existing };
+  if (!existing && !confirmed) {
+    const { data: job } = await db.from('projects').select('client_address').eq('id', projectId).maybeSingle();
+    if (!job) return { ok: false, error: 'Job not found.' };
+    if (!sameAddress(form, job.client_address)) return { ok: false, confirm: true, error: `Formbay form ${id} is at ${formAddress(form)}, which is not this job's address.` };
+  }
 
   const docsRes = await formbayCall(token, 'bstc_docs_list', { form: { formid: id, group_id: form.group_id || '' } });
   const patch = { job_status: form.sold_date ? 'sold' : form.status, form, synced_at: new Date().toISOString(), sync_error: null };
@@ -82,9 +90,11 @@ async function applyToJob(db, row) {
   if (sErr) throw sErr;
   let line = stcs.find(s => s.id === row.job_stc_id) || stcs.find(s => s.formbay_job_id === row.formbay_job_id)
     || stcs.find(s => s.stc_type === 'bstc' && !s.formbay_job_id);
-  const status = row.job_status === 'sold' ? 'sold' : (STC_STATUS[form.status] || 'pending_installer_action');
+  const status = row.job_status === 'sold' ? 'sold' : STC_STATUS[form.status];
   const linePatch = { formbay_job_id: row.formbay_job_id, commercial: String(form.commercial) === '1', updated_at: new Date().toISOString() };
-  if (!line || line.status !== 'paid') linePatch.status = status;   // paid comes from the payment advice and stays
+  // The line follows the form forwards only (a status typed ahead of Formbay, and Paid from the
+  // payment advice, stay), except a rejection, which sends it back to the retailer.
+  if (!line || form.status === 'rejected' || STC_ORDER.indexOf(status) > STC_ORDER.indexOf(line.status)) linePatch.status = status;
   if (form.sold_date && !(line && line.sold_on)) linePatch.sold_on = isoDate(form.sold_date) || String(form.sold_date).slice(0, 10);
   if (line) {
     const { error } = await db.from('job_stcs').update(linePatch).eq('id', line.id);
@@ -141,11 +151,14 @@ async function makeEquipment(db, row, project) {
 
   const { data: onJob, error } = await db.from('customer_assets').select('*').eq('project_id', project.id).neq('status', 'decommissioned').order('created_at');
   if (error) throw error;
+  const taken = new Set();
   for (const w of wanted) {
-    const sameKind = onJob.filter(a => a.asset_type === w.asset_type);
-    const mine = sameKind.find(a => a.formbay_form_id === row.id && (a.model || '') === (w.model || ''))
+    // This form's own rows are matched by kind and order (never by model, which a person may retype).
+    const sameKind = onJob.filter(a => a.asset_type === w.asset_type && !taken.has(a.id));
+    const mine = sameKind.find(a => a.formbay_form_id === row.id)
       || sameKind.find(a => !a.formbay_form_id && lines(a.serial_numbers).some(s => w.serials.includes(s)))
       || (sameKind.length === 1 && !sameKind[0].formbay_form_id ? sameKind[0] : null);
+    if (mine) taken.add(mine.id);
     if (mine) {
       const patch = { formbay_form_id: row.id, serial_numbers: unique([...lines(mine.serial_numbers), ...w.serials]).join('\n') };
       if (!mine.make) patch.make = w.make;
@@ -192,12 +205,16 @@ async function warrantyFor(db, w, installed) {
 async function fileFormDocs(db, token, row, { limit = 8 } = {}) {
   const filed = { ...(row.filed || {}) };
   // A file that failed is tried again on later runs, three times in all.
-  const todo = (row.docs || []).filter(d => d.fileid && (!filed[d.fileid] || (filed[d.fileid].failed && filed[d.fileid].tries < 3)));
+  const todo = (row.docs || []).filter(d => d.fileid && (!filed[d.fileid] || (filed[d.fileid].failed && filed[d.fileid].tries < 3)
+    || (filed[d.fileid].claimed && Date.now() - filed[d.fileid].claimed > 30 * 60 * 1000)));   // a claim left by a run that died
   let done = 0;
   for (const doc of todo) {
     if (done >= limit) break;
     try {
       if (NOT_FILED.test(doc.name || '')) { filed[doc.fileid] = { skipped: true }; continue; }
+      // Claimed before the download, so a second run that overlaps this one leaves it alone.
+      filed[doc.fileid] = { claimed: Date.now() };
+      await db.from('formbay_forms').update({ filed }).eq('id', row.id);
       const file = await formbayFile(token, doc.fileid);
       const isPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(doc.filename || '');
       filed[doc.fileid] = isPdf ? await filePdf(db, row, doc, file.bytes) : await filePhoto(db, row, doc, file.bytes);
@@ -384,7 +401,7 @@ async function createForm(db, token, { projectId, userId, f }) {
     const said = (r.json && (r.json.error || r.json.error_message || r.json.message)) || r.text || 'no answer';
     return { ok: false, error: `Formbay did not make the form: ${said}${detail ? ` (${detail})` : ''}` };
   }
-  const synced = await syncForm(db, token, { formId, projectId, userId });
+  const synced = await syncForm(db, token, { formId, projectId, userId, confirmed: true });
   if (synced.ok) return synced;
   // Formbay made the form but reading it back failed: keep the link, the 15 minute check fills it in.
   if (!synced.row) await db.from('formbay_forms').insert({ project_id: projectId, ftype: 'bstc', formbay_job_id: String(formId), created_by: userId, sync_error: synced.error });

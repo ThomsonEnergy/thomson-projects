@@ -40,3 +40,6 @@ create policy "Pricing roles read formbay forms" on public.formbay_forms
 -- Equipment made from a Formbay form remembers the form, so a later read updates it and never doubles it.
 alter table public.customer_assets add column if not exists formbay_form_id uuid references public.formbay_forms(id) on delete set null;
 create index if not exists customer_assets_formbay_form on public.customer_assets (formbay_form_id);
+
+-- One STC line per Formbay form on a job, so two reads landing together cannot add it twice.
+create unique index if not exists job_stcs_one_per_formbay_form on public.job_stcs (project_id, formbay_job_id) where formbay_job_id is not null;

@@ -12,18 +12,26 @@ const FILES_PER_RUN = 12;
 
 exports.handler = async () => {
   const db = getAdminClient();
-  const { data: rows, error } = await db.from('formbay_forms').select('formbay_job_id, job_status, synced_at').order('synced_at', { ascending: true, nullsFirst: true }).limit(200);
+  // Forms not sold yet every run; a sold form once a day.
+  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { data: due, error } = await db.from('formbay_forms').select('formbay_job_id')
+    .or(`job_status.is.null,job_status.neq.sold,synced_at.is.null,synced_at.lt.${dayAgo}`)
+    .order('synced_at', { ascending: true, nullsFirst: true }).limit(200);
   if (error) { console.error('Formbay poll:', error.message); return { statusCode: 500 }; }
-  const dayAgo = Date.now() - 24 * 3600 * 1000;
-  const due = rows.filter(r => r.job_status !== 'sold' || !r.synced_at || new Date(r.synced_at).getTime() < dayAgo);
   if (!due.length) return { statusCode: 200 };
 
   let token;
   try { token = await formbayLogin(); } catch (err) { console.error('Formbay poll:', err.message); return { statusCode: 200 }; }
-  let files = 0, failed = 0;
+  let files = 0, failed = 0, inARow = 0;
   for (const r of due) {
     const res = await syncForm(db, token, { formId: r.formbay_job_id });
-    if (!res.ok) { failed++; console.error(`Formbay poll: form ${r.formbay_job_id}: ${res.error}`); continue; }
+    if (!res.ok) {
+      failed++; inARow++;
+      console.error(`Formbay poll: form ${r.formbay_job_id}: ${res.error}`);
+      if (inARow >= 3) { console.error('Formbay poll: three failures in a row, stopping until the next run'); break; }
+      continue;
+    }
+    inARow = 0;
     // Photos once the on site work is signed off by the installer; documents are filed in the same pass.
     if (files < FILES_PER_RUN && isoDate(res.row.form.installer_signee_date)) files += await fileFormDocs(db, token, res.row, { limit: FILES_PER_RUN - files });
   }
