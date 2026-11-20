@@ -2229,7 +2229,8 @@ async function loadClientSites(clientId) {
 // Which saved site a job address is. The office address is not a site (null). A new address
 // is saved as a site for the client (unless save is false) and its id returned. Pass the
 // client's office address when it is to hand; otherwise it is looked up.
-async function resolveClientSite(clientId, address, officeAddress, { save = true } = {}) {
+// columns: the address in parts and its map point (addressBoxColumns), kept on a site made here.
+async function resolveClientSite(clientId, address, officeAddress, { save = true, columns = null } = {}) {
   address = String(address || '').trim();
   if (!clientId || !address) return null;
   if (officeAddress === undefined) {
@@ -2241,7 +2242,7 @@ async function resolveClientSite(clientId, address, officeAddress, { save = true
   const found = sites.find(s => sameAddress(s.address, address));
   if (found) return found.id;
   if (!save) return null;
-  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address }).select('id').single();
+  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address, ...(columns || {}) }).select('id').single();
   if (error) {
     // Two people saving the same new site at once: the unique index keeps one row, use it.
     const again = (await loadClientSites(clientId)).find(s => sameAddress(s.address, address));
@@ -4543,7 +4544,7 @@ function openQuickJobPanel(onCreated) {
       <input id="qj-client-phone" type="tel" inputmode="tel" autocomplete="tel" />
 
       <label>Site address</label>
-      <input id="qj-address" placeholder="Job site address" />
+      <input id="qj-address" data-address placeholder="Job site address" />
 
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400;">
         <input type="checkbox" id="qj-laha-approved" style="width:auto;" /> LAHA approved (more than 100km from base)
@@ -4617,20 +4618,22 @@ function openQuickJobPanel(onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
+      const addressCols = await addressColumnsFor(overlay.querySelector('#qj-address'));
       let clientId = selectedClientId;
       // Only a pricing role may add the clients row; for anyone else the job keeps the typed name (bug F7).
       if (!clientId && isPricingRole(await getMyRole())) {
         const { data: newClient, error: clientErr } = await supabaseClient
           .from('clients')
-          .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
+          .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress, ...addressCols })
           .select('id')
           .single();
         if (clientErr) throw clientErr;
         clientId = newClient.id;
       }
-      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress) : null;
+      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress, undefined, { columns: addressCols }) : null;
 
       const { data: project, error } = await supabaseClient.from('projects').insert({
+        ...addressCols,
         name,
         sow_text: brief || null,
         client_id: clientId,
@@ -4927,7 +4930,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       <input id="wj-client-phone" type="tel" autocomplete="tel" value="${escapeHtml(originalProject.client_phone || '')}" />
 
       <label>Site address</label>
-      <input id="wj-address" value="${escapeHtml(originalProject.client_address || '')}" />
+      <input id="wj-address" data-address value="${escapeHtml(originalProject.client_address || '')}" />
 
       <div style="margin-top:14px;">
         <button id="wj-confirm-btn">Create warranty job</button>
@@ -4954,8 +4957,10 @@ function openWarrantyJobPanel(originalProject, onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
-      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress);
+      const addressCols = await addressColumnsFor(overlay.querySelector('#wj-address'));
+      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress, undefined, { columns: addressCols });
       const { data: project, error } = await supabaseClient.from('projects').insert({
+        ...addressCols,
         name,
         sow_text: brief || null,
         client_id: originalProject.client_id || null,
@@ -7057,6 +7062,17 @@ function loadJsOnce(src, isLoaded) {
     document.head.appendChild(s);
   });
 }
+// Address boxes (item 103): any <input data-address> gets Google's address suggestions the first
+// time it is focused, on every page, and addressColumnsFor(input) gives the parts to save beside
+// its text ({ address_parts, lat, lng }). The how is in /js/address-box.js.
+const loadAddressBox = () => loadJsOnce('/js/address-box.js?v=1', () => typeof wireAddressBox === 'function');
+document.addEventListener('focusin', (e) => {
+  if (e.target && e.target.matches && e.target.matches('input[data-address]')) loadAddressBox().then(() => wireAddressBox(e.target)).catch(() => {});
+});
+async function addressColumnsFor(input) {
+  try { await loadAddressBox(); return await addressBoxColumns(input); } catch (err) { return {}; }   // no lookup: the text still saves
+}
+const loadFormbayNote = () => loadJsOnce('/js/formbay-note.js?v=1', () => typeof formbayInstallerNote === 'function');
 const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=2', () => typeof openUsedStockPanel === 'function');
 const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=2', () => typeof openStockScanPanel === 'function');
 const loadStockKinds = () => loadJsOnce('/js/stock-kinds.js?v=1', () => typeof stockKindGuess === 'function');

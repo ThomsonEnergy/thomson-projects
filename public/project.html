@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=142"></script>
+  <script src="/js/supabase-client.js?v=143"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -51,7 +51,7 @@
   <script src="/js/email-view.js?v=4"></script>
   <script src="/js/email-compose.js?v=13"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
-  <script src="/js/job-schedule.js?v=5"></script>
+  <script src="/js/job-schedule.js?v=6"></script>
   <script src="/js/job-contacts.js?v=6"></script>
   <script src="/js/share-with-client.js?v=1"></script>
   <script src="/js/rate-cards.js?v=2"></script>
@@ -792,30 +792,6 @@
       });
     }
 
-    function loadEditAddressAutocomplete(apiKey) {
-      if (!apiKey) return;
-      if (window.google && window.google.maps) { initEditAddressAutocomplete(); return; }
-      window._initEditAddressAutocomplete = initEditAddressAutocomplete;
-      if (document.getElementById('google-places-script')) return;
-      const script = document.createElement('script');
-      script.id = 'google-places-script';
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=_initEditAddressAutocomplete`;
-      script.async = true;
-      document.head.appendChild(script);
-    }
-
-    function initEditAddressAutocomplete() {
-      const input = document.getElementById('p-address');
-      if (!input) return;
-      const autocomplete = new google.maps.places.Autocomplete(input, {
-        componentRestrictions: { country: 'au' }, fields: ['formatted_address'], types: ['address'],
-      });
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place && place.formatted_address) input.value = place.formatted_address;
-      });
-    }
-
     function editorCostCentresHtml() {
       return `
         <div class="card">
@@ -842,7 +818,7 @@
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         render(project, true);
@@ -3246,7 +3222,7 @@
                   <div style="grid-column: span 2;">
                     <label>Site address</label>
                     <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
-                    <input id="p-address" placeholder="Where the work is done" value="${escapeHtml(project.client_address || '')}" />
+                    <input id="p-address" data-address placeholder="Where the work is done" value="${escapeHtml(project.client_address || '')}" />
                     <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
                   </div>
                   <div>
@@ -3507,17 +3483,16 @@
           await sitePicker.setClient(client);
         }
       }
-      loadEditAddressAutocomplete(companySettings.google_maps_api_key);
     }
 
     async function wireQuoteSteps(project) {
       try {
         // the steps save themselves: that file loads while the rest is wired, and is mounted last
-        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=1', () => typeof mountQuoteAutosave === 'function');
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=2', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
-            .select('default_terms, default_estimate_disclaimer, default_markup_percent, google_maps_api_key').eq('id', 1).single();
+            .select('default_terms, default_estimate_disclaimer, default_markup_percent').eq('id', 1).single();
           companySettings = settingsRow || {};
         }
         currentTemplate = project.proposal_template || 'new_build';
@@ -5733,7 +5708,7 @@
 
     async function loadJobStcs(project, centres) {
       const el = document.getElementById('job-stcs-list');
-      loadJsOnce('/js/formbay-card.js?v=1', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
+      loadJsOnce('/js/formbay-card.js?v=10', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
       const [r, s] = await Promise.all([
         supabaseClient.from('job_stcs').select('*, formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').eq('project_id', project.id).order('created_at'),
         jobStcSettings ? Promise.resolve({ data: jobStcSettings }) : supabaseClient.from('company_settings').select('stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),
@@ -7697,6 +7672,7 @@
             </div>
           </div>`;
 
+        loadFormbayNote().then(() => formbayInstallerNote(project.id, overlay.querySelector('#sched-msg')));   // who must be on site for the Formbay photos
         overlay.querySelector('#sched-close-btn').addEventListener('click', () => { overlay.remove(); if (window.loadJobSchedule) loadJobSchedule(project); });
         overlay.querySelectorAll('.sched-remove').forEach(btn => btn.addEventListener('click', async () => {
           const b = (booked || []).find(x => x.id === btn.dataset.id);

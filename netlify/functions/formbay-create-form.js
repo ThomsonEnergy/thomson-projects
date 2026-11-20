@@ -1,13 +1,13 @@
 // POST /.netlify/functions/formbay-create-form  (pricing roles; the job's STCs tab, public/js/formbay-card.js)
-//   { action: 'options', projectId }                  people, battery brands and the job's details for the panel
-//   { action: 'series', brand } / { action: 'models', brand, series }   Formbay's own battery lists
-//   { action: 'create', projectId, fields }           make the battery (BSTC) form in Formbay as a draft
+//   { action: 'options', projectId }                  people, brands and the job's details for the panel
+//   { action: 'list', list, brand, series }           Formbay's own panel, inverter and battery lists
+//   { action: 'create', projectId, fields }           make the solar, battery or solar and battery form in Formbay as a draft
 // Create is the only thing in the app that writes to Formbay. It signs and submits nothing: those
 // stay in Formbay's app, as they are the installer's declaration. The how is in _shared/formbay-sync.js.
 
 const { requirePricingRole } = require('./_shared/require-pricing-role');
-const { formbayLogin, formbayCall } = require('./_shared/formbay');
-const { createOptions, createForm } = require('./_shared/formbay-sync');
+const { formbayLogin } = require('./_shared/formbay');
+const { createOptions, createForm, equipmentList } = require('./_shared/formbay-sync');
 
 const answer = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 
@@ -22,12 +22,7 @@ exports.handler = async (event) => {
 
   try {
     const token = await formbayLogin();
-    if (action === 'series' || action === 'models') {
-      const q = new URLSearchParams({ b_brand: String(input.brand || ''), bstc: 1 });
-      if (action === 'models') q.set('b_series', String(input.series || ''));
-      const r = await formbayCall(token, `pv_inverter_battery_${action}?${q}`);
-      return answer(200, Array.isArray(r.json) ? { ok: true, list: r.json } : { ok: false, error: 'Formbay did not send its list. Try again.' });
-    }
+    if (action === 'list') return answer(200, await equipmentList(token, input.list, input));
     if (!projectId) return answer(400, { ok: false, error: 'projectId is required' });
     if (action === 'options') return answer(200, await createOptions(db, token, projectId));
     if (action === 'create') return answer(200, await createForm(db, token, { projectId, userId: auth.user.id, f: input.fields || {} }));

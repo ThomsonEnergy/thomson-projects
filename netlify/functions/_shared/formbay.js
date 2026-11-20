@@ -44,13 +44,30 @@ async function formbayCall(token, path, { form = null, json = null, timeout = 20
   }
 }
 
-// One document or photo off a battery form, as bytes. Formbay answers with the address of the file.
-async function formbayFile(token, fileId) {
-  const res = await fetch(`${TRADING}/client_api/bstc_doc?fileid=${encodeURIComponent(fileId)}`, {
+// One edit to a form that exists, through Formbay's /jobs calls (they take answers client_api's create
+// does not, such as the battery's location). Each has its own media type. Returns { status, json, text }.
+async function formbayPatch(token, path, mediaType, body) {
+  try {
+    const res = await fetch(`${TRADING}/jobs/${path}`, {
+      method: 'PATCH', headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'Content-Type': mediaType },
+      body: JSON.stringify(body), timeout: 20000,
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
+    return { status: res.status, json, text: json === null ? text.slice(0, 2000) : null };
+  } catch (err) {
+    return { status: null, json: null, text: String(err.message || err) };
+  }
+}
+
+// One document or photo off a form ('pv' or 'bstc'), as bytes. Formbay answers with the address of the file.
+async function formbayFile(token, ftype, fileId) {
+  const res = await fetch(`${TRADING}/client_api/${ftype === 'pv' ? 'pv_doc' : 'bstc_doc'}?fileid=${encodeURIComponent(fileId)}`, {
     headers: { Authorization: `Bearer ${token}` }, timeout: 45000, size: 30 * 1024 * 1024,
   });
   if (!res.ok) throw new Error(`Formbay file ${fileId}: HTTP ${res.status}`);
   return { bytes: await res.buffer(), type: (res.headers.get('content-type') || '').split(';')[0] };
 }
 
-module.exports = { formbayLogin, formbayCall, formbayFile };
+module.exports = { formbayLogin, formbayCall, formbayPatch, formbayFile };
