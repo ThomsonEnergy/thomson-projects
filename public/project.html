@@ -3803,7 +3803,7 @@
 
     function render(project, pricingVisible) {
       const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
-      const { directRate, indirectRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal } = stageMoney(centres);
+      const { directRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal } = stageMoney(centres);
       const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);

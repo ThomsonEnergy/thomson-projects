@@ -26,7 +26,6 @@ const QUOTE_AUTOSAVE_LEFT_MS = 150;    // after a box is left, or a tick or pick
 const QUOTE_AUTOSAVE_POLL_MS = 2000;   // catches boxes filled by code (the AI scope, Pylon, a removed row)
 const QUOTE_AUTOSAVE_SETTLE_MS = 8000; // quiet time before the PDF and the ready check are redone
 const QUOTE_AUTOSAVE_OPENING_MS = 1500; // boxes the page is still filling in just after it opens are not changes
-const QUOTE_AUTOSAVE_LOG_MS = 45000;   // quiet time before stage changes go in the activity log, as one lot
 const QUOTE_SAVE_POINTS_KEPT = 10;
 const QUOTE_SAVE_POINT_WHY = {
   opened: 'when the quote was opened',
@@ -64,10 +63,12 @@ async function quoteAutosaveSavePoint(reason) {
 window.addEventListener('beforeunload', (e) => {
   if (quoteAutosaveLive && quoteAutosaveLive.unsaved()) { e.preventDefault(); e.returnValue = ''; }
 });
-// A phone that switches app may never come back to this tab: save now. A client name or site address
-// still being typed waits all the same, so half a name never becomes a client or a site.
+// A phone that switches app may never come back to this tab: save now, then do what normally
+// waits for things to go quiet (the PDF, the activity log). A client name or site address still
+// being typed waits all the same, so half a name never becomes a client or a site.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && quoteAutosaveLive) quoteAutosaveLive.flush();
+  const live = quoteAutosaveLive;
+  if (document.visibilityState === 'hidden' && live) live.flush().then(() => live.settleNow());
 });
 window.addEventListener('pagehide', () => { if (quoteAutosaveLive) quoteAutosaveLive.settleNow(); });
 window.addEventListener('online', () => { if (quoteAutosaveLive) quoteAutosaveLive.retry(); });
@@ -518,7 +519,6 @@ function mountQuoteAutosave({ project, page }) {
         s.failed = null;
         changed.add(s.key);
         if (s.key === 'scope') summaryDue = true;
-        if (s === stagesStep) logSoon();
         if (s.after) s.after(s.saved, before);
         reload = !!result.reload;
         settleSoon();
@@ -573,19 +573,17 @@ function mountQuoteAutosave({ project, page }) {
     const did = new Set(changed);
     changed.clear();
     if (['client', 'answers', 'pricing', 'stages', 'scope'].some(k => did.has(k)) && (project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+    if (did.has('stages')) logStages();
     if (dead) return;
     if (did.has('stages')) page.stagesSettled();
     page.readyCheck();
   }
 
-  // ----- the activity log hears about stage changes as one lot, once they have been quiet a while -----
+  // The activity log hears about stage changes as one lot when they go quiet, not once per
+  // keystroke pause: what was added, removed, renamed or repriced since it last heard.
   const stagesStep = steps.find(s => s.key === 'stages');
   let loggedStages = null; // the stages as the log last heard them (set at the first stage save)
-  let logTimer = null;
-  function logSoon() { clearTimeout(logTimer); logTimer = setTimeout(logStages, QUOTE_AUTOSAVE_LOG_MS); }
   async function logStages() {
-    clearTimeout(logTimer);
-    logTimer = null;
     const now = stagesStep && stagesStep.saved;
     if (!Array.isArray(now) || !loggedStages || quoteCanon(now) === quoteCanon(loggedStages)) return;
     const before = loggedStages;
@@ -659,11 +657,10 @@ function mountQuoteAutosave({ project, page }) {
     attached: () => !dead && document.body.contains(steps[0].card),
     unsaved: () => !gone() && steps.some(s => s.inFlight || dirty(s)),
     retry: () => steps.forEach(s => { if (s.failed) run(s, { force: true }); }),
-    settleNow: () => { if (settleTimer) settle(); if (logTimer) logStages(); },
+    settleNow: () => { if (settleTimer) settle(); },
     destroy() {
       if (dead) return;
-      if (settleTimer) settle(); // the PDF still follows what was saved
-      if (logTimer) logStages();
+      if (settleTimer) settle(); // the PDF and the activity log still follow what was saved
       dead = true;
       steps.forEach(s => clearTimeout(s.timer));
       clearTimeout(openingTimer);
