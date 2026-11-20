@@ -1,33 +1,36 @@
-// The quote steps save themselves (backlog item 99, owner 18 Nov 2026). Every box on the Quote
-// tab's steps (Quote and client, Pre-quote information, Site visit, the Pricing card's own boxes,
-// Scope of works) saves about a second after typing stops and when the box is left. Each step
+// The quote steps save themselves (backlog item 99, owner 18 and 20 Nov 2026). Every box on the
+// Quote tab's steps (Quote and client, Pre-quote information, Site visit, Pricing with its stage
+// table, Scope of works) saves about a second after typing stops and when the box is left. Each step
 // says Saving, Saved with the time, or Not saved with Try again, and warns before the page is
 // left with something not yet saved. Undo puts one step back to a save point: a snapshot of
 // every step, made by itself when the quote is opened and then changed, just before the AI
-// writes the scope, and just before an Undo (so an Undo can be undone). The newest 10 per quote
-// are kept in quote_save_points.
+// writes the scope or suggests prebuilds, and just before an Undo (so an Undo can be undone).
+// The newest 10 per quote are kept in quote_save_points.
 //
 // Who calls it: project.html, which loads this file when a quote's steps are on screen.
 // wireQuoteSteps() ends with mountQuoteAutosave({ project, page }), where page is the handful of
 // things only the page knows (which client is linked, the answers, the milestone rows, the
 // supporting documents, the stage table). loadProject() awaits quoteAutosaveFlush() so nothing
-// typed is lost when the page redraws, and the AI scope button awaits
-// quoteAutosaveSavePoint('ai_scope') before it writes.
+// typed is lost when the page redraws, and the AI buttons await quoteAutosaveSavePoint(reason)
+// before they write.
 //
 // Writes: projects (each step's own columns), clients (a new client, that client's details while
 // this page stays open, payment terms), client_sites (through resolveClientSite),
-// payment_milestones, quote_save_points. The stage table (stage names, descriptions, line items,
-// prices) is NOT saved here: it is money, so it still saves all in one go with Save pricing, and
-// this file only says when it has changes not yet saved.
+// payment_milestones, quote_save_points, activity_log (what changed on the stages, once things
+// go quiet). The stage table (stage names, descriptions, line items, prices) is money, so it is
+// not written piece by piece: every save sends all the stages to the database function
+// save_quote_stages, which saves all of them or none.
 
 const QUOTE_AUTOSAVE_TYPING_MS = 1000; // after the last keystroke
 const QUOTE_AUTOSAVE_LEFT_MS = 150;    // after a box is left, or a tick or pick changes
 const QUOTE_AUTOSAVE_POLL_MS = 2000;   // catches boxes filled by code (the AI scope, Pylon, a removed row)
 const QUOTE_AUTOSAVE_SETTLE_MS = 8000; // quiet time before the PDF and the ready check are redone
+const QUOTE_AUTOSAVE_OPENING_MS = 1500; // boxes the page is still filling in just after it opens are not changes
 const QUOTE_SAVE_POINTS_KEPT = 10;
 const QUOTE_SAVE_POINT_WHY = {
   opened: 'when the quote was opened',
   ai_scope: 'before the AI wrote the scope',
+  ai_prebuilds: 'before the AI suggested prebuilds',
   undo: 'before an Undo',
 };
 
@@ -35,16 +38,46 @@ let quoteAutosaveLive = null;      // the quote steps now on screen
 let quoteTypedEarly = false;       // something was typed before the steps were ready: save it all once
 const quoteClientsMadeHere = {};   // quote id -> the client this page made for it
 
-// Saves everything typed and waits for it. The page calls this before it reloads the quote, so a
-// save that would redraw the quote (a new proposal type) leaves the redraw to the caller.
-// Gives back what could not be saved, as [{ label, why, waitsForStages }]: nothing when all of it is in.
-async function quoteAutosaveFlush() {
-  return quoteAutosaveLive ? quoteAutosaveLive.flush({ callerReloads: true }) : [];
+// Saves everything typed and waits for it. Gives back what could not be saved, as
+// [{ label, why }]: nothing when all of it is in. The page calls this before it reloads the
+// quote (callerReloads: a save that would redraw the quote, a new proposal type, leaves the
+// redraw to the caller) and before it makes a PDF or emails the quote.
+async function quoteAutosaveFlush({ callerReloads = false } = {}) {
+  return quoteAutosaveLive ? quoteAutosaveLive.flush({ callerReloads }) : [];
 }
 
-// Save pricing has just saved the stage table: it has no unsaved changes now.
-function quoteAutosaveStagesSaved() {
-  if (quoteAutosaveLive) quoteAutosaveLive.stagesSaved();
+// Stages out of a save point, made safe to draw: numbers are numbers, ids look like ids, and
+// every line has an id of its own (the row drawing tells a stage's lines apart by id).
+function quoteCleanStages(stages) {
+  const num = (v) => { const n = Number(v); return v === null || v === undefined || v === '' || !Number.isFinite(n) ? null : n; };
+  const uuid = (v) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || '')) ? String(v) : '');
+  return (Array.isArray(stages) ? stages : []).map(st => ({
+    id: uuid(st.id), name: String(st.name || ''), description: String(st.description || ''),
+    markup_percent: num(st.markup_percent), stc_total: num(st.stc_total) || 0, stc_quantity: num(st.stc_quantity),
+    stc_system_kw: num(st.stc_system_kw), stc_zone_rating: num(st.stc_zone_rating), stc_install_year: num(st.stc_install_year),
+    stc_price_per_certificate: num(st.stc_price_per_certificate),
+    lineItems: (Array.isArray(st.lineItems) ? st.lineItems : []).map(li => ({
+      id: quoteNewId(), description: String(li.description || ''), item_type: li.item_type === 'labour' ? 'labour' : 'material',
+      quantity: num(li.quantity) || 0, unit_cost: num(li.unit_cost) || 0, rate_tier_id: uuid(li.rate_tier_id),
+      prebuild_group_id: uuid(li.prebuild_group_id) || null, prebuild_client_description: String(li.prebuild_client_description || ''),
+      prebuild_base_quantity: num(li.prebuild_base_quantity), ai_suggested: !!li.ai_suggested,
+    })),
+    photoGroups: (Array.isArray(st.photoGroups) ? st.photoGroups : []).map(pg => ({
+      description: String(pg.description || ''),
+      photos: (Array.isArray(pg.photos) ? pg.photos : []).map(ph => String((ph && ph.url) || (typeof ph === 'string' ? ph : ''))).filter(Boolean),
+    })),
+  }));
+}
+
+// An id for a stage made on the page. The page gives a new stage its id, so a save that is sent
+// twice (a dropped reply, Try again) updates the stage instead of adding a second one.
+function quoteNewId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 // Saves everything typed, then keeps a save point of the quote as it is now.
@@ -55,10 +88,12 @@ async function quoteAutosaveSavePoint(reason) {
 window.addEventListener('beforeunload', (e) => {
   if (quoteAutosaveLive && quoteAutosaveLive.unsaved()) { e.preventDefault(); e.returnValue = ''; }
 });
-// A phone that switches app may never come back to this tab: save now. A client name or site address
-// still being typed waits all the same, so half a name never becomes a client or a site.
+// A phone that switches app may never come back to this tab: save now, then do what normally
+// waits for things to go quiet (the PDF, the activity log). A client name or site address still
+// being typed waits all the same, so half a name never becomes a client or a site.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && quoteAutosaveLive) quoteAutosaveLive.flush();
+  const live = quoteAutosaveLive;
+  if (document.visibilityState === 'hidden' && live) live.flush().then(() => live.settleNow());
 });
 window.addEventListener('pagehide', () => { if (quoteAutosaveLive) quoteAutosaveLive.settleNow(); });
 window.addEventListener('online', () => { if (quoteAutosaveLive) quoteAutosaveLive.retry(); });
@@ -251,8 +286,8 @@ function quoteStepDefs(project, page) {
         : p.site_visit_decision === 'not_needed' ? `No site visit needed${p.site_visit_reason ? `: ${short(p.site_visit_reason, 60)}` : ''}` : 'Not decided'),
     },
     {
-      // The Pricing card's own boxes. The stage table saves with Save pricing.
-      key: 'pricing', label: 'Pricing boxes', card: el('qstep-3'), head: el('qstep-3-head'),
+      // The Pricing card's own boxes: deposit, credits, Pylon, payment stages.
+      key: 'pricing', label: 'Pricing boxes', card: el('qstep-3'), head: el('qstep-3-head'), foot: false,
       read: () => {
         const num = (id) => { const v = parseFloat(val(id)); return Number.isFinite(v) ? v : null; };
         return {
@@ -297,6 +332,37 @@ function quoteStepDefs(project, page) {
       },
     },
     {
+      // The stage table: stage names, descriptions, line items, markup and prices. Money, so one
+      // database function saves all the stages or none. A longer pause than text, so half a
+      // typed price is saved less often.
+      key: 'stages', label: 'Stages and prices', card: el('qstep-3'), head: el('qstage-head'), foot: 'Stages and prices', typingMs: 1500,
+      read: () => page.stages(),
+      waits: () => page.stagesProblem(),
+      save: async (p, before) => {
+        // Only stages this page has seen are ever removed: one added meanwhile in another tab, or
+        // by someone else, is not on this page and is left alone.
+        const seen = (Array.isArray(before) ? before : (project.cost_centres || [])).map(st => st.id).filter(Boolean);
+        const here = new Set(p.map(st => st.id));
+        const { error } = await supabaseClient.rpc('save_quote_stages', { p_project_id: project.id, p_stages: p, p_remove: seen.filter(id => !here.has(id)) });
+        if (error) throw error;
+      },
+      after: (saved) => {
+        // the quote in memory follows what was saved, so the header totals, the step tick and the PDF check are right without a reload
+        const was = Object.fromEntries((project.cost_centres || []).map(c => [c.id, c]));
+        project.cost_centres = saved.map(({ lineItems, photoGroups, ...stage }) => ({
+          ...(was[stage.id] || {}), ...stage, project_id: project.id,
+          cost_centre_line_items: lineItems, cost_centre_photo_groups: photoGroups,
+        }));
+        page.stagesSaved();
+        tick(3, 'Pricing');
+      },
+      apply: (p) => page.setStages(quoteCleanStages(p)),
+      preview: (p) => {
+        const total = p.reduce((sum, st) => sum + (Number(st.quoted_amount) || 0), 0);
+        return `${p.length} stage${p.length === 1 ? '' : 's'}, ${money(total)} ex GST: ${short(p.map(st => st.name).join(', '), 70)}`;
+      },
+    },
+    {
       key: 'scope', label: 'Scope of works', card: el('qstep-4'), head: el('qstep-4-head'),
       read: () => ({ sow_brief: val('p-brief').trim(), sow_text: val('p-sow'), terms_text: val('p-terms'), sow_documents: page.sowDocs().map(d => ({ ...d })) }),
       save: (p) => saveProject(p),
@@ -323,9 +389,14 @@ function mountQuoteAutosave({ project, page }) {
   let dead = false;
   let settleTimer = null;
   let summaryDue = false;      // the scope changed: the installer summary is rewritten once the scope box is left
+  let tabsStale = false;       // the stages changed: the other tabs (Summary, Cost Centres) still show the old ones
   const changed = new Set();   // steps saved since the PDF and ready check were last redone
   const read = (s) => { try { return s.read(); } catch (e) { console.error(`Quote autosave: could not read ${s.key}`, e); return s.saved; } };
-  const dirty = (s) => quoteCanon(read(s)) !== s.savedJson;
+  // Something typed that cannot go into a save yet (a stage with lines and no name is left out of
+  // what is read, so it would not show as a change): the step says why and counts as unsaved.
+  const waiting = (s) => { const why = s.waits ? s.waits() : null; return typeof why === 'string' ? why : null; };
+  const dirty = (s) => waiting(s) !== null || quoteCanon(read(s)) !== s.savedJson;
+  const stuck = (s) => !!s.failed || waiting(s) !== null || (!!s.hold && typeof s.hold(read(s), s.saved) === 'string');
   // The page was redrawn: these steps are off the page, and the boxes with their ids now belong to
   // the new steps (which may still be filling in). Nothing here reads or saves from then on.
   const gone = () => { if (!dead && !document.body.contains(steps[0].card)) api.destroy(); return dead; };
@@ -383,7 +454,10 @@ function mountQuoteAutosave({ project, page }) {
   function paint(s) {
     if (dead || !s.states) return;
     const html = stateHtml(s);
-    s.states.forEach(st => { if (st.innerHTML !== html) st.innerHTML = html; });
+    s.states.forEach(st => {
+      const text = st === s.footEl && typeof s.foot === 'string' && html ? `${escapeHtml(s.foot)}: ${html}` : html;
+      if (st.html !== text) { st.html = text; st.innerHTML = text; }
+    });
     s.undoBtn.style.display = pointsOk ? '' : 'none';
     s.undoBtn.disabled = !undoChoices(s).length;
     s.undoBtn.title = s.undoBtn.disabled ? 'Nothing to go back to yet. A save point is made when the quote is opened and before the AI writes.' : `Put ${s.label} back to a save point`;
@@ -451,14 +525,19 @@ function mountQuoteAutosave({ project, page }) {
   function run(s, opts = {}) {
     if (gone()) return Promise.resolve();
     if (s.inFlight) { s.again = true; return s.promise; }
+    const waits = waiting(s);
+    if (waits !== null) { s.held = waits; paint(s); return Promise.resolve(); }
     const p = read(s);
     const json = quoteCanon(p);
     if (json === s.savedJson) { s.held = null; s.failed = null; paint(s); return Promise.resolve(); }
     if (s.failed && s.failed.json === json && !opts.force) return Promise.resolve(); // the same thing that just failed: wait for Try again or the connection
     let why = s.hold ? s.hold(p, s.saved) : null;
-    // a save that redraws the whole quote would drop stage rows not yet saved
-    s.waitsForStages = typeof why !== 'string' && !!s.redraws && s.redraws(p, s.saved) && stagesUnsaved();
-    if (s.waitsForStages) why = 'Not saved yet: press Save pricing first, a new proposal type redraws the quote';
+    // A save that redraws the whole quote (a new proposal type) would drop what another step has
+    // typed and cannot save yet. What can save does so first: the redraw waits for it.
+    if (typeof why !== 'string' && s.redraws && s.redraws(p, s.saved)) {
+      const first = steps.find(o => o !== s && dirty(o) && stuck(o));
+      if (first) why = `Not saved yet: ${first.label} has to save first, a new proposal type redraws the quote`;
+    }
     if (typeof why === 'string') { s.held = why; paint(s); return Promise.resolve(); }
     s.held = null;
     s.inFlight = true;
@@ -468,6 +547,7 @@ function mountQuoteAutosave({ project, page }) {
       let reload = false;
       try {
         const before = s.saved;
+        if (s === stagesStep && !loggedStages) loggedStages = Array.isArray(before) ? before : (project.cost_centres || []).map(c => ({ ...c }));
         const result = (await s.save(p, before)) || {};
         s.saved = result.payload || p;
         s.savedJson = quoteCanon(s.saved);
@@ -475,6 +555,7 @@ function mountQuoteAutosave({ project, page }) {
         s.failed = null;
         changed.add(s.key);
         if (s.key === 'scope') summaryDue = true;
+        if (s === stagesStep) tabsStale = true;
         if (s.after) s.after(s.saved, before);
         reload = !!result.reload;
         settleSoon();
@@ -493,7 +574,7 @@ function mountQuoteAutosave({ project, page }) {
     })();
     return s.promise;
   }
-  // Saves what can be saved and gives back what could not: [{ label, why }].
+  // Saves what can be saved, waits for it, and gives back what could not be: [{ label, why }].
   async function flush(opts = {}) {
     if (gone()) return [];
     steps.forEach(s => { clearTimeout(s.timer); s.timer = null; s.typing = false; });
@@ -501,10 +582,7 @@ function mountQuoteAutosave({ project, page }) {
     await Promise.all(steps.map(s => run(s, { force: true, callerReloads: !!opts.callerReloads })));
     await Promise.all(steps.map(s => s.promise));
     if (gone()) return [];
-    return steps.filter(dirty).map(s => ({
-      label: s.label, waitsForStages: !!s.waitsForStages,
-      why: (s.failed ? s.failed.message : s.held || 'still saving').replace(/^Not saved yet: /, ''),
-    }));
+    return steps.filter(dirty).map(s => ({ label: s.label, why: (s.failed ? s.failed.message : s.held || 'it is still saving').replace(/^Not saved yet: /, '') }));
   }
   async function savePoint(reason) {
     if (gone()) return;
@@ -531,36 +609,30 @@ function mountQuoteAutosave({ project, page }) {
       }
     }
     if (!changed.size) return;
-    const onProposal = ['client', 'answers', 'pricing', 'scope'].some(k => changed.has(k));
+    const did = new Set(changed);
     changed.clear();
-    if (onProposal && (project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
-    if (!dead) page.readyCheck();
+    if (['client', 'answers', 'pricing', 'stages', 'scope'].some(k => did.has(k)) && (project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
+    if (did.has('stages')) logStages();
+    if (dead) return;
+    if (did.has('stages')) page.stagesSettled();
+    page.readyCheck();
   }
 
-  // ----- the stage table: still saved with Save pricing, this only says when it has changes -----
-  const stagesBtn = document.getElementById('qs3-save');
-  const stagesText = () => { try { return quoteCanon(page.stages()); } catch (e) { return null; } };
-  let stagesBase = stagesBtn ? stagesText() : null;
-  let stagesTouched = false;
-  let stagesNote = null;
-  const stagesUnsaved = () => { const now = stagesBase === null ? null : stagesText(); return now !== null && now !== stagesBase; };
-  function paintStages() {
-    if (!stagesNote) return;
-    const html = stagesUnsaved()
-      ? '<span style="color:var(--amber, #92400e);">Stage changes are not saved yet. Press Save pricing.</span>'
-      : 'Stages and prices save with this button. The other boxes on this card save themselves.';
-    if (stagesNote.innerHTML !== html) stagesNote.innerHTML = html;
-  }
-  if (stagesBtn) {
-    stagesNote = document.createElement('span');
-    stagesNote.className = 'subtitle';
-    stagesNote.style.cssText = 'font-size:12px; margin-left:8px;';
-    stagesBtn.insertAdjacentElement('afterend', stagesNote);
-    const card = document.getElementById('qstep-3');
-    ['pointerdown', 'keydown'].forEach(ev => card.addEventListener(ev, () => { stagesTouched = true; }, true));
-    // rows that finish drawing just after the page opens are part of what was opened, not a change
-    setTimeout(() => { if (!dead && !stagesTouched) stagesBase = stagesText(); }, 1500);
-    paintStages();
+  // The activity log hears about stage changes as one lot when they go quiet, not once per
+  // keystroke pause: what was added, removed, renamed or repriced since it last heard.
+  const stagesStep = steps.find(s => s.key === 'stages');
+  let loggedStages = null; // the stages as the log last heard them (set at the first stage save)
+  async function logStages() {
+    const now = stagesStep && stagesStep.saved;
+    if (!Array.isArray(now) || !loggedStages || quoteCanon(now) === quoteCanon(loggedStages)) return;
+    const before = loggedStages;
+    loggedStages = now;
+    const known = new Set(before.map(st => st.id));
+    try {
+      // logStageChanges reads a stage with no id as added
+      await logStageChanges(project.id, before, now.map(st => (known.has(st.id) ? st : { ...st, id: null })));
+      await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
+    } catch (e) { console.error('Stage changes not logged:', e); }
   }
 
   // ----- wire each step -----
@@ -578,18 +650,23 @@ function mountQuoteAutosave({ project, page }) {
     s.bar.style.cssText = 'position:relative; display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);';
     s.bar.innerHTML = '<span class="qas-state" role="status" aria-live="polite"></span><button type="button" class="secondary qas-undo" style="font-size:12px; padding:6px 10px;" disabled>Undo</button>';
     (head || s.card).appendChild(s.bar);
-    // the same line again where the Save button used to be, in reach of the boxes at the bottom of a long card
-    const foot = document.createElement('div');
-    foot.className = 'qas-state';
-    foot.style.cssText = 'margin-top:10px; font-size:12px; color:var(--muted); min-height:18px;';
-    s.card.appendChild(foot);
-    s.states = [s.bar.querySelector('.qas-state'), foot];
+    s.states = [s.bar.querySelector('.qas-state')];
+    if (s.foot !== false) {
+      // the same line again where the Save button used to be, in reach of the boxes at the bottom of a long
+      // card (named when two steps share the card)
+      s.footEl = document.createElement('div');
+      s.footEl.className = 'qas-state';
+      s.footEl.style.cssText = 'margin-top:10px; font-size:12px; color:var(--muted); min-height:18px;';
+      s.card.appendChild(s.footEl);
+      s.states.push(s.footEl);
+    }
     s.undoBtn = s.bar.querySelector('.qas-undo');
     s.undoBtn.addEventListener('click', () => openMenu(s));
     s.states.forEach(st => st.addEventListener('click', (e) => { if (e.target.closest('.qas-retry')) run(s, { force: true }); }));
-    s.card.addEventListener('input', () => schedule(s, QUOTE_AUTOSAVE_TYPING_MS, true));
+    s.card.addEventListener('input', () => { s.touched = true; schedule(s, s.typingMs || QUOTE_AUTOSAVE_TYPING_MS, true); });
     ['change', 'focusout', 'click'].forEach(ev => s.card.addEventListener(ev, (e) => {
       if (e.target.closest('.qas-undo, .qas-point, .qas-retry')) return;
+      s.touched = true;
       schedule(s, QUOTE_AUTOSAVE_LEFT_MS, s.typing);
       if (s.key === 'scope' && ev === 'focusout' && summaryDue) settleSoon();
     }));
@@ -598,26 +675,43 @@ function mountQuoteAutosave({ project, page }) {
   const opened = typedEarly ? { stored: true } : { taken_at: new Date().toISOString(), reason: 'opened', snapshot: snapshotNow(), stored: false };
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onDocKey);
+  // The other tabs were drawn when the page opened. Once the stages have changed, opening one
+  // reads the quote again and redraws, the way Save pricing used to straight after each save.
+  const tabs = document.getElementById('job-tabs');
+  if (tabs) tabs.addEventListener('click', (e) => {
+    const tab = e.target.closest('.settings-tab');
+    if (!tab || tab.dataset.panel === 'quote' || !tabsStale || dead) return;
+    tabsStale = false;
+    page.reload(tab.dataset.panel);
+  });
+
+  // Boxes the page is still filling in just after it opens (stage rows that finish drawing, a tick
+  // the page sets itself) are part of the quote as opened, not a change to save.
+  const openingTimer = setTimeout(() => {
+    if (gone() || typedEarly) return;
+    steps.forEach(s => { if (!s.touched && !s.inFlight && !s.timer) { s.saved = read(s); s.savedJson = quoteCanon(s.saved); } });
+    if (!opened.stored && !opened.storing) opened.snapshot = snapshotNow();
+    steps.forEach(paint);
+  }, QUOTE_AUTOSAVE_OPENING_MS);
 
   const poll = setInterval(() => {
     if (gone()) return;
     steps.forEach(s => { if (!s.timer && !s.inFlight) run(s); });
-    paintStages();
   }, QUOTE_AUTOSAVE_POLL_MS);
 
   const api = {
     flush,
     savePoint,
     attached: () => !dead && document.body.contains(steps[0].card),
-    stagesSaved: () => { if (stagesBtn) { stagesBase = stagesText(); stagesTouched = true; paintStages(); } },
-    unsaved: () => !gone() && (steps.some(s => s.inFlight || dirty(s)) || stagesUnsaved()),
+    unsaved: () => !gone() && steps.some(s => s.inFlight || dirty(s)),
     retry: () => steps.forEach(s => { if (s.failed) run(s, { force: true }); }),
     settleNow: () => { if (settleTimer) settle(); },
     destroy() {
       if (dead) return;
-      if (settleTimer) settle(); // the PDF still follows what was saved
+      if (settleTimer) settle(); // the PDF and the activity log still follow what was saved
       dead = true;
       steps.forEach(s => clearTimeout(s.timer));
+      clearTimeout(openingTimer);
       clearInterval(poll);
       closeMenu();
       document.removeEventListener('click', onDocClick);
