@@ -10,7 +10,7 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 
 - **WA and remote work (owner, 20 Nov 2026).** We also hold WA electrical contractor licence EC17853 and have a warehouse in Kenwick, Perth. WA work is statewide: promote the commercial side (large commercial, mining and industrial sites, off-grid power for stations and remote properties, mostly remote and off-grid). Never say we don't install homes in Perth (owner: "we will if we can make it work but just don't boast it"). Our electricians do FIFO (fly-in fly-out) work on mining and industrial sites. Remote work is the specialty in all three states: for a big enough job we go anywhere in NSW, QLD or WA. Homes and everyday electrical work stay in the Tweed, Northern Rivers and Gold Coast. The network lists above stay NSW and QLD (WA work is off-grid).
 - **Panels (owner, 20 Nov 2026).** Winaico is the brand we recommend, not the only one: we also install TCL and JA Solar and can get almost any panel a customer prefers.
-- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and home batteries roughly 50 cents a watt-hour (about $500 per kWh) installed. The public website quotes these per kW and per kWh.
+- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and a 9 kWh home battery starts from $8,000 installed after the federal battery (BSTC) rebate, with extra storage roughly 50 cents a watt-hour (about $500 per kWh). The older, dearer battery ranges on the website were out of date and are retired. The public website quotes these per kW and per kWh.
 
 ## Xero
 
