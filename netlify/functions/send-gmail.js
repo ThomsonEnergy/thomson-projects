@@ -25,6 +25,7 @@ const { sharedMailbox, mailboxById, canUseMailbox, deleteGmailDraft } = require(
 const { signatureForUser } = require('./_shared/build-email-signature');
 const { sendRecordedEmail } = require('./_shared/send-recorded-email');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { startPushWhenEmailed } = require('./_shared/push-invoice-to-xero');
 
 const ALLOWED_BUCKETS = ['email-attachments', 'project-documents', 'site-photos'];
 const MAX_FILES = 10;
@@ -147,6 +148,9 @@ exports.handler = async (event) => {
     // foreign key and is logged, nothing else)
     if (invoiceEvent && PRICING_ROLES.includes(auth.role) && UUID.test(invoiceEvent.invoiceId || '') && ['emailed', 'reminder'].includes(invoiceEvent.kind)) {
       await logInvoiceEvent(supabaseAdmin, { invoiceId: invoiceEvent.invoiceId, kind: invoiceEvent.kind, actorId: user.id, emailThreadId: thread.id, detail: `To ${String(to).slice(0, 200)}` });
+      // emailed to the client: it goes to Xero by itself when it is not there yet (owner, 20 Nov 2026).
+      // Started in the background, so this send never waits on Xero or fails because of it.
+      await startPushWhenEmailed(invoiceEvent.invoiceId);
     }
 
     if (draftId && UUID.test(draftId)) {
