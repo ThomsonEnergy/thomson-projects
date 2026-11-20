@@ -1,20 +1,19 @@
 // Scheduled every 15 minutes (netlify.toml). Item 101 step 1: reads what Formbay holds for this
 // account and keeps each answer exactly as it came, so the form to job mapping (stage, serial numbers,
-// photos, documents, CCEW) is written from real forms. Read only: GET requests, nothing sent to Formbay.
+// photos, documents, CCEW) is written from real forms. Read only: nothing on a Formbay form changes
+// (GET requests, plus Formbay's document list, which is read with a POST).
 //
-// Reads: Formbay's own API documentation; the form lists; each recent form with its documents; the
-// installer lists; and the links the newer API (api.formbay.com.au) hands out.
-// Writes: formbay_webhook_events (finance roles read it), one row per address, event_type 'read.doc',
-// 'read.trading' or 'read.api', the address in formbay_job_id. An address already kept in the last
-// 6 hours is skipped, so a run with nothing new writes nothing.
+// Reads: every battery (BSTC) form with its stage, its details, its documents and its linked forms;
+// the people a form can be given to; the battery series and models of the brands on those forms.
+// Writes: formbay_webhook_events (finance roles read it), one row per address, event_type
+// 'read.trading', the address in formbay_job_id. An address already kept in the last 6 hours is
+// skipped, so a run with nothing new writes nothing.
 
 const { getAdminClient } = require('./_shared/require-admin');
-const { TRADING, API, formbayLogin, formbayGet, swaggerSpecFromHtml } = require('./_shared/formbay');
+const { TRADING, formbayLogin, formbayGet } = require('./_shared/formbay');
 
-const MAX_REQUESTS = 90;
-const FORMS_PER_LIST = 8;
-// Never call anything that could change a form, or that sends back a file rather than data.
-const NOT_A_READ = /zip|download|sdk|token|logout|delete|remove|submit|create|update|send|sign|validate|set_|save|upload|cancel|pay/i;
+const MAX_REQUESTS = 60;
+const MAX_FORMS = 10;
 
 exports.handler = async () => {
   const db = getAdminClient();
@@ -29,77 +28,60 @@ exports.handler = async () => {
 
   let requests = 0, stored = 0;
   // Read one address once, keep the answer, hand it back (null when skipped or over the limit).
-  const read = async (kind, url, { withToken = true } = {}) => {
-    if (kept.has(url) || requests >= MAX_REQUESTS) return null;
-    kept.add(url);
+  const read = async (path, form = null) => {
+    const url = `${TRADING}/client_api/${path}`;
+    const key = form ? `${url} POST ${new URLSearchParams(form)}` : url;
+    if (kept.has(key) || requests >= MAX_REQUESTS) return null;
+    kept.add(key);
     requests++;
-    const r = await formbayGet(url, withToken ? token : null);
+    const r = await formbayGet(url, token, { form });
     const { error } = await db.from('formbay_webhook_events').insert({
-      event_type: kind, formbay_job_id: url,
+      event_type: 'read.trading', formbay_job_id: key,
       payload: r.json !== null ? { status: r.status, body: r.json } : null,
       raw_body: r.json !== null ? null : `HTTP ${r.status}\n${r.text || ''}`,
     });
-    if (error) console.error('Formbay read: could not keep', url, error.message); else stored++;
+    if (error) console.error('Formbay read: could not keep', key, error.message); else stored++;
     return r;
   };
+  const q = (params) => new URLSearchParams(params).toString();
 
-  // 1. Formbay's documentation, so the mapping is written against their field list.
-  const docPage = await read('read.doc', `${TRADING}/formbay/documentation`, { withToken: false });
-  await read('read.doc', 'https://api-doc.formbay.com.au/', { withToken: false });
-  const spec = docPage && docPage.text ? swaggerSpecFromHtml(docPage.text) : null;
+  // The forms, newest first, with stage, signatures, what each is waiting on, sale and payment.
+  // (The second version of the list is kept under its own address, so a later run still reads the ids.)
+  await read(`bstc_form_list?${q({ version: 2, size: 100 })}`);
+  const idsRes = await formbayGet(`${TRADING}/client_api/bstc_form_list`, token);
+  const ids = (Array.isArray(idsRes.json) ? idsRes.json : []).slice(-MAX_FORMS);
 
-  // 2. The form lists, then each recent form.
-  const formIds = { pv: [], bstc: [] };
-  for (const ftype of Object.keys(formIds)) {
-    const r = await read('read.trading', `${TRADING}/client_api/${ftype}_form_list`);
-    const list = r && r.json;
-    const ids = (Array.isArray(list) ? list : (list && typeof list === 'object' ? Object.values(list).find(Array.isArray) || [] : []))
-      .map(x => (x && typeof x === 'object' ? (x.formid || x.form_id || x.id) : x)).filter(Boolean);
-    formIds[ftype] = ids.slice(-FORMS_PER_LIST);
-  }
-  for (const ftype of Object.keys(formIds)) {
-    for (const id of formIds[ftype]) {
-      const q = `formid=${encodeURIComponent(id)}`;
-      await read('read.trading', `${TRADING}/client_api/get_jobs?ftype=${ftype}&${q}`);
-      await read('read.trading', `${TRADING}/client_api/pv_form_docs?${q}`);
-      await read('read.trading', `${TRADING}/client_api/pv_docs_list?${q}`);
+  const clientsRes = await formbayGet(`${TRADING}/client_api/clients`, token);
+  const groupId = Array.isArray(clientsRes.json) ? clientsRes.json[0] : null;
+  if (groupId) await read(`ccew_contractors?${q({ group_id: groupId })}`);
+
+  const brands = new Map();
+  for (const id of ids) {
+    const formRes = await formbayGet(`${TRADING}/client_api/bstc_form?${q({ formid: id })}`, token);
+    for (const b of (formRes.json && formRes.json.batteries) || []) if (b.brand) brands.set(b.brand, b.series || b.b_series);
+    await read(`fb2_forms?${q({ ftype: 'bstc', formid: id })}`);
+    const docs = await read('bstc_docs_list', groupId ? { formid: id, group_id: groupId } : { formid: id });
+    // One document from each form, to see how a file comes back (the address, never the file itself).
+    const fileId = docs && firstValue(docs.json, ['fileid', 'file_id']);
+    if (fileId) {
+      await read(`bstc_doc?${q({ fileid: fileId })}`);
+      await read(`bstc_doc?${q({ fileid: fileId, stamp: 1 })}`);
     }
   }
-  for (const p of ['pv_installers', 'pv_electricians', 'pv_designers', 'clients']) await read('read.trading', `${TRADING}/client_api/${p}`);
-
-  // 3. Every other documented read that needs nothing, or only a form number (newest form of each type).
-  if (spec && spec.paths) {
-    const base = `${TRADING}${spec.basePath && spec.basePath !== '/' ? spec.basePath : ''}`;
-    for (const [path, ops] of Object.entries(spec.paths)) {
-      const op = ops && ops.get;
-      if (!op || path.includes('{') || NOT_A_READ.test(path) || NOT_A_READ.test(op.operationId || '')) continue;
-      const required = (op.parameters || []).filter(p => p.required && p.in === 'query').map(p => p.name);
-      if (required.some(n => !['formid', 'ftype'].includes(n))) continue;
-      const takesForm = (op.parameters || []).some(p => p.name === 'formid');
-      if (!takesForm) { await read('read.trading', `${base}${path}`); continue; }
-      for (const ftype of Object.keys(formIds)) {
-        const id = formIds[ftype][formIds[ftype].length - 1];
-        if (id) await read('read.trading', `${base}${path}?ftype=${ftype}&formid=${encodeURIComponent(id)}`);
-      }
-    }
+  for (const [brand, series] of brands) {
+    await read(`pv_inverter_battery_series?${q({ b_brand: brand, bstc: 1 })}`);
+    if (series) await read(`pv_inverter_battery_models?${q({ b_brand: brand, b_series: series, bstc: 1 })}`);
   }
 
-  // 4. The newer API answers with links to its other resources: follow them, one of each kind.
-  const kindOf = (u) => u.replace(/\/\d+(?=\/|\?|$)/g, '/{id}');
-  const seenKinds = new Set();
-  const queue = [`${API}/entrypoint`];
-  const linksIn = (v, out) => {
-    if (typeof v === 'string') { if (v.startsWith(API) && !NOT_A_READ.test(v)) out.add(v.split('#')[0]); }
-    else if (Array.isArray(v)) v.slice(0, 5).forEach(x => linksIn(x, out));
-    else if (v && typeof v === 'object') Object.values(v).forEach(x => linksIn(x, out));
-    return out;
-  };
-  for (let n = 0; queue.length && n < 30; n++) {
-    const r = await read('read.api', queue.shift());
-    if (!r || r.json === null) continue;
-    for (const l of linksIn(r.json, new Set())) { const k = kindOf(l); if (!seenKinds.has(k)) { seenKinds.add(k); queue.push(l); } }
-  }
-
-  console.log(`Formbay read: ${requests} requests, ${stored} kept, forms pv ${formIds.pv.length} bstc ${formIds.bstc.length}, docs ${spec ? 'read' : 'not found'}`);
+  console.log(`Formbay read: ${requests} requests, ${stored} kept, ${ids.length} forms`);
   return { statusCode: 200 };
 };
+
+// The first value under any of these keys, however deep the answer nests it.
+function firstValue(v, keys) {
+  if (Array.isArray(v)) { for (const x of v) { const f = firstValue(x, keys); if (f) return f; } return null; }
+  if (!v || typeof v !== 'object') return null;
+  for (const k of keys) if (v[k]) return v[k];
+  for (const x of Object.values(v)) { const f = firstValue(x, keys); if (f) return f; }
+  return null;
+}
