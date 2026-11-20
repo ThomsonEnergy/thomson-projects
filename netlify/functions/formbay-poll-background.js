@@ -14,7 +14,7 @@ exports.handler = async () => {
   const db = getAdminClient();
   // Forms not sold yet every run; a sold form once a day.
   const dayAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const { data: due, error } = await db.from('formbay_forms').select('formbay_job_id')
+  const { data: due, error } = await db.from('formbay_forms').select('ftype, formbay_job_id')
     .or(`job_status.is.null,job_status.neq.sold,synced_at.is.null,synced_at.lt.${dayAgo}`)
     .order('synced_at', { ascending: true, nullsFirst: true }).limit(200);
   if (error) { console.error('Formbay poll:', error.message); return { statusCode: 500 }; }
@@ -24,7 +24,7 @@ exports.handler = async () => {
   try { token = await formbayLogin(); } catch (err) { console.error('Formbay poll:', err.message); return { statusCode: 200 }; }
   let files = 0, failed = 0, inARow = 0;
   for (const r of due) {
-    const res = await syncForm(db, token, { formId: r.formbay_job_id });
+    const res = await syncForm(db, token, { formId: r.formbay_job_id, ftype: r.ftype });
     if (!res.ok) {
       failed++; inARow++;
       console.error(`Formbay poll: form ${r.formbay_job_id}: ${res.error}`);

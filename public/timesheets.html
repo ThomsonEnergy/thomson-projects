@@ -186,7 +186,8 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=142"></script>
+  <script src="/js/supabase-client.js?v=144"></script>
+  <script src="/js/split-sliders.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
@@ -639,10 +640,6 @@
     // block's hours have been sent to Xero (xero_pushed_at set), its time
     // is locked - Xero already has it - but the job/stage stays editable.
 
-    function segmentColor(i) {
-      return `hsl(${(i * 137.5) % 360}, 55%, 55%)`;
-    }
-
     let dayBlockKeySeq = 0;
     let dayBlocks = [];
     let dayRemovedBlocks = [];
@@ -965,69 +962,12 @@
         if (!canSplit) { section.style.display = 'none'; section.innerHTML = ''; block.splitPercentages = []; return; }
 
         const splitCentres = block.centres.filter(c => block.ccIds.includes(c.id));
-        if (block.splitPercentages.length !== splitCentres.length) {
-          block.splitPercentages = splitCentres.map(() => Math.round(100 / splitCentres.length));
-          block.splitPercentages[0] += 100 - block.splitPercentages.reduce((a, b) => a + b, 0);
-        }
-
-        section.style.display = 'block';
-        section.innerHTML = `
-          <p class="subtitle" style="margin:0 0 8px;">Split ${fmtDuration(totalMin * 60000)} across these stages.</p>
-          <div style="display:flex; height:18px; border-radius:6px; overflow:hidden; margin-bottom:10px;">
-            ${splitCentres.map((c, i) => `<div class="day-split-bar-seg" data-index="${i}" style="width:${block.splitPercentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
-          </div>
-          ${splitCentres.map((c, i) => `
-            <div style="margin-bottom:10px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-                <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${c.number}</strong> ${escapeHtml(c.name)}</span>
-                <span style="display:flex; align-items:center; gap:4px;">
-                  <input type="number" min="0" max="100" value="${block.splitPercentages[i]}" class="day-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
-                  <span class="day-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * block.splitPercentages[i] / 100) * 60000)}</span>
-                </span>
-              </div>
-              <input type="range" min="0" max="100" value="${block.splitPercentages[i]}" class="day-split-slider" data-index="${i}" style="width:100%; touch-action:none;" />
-            </div>
-          `).join('')}`;
-
-        const sliders = [...section.querySelectorAll('.day-split-slider')];
-        const numbers = [...section.querySelectorAll('.day-split-number')];
-        const labels = [...section.querySelectorAll('.day-split-label')];
-        const barSegs = [...section.querySelectorAll('.day-split-bar-seg')];
-
-        function paint() {
-          sliders.forEach((s, i) => { s.value = block.splitPercentages[i]; });
-          numbers.forEach((n, i) => { if (document.activeElement !== n) n.value = block.splitPercentages[i]; });
-          labels.forEach((l, i) => { l.textContent = fmtDuration(Math.round(totalMin * block.splitPercentages[i] / 100) * 60000); });
-          barSegs.forEach((b, i) => { b.style.width = `${block.splitPercentages[i]}%`; });
-        }
-        // Waterfall rebalancing: moving a slider only redistributes across
-        // the ones AFTER it (keeping earlier ones exactly as you left them).
-        function rebalance(idx, newVal) {
-          newVal = Math.max(0, Math.min(100, newVal));
-          const isLast = idx === splitCentres.length - 1;
-          const flexIdxs = isLast
-            ? splitCentres.map((_, i) => i).filter(i => i < idx)
-            : splitCentres.map((_, i) => i).filter(i => i > idx);
-          const lockedSum = splitCentres.map((_, i) => i)
-            .filter(i => i !== idx && !flexIdxs.includes(i))
-            .reduce((s, i) => s + block.splitPercentages[i], 0);
-          newVal = Math.min(newVal, 100 - lockedSum);
-          block.splitPercentages[idx] = newVal;
-          const remaining = 100 - newVal - lockedSum;
-          const flexOldTotal = flexIdxs.reduce((s, i) => s + block.splitPercentages[i], 0);
-          let assigned = 0;
-          flexIdxs.forEach((i, n) => {
-            const isLastFlex = n === flexIdxs.length - 1;
-            const share = isLastFlex
-              ? remaining - assigned
-              : Math.round(flexOldTotal > 0 ? (block.splitPercentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
-            block.splitPercentages[i] = Math.max(0, share);
-            assigned += share;
-          });
-          paint();
-        }
-        sliders.forEach(s => s.addEventListener('input', () => rebalance(parseInt(s.dataset.index), parseInt(s.value))));
-        numbers.forEach(n => n.addEventListener('input', () => { const v = parseInt(n.value); if (!isNaN(v)) rebalance(parseInt(n.dataset.index), v); }));
+        if (block.splitPercentages.length !== splitCentres.length) block.splitPercentages = splitEvenly(splitCentres.length);
+        mountSplitSliders(section, {
+          rows: splitCentres.map(c => ({ number: c.number, name: c.name })),
+          percentages: block.splitPercentages, totalMin,
+          intro: `Split ${fmtDuration(totalMin * 60000)} across these stages.`,
+        });
       }
 
       await renderAll();

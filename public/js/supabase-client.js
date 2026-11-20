@@ -3533,6 +3533,9 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // per Sydney calendar day, not every single clock-out), and finishes
 // with real "before you go" actions: log a site photo, jot a note (with
 // an optional signature), or head to the job.
+// The waterfall sliders for a split (js/split-sliders.js), loaded the first time a split is shown.
+const loadSplitSliders = () => loadJsOnce('/js/split-sliders.js?v=1', () => typeof mountSplitSliders === 'function');
+
 // `entry` needs id/staff_id/project_id/cost_centre_id/
 // selected_cost_centre_ids/time_category/clock_in. Calls `onDone` (if
 // given) once the clock-out has actually saved. `opts.switchTo`
@@ -3667,6 +3670,7 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     overlay.querySelector('#cko-next-btn').addEventListener('click', () => {
       const msg = overlay.querySelector('#cko-msg');
       if (centres.length && !chosenCentres.length) { msg.innerHTML = `<div class="error-box">Pick at least one stage this time counts against.</div>`; return; }
+      if (chosenCentres.length > 1 && splitPercentages.length !== chosenCentres.length && totalMinutesForSplit() > 0) { msg.innerHTML = `<div class="error-box">The split between stages is not showing, so it can't be saved. Wait a moment, or tick one stage.</div>`; return; }
       const timeVal = overlay.querySelector('#cko-time').value;
       if (!timeVal) { msg.innerHTML = `<div class="error-box">Pick a clock-out time.</div>`; return; }
       const [hh, mm] = timeVal.split(':').map(Number);
@@ -3683,72 +3687,31 @@ async function openClockOutModal(entry, onDone, opts = {}) {
     refreshClockOutSplit();
   }
 
-  // Splits the shift across stages right here (percentage sliders, same
-  // mechanics as the Timesheets split) instead of just crediting each
-  // ticked stage the full time and pointing them at Timesheets to fix it
-  // up afterwards.
-  function refreshClockOutSplit() {
+  // Splits the shift across the ticked stages right here (js/split-sliders.js).
+  let splitDraw = 0;
+  async function refreshClockOutSplit() {
     const section = overlay.querySelector('#cko-split-section');
     if (!section) return;
+    const draw = ++splitDraw;
     const totalMin = totalMinutesForSplit();
     if (chosenCentres.length < 2 || totalMin <= 0) { section.style.display = 'none'; section.innerHTML = ''; splitPercentages = []; return; }
 
     const splitCentres = centres.filter(c => chosenCentres.includes(c.id));
-    if (splitPercentages.length !== splitCentres.length) {
-      splitPercentages = splitCentres.map(() => Math.round(100 / splitCentres.length));
-      splitPercentages[0] += 100 - splitPercentages.reduce((a, b) => a + b, 0);
-    }
-
-    section.style.display = 'block';
-    section.innerHTML = `
-      <p class="subtitle" style="margin:0 0 8px;">Split ${fmtDuration(totalMin * 60000)} across these stages.</p>
-      <div style="display:flex; height:18px; border-radius:6px; overflow:hidden; margin-bottom:10px;">
-        ${splitCentres.map((c, i) => `<div class="cko-split-bar-seg" data-index="${i}" style="width:${splitPercentages[i]}%; background:${segmentColor(i)};"></div>`).join('')}
-      </div>
-      ${splitCentres.map((c, i) => `
-        <div style="margin-bottom:10px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:3px; gap:8px;">
-            <span><span style="display:inline-block; width:9px; height:9px; border-radius:3px; background:${segmentColor(i)}; margin-right:5px;"></span><strong>${escapeHtml(c.number)}</strong> ${escapeHtml(c.name)}</span>
-            <span style="display:flex; align-items:center; gap:4px;">
-              <input type="number" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-number" data-index="${i}" style="width:50px; padding:3px 5px; text-align:right;" />%
-              <span class="cko-split-label subtitle" data-index="${i}" style="min-width:60px; text-align:right;">${fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000)}</span>
-            </span>
-          </div>
-          <input type="range" min="0" max="100" value="${splitPercentages[i]}" class="cko-split-slider" data-index="${i}" style="width:100%; touch-action:none;" />
-        </div>
-      `).join('')}`;
-
-    const sliders = [...section.querySelectorAll('.cko-split-slider')];
-    const numbers = [...section.querySelectorAll('.cko-split-number')];
-    const labels = [...section.querySelectorAll('.cko-split-label')];
-    const barSegs = [...section.querySelectorAll('.cko-split-bar-seg')];
-
-    function paint() {
-      sliders.forEach((s, i) => { s.value = splitPercentages[i]; });
-      numbers.forEach((n, i) => { if (document.activeElement !== n) n.value = splitPercentages[i]; });
-      labels.forEach((l, i) => { l.textContent = fmtDuration(Math.round(totalMin * splitPercentages[i] / 100) * 60000); });
-      barSegs.forEach((b, i) => { b.style.width = `${splitPercentages[i]}%`; });
-    }
-    function rebalance(idx, newVal) {
-      newVal = Math.max(0, Math.min(100, newVal));
-      const isLast = idx === splitCentres.length - 1;
-      const flexIdxs = isLast ? splitCentres.map((_, i) => i).filter(i => i < idx) : splitCentres.map((_, i) => i).filter(i => i > idx);
-      const lockedSum = splitCentres.map((_, i) => i).filter(i => i !== idx && !flexIdxs.includes(i)).reduce((s, i) => s + splitPercentages[i], 0);
-      newVal = Math.min(newVal, 100 - lockedSum);
-      splitPercentages[idx] = newVal;
-      const remaining = 100 - newVal - lockedSum;
-      const flexOldTotal = flexIdxs.reduce((s, i) => s + splitPercentages[i], 0);
-      let assigned = 0;
-      flexIdxs.forEach((i, n) => {
-        const isLastFlex = n === flexIdxs.length - 1;
-        const share = isLastFlex ? remaining - assigned : Math.round(flexOldTotal > 0 ? (splitPercentages[i] / flexOldTotal) * remaining : remaining / flexIdxs.length);
-        splitPercentages[i] = Math.max(0, share);
-        assigned += share;
+    try {
+      await loadSplitSliders();
+      if (draw !== splitDraw || !section.isConnected) return; // a newer tick or time change draws instead
+      if (splitPercentages.length !== splitCentres.length) splitPercentages = splitEvenly(splitCentres.length);
+      mountSplitSliders(section, {
+        rows: splitCentres.map(c => ({ number: c.number, name: c.name })),
+        percentages: splitPercentages, totalMin,
+        intro: `Split ${splitMinutesText(totalMin)} across these stages.`,
       });
-      paint();
+    } catch (err) {
+      // never save a split nobody could see (bug, 20 Nov 2026: shifts were halved silently)
+      console.error('Clock-out split did not draw:', err);
+      splitPercentages = [];
+      section.innerHTML = '<div class="error-box">The split between stages did not load. Tick one stage, or close this and try again.</div>';
     }
-    sliders.forEach(s => s.addEventListener('input', () => rebalance(parseInt(s.dataset.index), parseInt(s.value))));
-    numbers.forEach(n => n.addEventListener('input', () => { const v = parseInt(n.value); if (!isNaN(v)) rebalance(parseInt(n.dataset.index), v); }));
   }
 
   function renderStep2() {

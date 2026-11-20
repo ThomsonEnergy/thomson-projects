@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=142"></script>
+  <script src="/js/supabase-client.js?v=144"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -5733,7 +5733,7 @@
 
     async function loadJobStcs(project, centres) {
       const el = document.getElementById('job-stcs-list');
-      loadJsOnce('/js/formbay-card.js?v=1', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
+      loadJsOnce('/js/formbay-card.js?v=9', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
       const [r, s] = await Promise.all([
         supabaseClient.from('job_stcs').select('*, formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').eq('project_id', project.id).order('created_at'),
         jobStcSettings ? Promise.resolve({ data: jobStcSettings }) : supabaseClient.from('company_settings').select('stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),

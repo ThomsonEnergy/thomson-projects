@@ -1,6 +1,6 @@
 // The Formbay card on a job's STCs tab (item 101). Loaded by project.html when the tab opens.
 //   renderFormbayCard(project, { onChange })   draws into #formbay-card; onChange runs after the job changed
-// Shows the job's Formbay battery form: its stage, what it is waiting on, who has signed, the NMI,
+// Shows the job's Formbay forms (solar, battery, or both): each one's stage, what it is waiting on, who has signed, the NMI,
 // serial numbers and how many of its photos and documents are on the job. With no form yet: Create
 // Formbay form (makes a draft in Formbay) or Find this job in Formbay (a form started in Formbay's app).
 // Reads formbay_forms and customer_assets; everything else goes through the formbay-sync and
@@ -36,7 +36,12 @@ async function renderFormbayCard(project, { onChange } = {}) {
   if (!forms.length) { fbDrawEmpty(el, project, changed); return; }
   const { data: assets } = await supabaseClient.from('customer_assets').select('id, name, model, installed_at, warranty_expires, formbay_form_id')
     .in('formbay_form_id', forms.map(f => f.id));
-  el.innerHTML = `<h2 style="margin:0 0 8px;">Formbay</h2>${forms.map(f => fbFormHtml(f, assets || [])).join('')}<div id="fb-msg"></div>`;
+  // A job can carry a solar form and a battery form: the missing kind can still be found or made.
+  const kinds = new Set(forms.map(f => f.ftype));
+  el.innerHTML = `<h2 style="margin:0 0 8px;">Formbay</h2>${forms.map(f => fbFormHtml(f, assets || [])).join('')}<div id="fb-msg"></div>
+    ${kinds.size < 2 ? `<p style="margin:10px 0 0;"><button type="button" class="secondary" id="fb-more" style="padding:4px 10px; font-size:12px;">Add a ${kinds.has('pv') ? 'battery' : 'solar'} form</button></p><div id="fb-more-panel"></div>` : ''}`;
+  const more = el.querySelector('#fb-more');
+  if (more) more.addEventListener('click', () => { more.parentElement.remove(); fbDrawButtons(el.querySelector('#fb-more-panel'), project, changed); });
 
   el.querySelectorAll('[data-fb-check]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Checking...';
@@ -68,10 +73,12 @@ function fbFormHtml(row, assets) {
   const signed = [['Installer', f.installer_signee_date], ['Designer', f.designer_signee_date], ['Owner', f.homeowner_signee_date]]
     .map(([who, d]) => `${who} ${fbDate(d) ? `signed ${fbDate(d)}` : 'not signed yet'}`).join(' · ');
   const battery = (f.batteries || [])[0];
+  const solar = row.ftype === 'pv';
   const serials = (f.battery_serials || []).length + (f.serialnumbersname || []).length + (f.inverterserialnumbersname || []).length;
   const facts = [
-    f.nmi ? `NMI ${f.nmi}` : '', fbDate(f.idate) ? `Install date ${f.idate}` : '', battery ? battery.model : '',
-    Number(f.calbstc) ? `${Number(f.calbstc)} STCs` : '', serials ? `${serials} serial number${serials === 1 ? '' : 's'}` : '',
+    f.nmi ? `NMI ${f.nmi}` : '', fbDate(f.idate) ? `Install date ${f.idate}` : '',
+    solar && f.model ? `${Number(f.npanels) || ''} x ${f.model}` : '', solar && f.modeli ? f.modeli : '', battery ? battery.model : '',
+    Number(solar ? f.calrec : f.calbstc) ? `${Number(solar ? f.calrec : f.calbstc)} STCs` : '', serials ? `${serials} serial number${serials === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
   const docs = (row.docs || []).length;
   const filedMap = row.filed || {};
@@ -86,7 +93,7 @@ function fbFormHtml(row, assets) {
   return `
     <div style="margin-bottom:12px;">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <strong>Battery form ${escapeHtml(row.formbay_job_id)}</strong>
+        <strong>${solar ? 'Solar' : 'Battery'} form ${escapeHtml(row.formbay_job_id)}</strong>
         <span class="badge ${row.job_status === 'sold' || row.job_status === 'approved' ? 'complete' : row.job_status === 'rejected' ? 'amber' : 'info'}">${escapeHtml(stage)}</span>
       </div>
       ${waiting.length ? `<p style="margin:8px 0 2px; font-weight:600;">Waiting on</p><ul style="margin:0 0 6px 18px; padding:0;">${waiting.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>` : ''}
@@ -109,10 +116,13 @@ function fbFormHtml(row, assets) {
 // ---------- no form yet: create one, or find one started in Formbay ----------
 
 function fbDrawEmpty(el, project, changed) {
+  el.innerHTML = `<h2 style="margin:0 0 6px;">Formbay</h2><p class="subtitle" style="margin:0 0 10px;">No Formbay form on this job yet.</p><div id="fb-start"></div>`;
+  fbDrawButtons(el.querySelector('#fb-start'), project, changed);
+}
+
+function fbDrawButtons(el, project, changed) {
   el.innerHTML = `
-    <h2 style="margin:0 0 6px;">Formbay</h2>
-    <p class="subtitle" style="margin:0 0 10px;">No Formbay form on this job yet.</p>
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
       <button type="button" id="fb-create-open">Create Formbay form</button>
       <button type="button" id="fb-find-open" class="secondary">Find this job in Formbay</button>
     </div>
@@ -127,15 +137,15 @@ async function fbDrawFind(panel, project, changed) {
   let forms = [];
   let failed = '';
   try { forms = (await fbCall('formbay-sync', { action: 'find', projectId: project.id })).forms; } catch (err) { failed = err.message; }
-  const link = async (formId, btn) => {
+  const link = async (formId, btn, ftype) => {
     btn.disabled = true;
     panel.querySelector('#fb-find-msg').innerHTML = `<p class="subtitle">Reading form ${escapeHtml(formId)}...</p>`;
     try {
-      try { await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId }); }
+      try { await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId, ftype }); }
       catch (err) {
         // A form at another address needs a person's yes: linking puts its NMI, serials and photos on this job.
         if (!err.confirm || !confirm(`${err.message} Link it to this job anyway?`)) throw err;
-        await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId, confirmed: true });
+        await fbCall('formbay-sync', { action: 'link', projectId: project.id, formId, ftype, confirmed: true });
       }
       await changed();
     } catch (err) { panel.querySelector('#fb-find-msg').innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; btn.disabled = false; }
@@ -144,16 +154,16 @@ async function fbDrawFind(panel, project, changed) {
     ${failed ? `<div class="error-box">${escapeHtml(failed)}</div>` : ''}
     ${forms.length ? forms.map(f => `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);">
-        <div><strong>${escapeHtml(f.formId)}</strong> ${f.match ? '<span class="badge complete">Same address</span>' : ''}
+        <div><strong>${escapeHtml(f.kind === 'solar' ? 'Solar' : 'Battery')} ${escapeHtml(f.formId)}</strong> ${f.match ? '<span class="badge complete">Same address</span>' : ''}
           <div class="subtitle" style="margin:2px 0 0;">${escapeHtml([f.address, f.owner, FB_STAGE[f.status] || f.status].filter(Boolean).join(' · '))}</div></div>
-        <button type="button" data-fb-link="${escapeHtml(f.formId)}" class="${f.match ? '' : 'secondary'}" style="white-space:nowrap;">This is it</button>
-      </div>`).join('') : (failed ? '' : `<p class="subtitle">Formbay has no battery forms that are not already on a job.</p>`)}
+        <button type="button" data-fb-link="${escapeHtml(f.formId)}" data-fb-type="${escapeHtml(f.ftype)}" class="${f.match ? '' : 'secondary'}" style="white-space:nowrap;">This is it</button>
+      </div>`).join('') : (failed ? '' : `<p class="subtitle">Formbay has no solar or battery forms that are not already on a job.</p>`)}
     <div style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;">
       <input id="fb-find-id" inputmode="numeric" placeholder="Or type the Formbay job number" style="max-width:240px; margin:0;" />
       <button type="button" id="fb-find-link" class="secondary">Link</button>
     </div>
     <div id="fb-find-msg" style="margin-top:8px;"></div>`;
-  panel.querySelectorAll('[data-fb-link]').forEach(b => b.addEventListener('click', () => link(b.dataset.fbLink, b)));
+  panel.querySelectorAll('[data-fb-link]').forEach(b => b.addEventListener('click', () => link(b.dataset.fbLink, b, b.dataset.fbType)));
   panel.querySelector('#fb-find-link').addEventListener('click', (e) => {
     const id = panel.querySelector('#fb-find-id').value.trim();
     if (!/^\d+$/.test(id)) { panel.querySelector('#fb-find-msg').innerHTML = `<div class="error-box">The Formbay job number is digits only.</div>`; return; }
@@ -170,49 +180,131 @@ async function fbDrawCreate(panel, project, changed) {
   const p = o.prefill;
   const box = (id, label, value, extra = '') => `<div><label style="margin-top:0;">${label}</label><input id="fbc-${id}" value="${escapeHtml(value || '')}" ${extra} /></div>`;
   const opts = (list, picked, blank) => `<option value="">${blank}</option>${list.map(x => `<option value="${escapeHtml(x.value)}" ${x.value === picked ? 'selected' : ''}>${escapeHtml(x.label)}</option>`).join('')}`;
+  const pick = (id, label, list, picked, blank = 'Pick one', span = '') => `<div ${span}><label style="margin-top:0;">${label}</label><select id="fbc-${id}">${opts(list, picked, blank)}</select></div>`;
+  const plain = (list) => list.map(b => ({ value: b, label: b }));
   const streetTypes = Object.keys(o.streetTypes).sort().map(k => ({ value: k, label: `${k} (${o.streetTypes[k]})` }));
+  const grid = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px;';
+  // One inverter or battery: brand, series, model and how many. n is '' for the first, then 2, 3, 4
+  // (Formbay's own form has Add another inverter and Add another battery; owner, 20 Nov 2026).
+  const equip = (kind, n) => {
+    const name = kind === 'inverter' ? 'Inverter' : 'Battery';
+    const first = kind === 'inverter' ? 'Inverter brand (new, or the one already there)' : 'Battery brand';
+    return `<div style="${grid} margin-top:10px;">
+      ${pick(`${kind}${n}_brand`, n ? `${name} ${n} brand` : first, plain(o.brands[kind]), n ? '' : p[`${kind}_brand`])}
+      ${pick(`${kind}${n}_series`, `${name} ${n ? `${n} ` : ''}series`, [], '', 'Pick the brand first')}
+      ${pick(`${kind}${n}_model`, `${name} ${n ? `${n} ` : ''}model`, [], '', 'Pick the series first', 'style="grid-column:span 2;"')}
+      ${box(`${kind}${n}_count`, 'How many', '1', 'type="number" min="1" inputmode="numeric"')}
+    </div>`;
+  };
   panel.innerHTML = `
-    <p class="subtitle" style="margin:0 0 10px;">Filled in from the job. Check it, pick the battery, then Create. It lands in Formbay as a draft: signing and Submit stay in Formbay's app.</p>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px;">
+    <p class="subtitle" style="margin:0 0 10px;">Filled in from the job. Check it, pick the equipment, then Create. It lands in Formbay as a draft: signing and Submit stay in Formbay's app.</p>
+    <div style="${grid}">
+      ${pick('what', 'What is going in', [{ value: 'pv', label: 'Solar' }, { value: 'pv_bstc', label: 'Solar and battery' }, { value: 'bstc', label: 'Battery' }]
+    .filter(w => !(p.has || []).length || w.value === p.what), p.what)}
       ${box('fname', 'Owner first name', p.fname)}${box('sname', 'Owner last name', p.sname)}
       ${box('email', 'Owner email', p.email, 'type="email"')}${box('phone', 'Owner phone', p.phone, 'inputmode="tel"')}
       ${box('unit_number', 'Unit (if any)', p.unit_number)}${box('street_number', 'Street number', p.street_number)}
-      ${box('street_name', 'Street name', p.street_name)}
-      <div><label style="margin-top:0;">Street type</label><select id="fbc-street_type">${opts(streetTypes, p.street_type, 'Pick one')}</select></div>
+      ${box('street_name', 'Street name', p.street_name)}${pick('street_type', 'Street type', streetTypes, p.street_type)}
       ${box('city', 'Suburb', p.city)}${box('state', 'State', p.state, 'maxlength="3"')}${box('postcode', 'Postcode', p.postcode, 'inputmode="numeric" maxlength="4"')}
       ${box('nmi', 'NMI (optional)', p.nmi, 'inputmode="numeric" placeholder="Formbay finds it from the address"')}
       ${box('date', 'Install date', sydneyDateKey(new Date()), 'type="date"')}
-      <div><label style="margin-top:0;">Installer</label><select id="fbc-installer">${opts(o.installers.map(i => ({ value: i.id, label: i.name })), p.installer, 'Pick one')}</select></div>
-      <div><label style="margin-top:0;">Battery brand</label><select id="fbc-brand">${opts(o.brands.map(b => ({ value: b, label: b })), p.brand, 'Pick one')}</select></div>
-      <div><label style="margin-top:0;">Battery series</label><select id="fbc-series"><option value="">Pick the brand first</option></select></div>
-      <div style="grid-column:span 2;"><label style="margin-top:0;">Battery model</label><select id="fbc-model"><option value="">Pick the series first</option></select></div>
-      ${box('count', 'How many', '1', 'type="number" min="1" inputmode="numeric"')}
+      ${pick('off_grid', 'Grid', [{ value: 'no', label: 'Grid connected' }, { value: 'yes', label: 'Off-grid' }], 'no', 'Pick one')}
+      ${pick('installer', 'Installer', [], '')}${pick('designer', 'Designer', [], '')}${pick('electrician', 'Electrician', [], '')}
     </div>
-    <p class="subtitle" style="margin:8px 0 0;">The installer is also put down as the designer and the electrician; change that in Formbay if it is someone else.</p>
+    <div id="fbc-solar" style="${grid} margin-top:10px;">
+      ${pick('installation', 'Solar on this site', [{ value: '0', label: 'New system' }, { value: '1', label: 'Replacement' }, { value: '2', label: 'Additional' }, { value: '3', label: 'Extension' }], '0', 'Pick one')}
+      ${pick('panel_brand', 'Panel brand', plain(o.brands.panel), p.panel_brand)}
+      ${pick('panel_model', 'Panel model', [], '', 'Pick the brand first', 'style="grid-column:span 2;"')}
+      ${box('panel_count', 'Number of panels', '', 'type="number" min="1" inputmode="numeric"')}
+      ${pick('optimisers', 'Optimisers', [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes' }], 'no', 'Pick one')}
+    </div>
+    <div id="fbc-inverters">${equip('inverter', '')}</div>
+    <p style="margin:6px 0 0;"><button type="button" class="secondary" id="fbc-add-inverter" style="padding:4px 10px; font-size:12px;">Add another inverter</button></p>
+    <div id="fbc-battery" style="margin-top:10px;">
+      <div id="fbc-batteries">${equip('battery', '')}</div>
+      <p style="margin:6px 0 0;"><button type="button" class="secondary" id="fbc-add-battery" style="padding:4px 10px; font-size:12px;">Add another battery</button></p>
+      <div style="${grid} margin-top:10px;">
+      ${pick('battery_location', 'Battery goes', [{ value: 'indoor', label: 'Indoor' }, { value: 'outdoor', label: 'Outdoor' }], '')}
+      ${pick('pv_first', 'Solar is commissioned before or with the battery', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '', 'Pick one', 'style="grid-column:span 2;"')}
+      </div>
+    </div>
+    <div id="fbc-battery-only" style="${grid} margin-top:10px;">
+      ${pick('battery_install', 'This battery is', [{ value: 'first', label: 'First time installation' }, { value: 'additional', label: 'Additional installation' }, { value: 'replacement', label: 'Replacement installation' }], '')}
+      ${pick('pv_working', 'Solar already at this address', [{ value: 'yes', label: 'Yes, and it is working' }, { value: 'replacing', label: 'Yes, but we are replacing it' }], '', 'Pick one', 'style="grid-column:span 2;"')}
+      ${pick('pv_limit', 'Total solar here is 100 kW or less', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '')}
+    </div>
+    <p class="subtitle" style="margin:8px 0 0;">Only people Formbay has accredited for this kind of job can be picked.</p>
     <div style="display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap;">
       <button type="button" id="fbc-go">Create in Formbay</button>
       <div id="fbc-msg" style="flex:1; min-width:200px;"></div>
     </div>`;
   const $ = (id) => panel.querySelector(`#fbc-${id}`);
-  const fill = async (action, target, blank, body) => {
+  // Who Formbay has accredited for this kind of job: off-grid needs the stand-alone accreditation, a
+  // battery on the grid needs the battery endorsement. The server checks the same rule again.
+  const may = (i, role) => {
+    const design = role === 'designer';
+    if ($('off_grid').value === 'yes') return design ? i.offGridDesign : i.offGrid;
+    if ($('what').value !== 'pv' && !i.battery) return false;
+    return design ? i.gridDesign : i.grid;
+  };
+  const team = () => ['installer', 'designer', 'electrician'].forEach(role => {
+    const was = $(role).value || (role === 'installer' ? p.installer : $('installer').value);
+    const list = o.installers.map(i => ({ ...i, ok: role === 'electrician' || may(i, role) }));
+    const keep = list.find(i => i.ok && i.id === was) || (list.filter(i => i.ok).length === 1 ? list.find(i => i.ok) : null);
+    $(role).innerHTML = `<option value="">Pick one</option>${list.map(i => `<option value="${escapeHtml(i.id)}" ${i.ok ? '' : 'disabled'} ${keep && keep.id === i.id ? 'selected' : ''}>${escapeHtml(i.name)}${i.ok ? '' : ' (not accredited for this job)'}</option>`).join('')}`;
+  });
+  const show = () => {
+    $('solar').style.display = $('what').value === 'bstc' ? 'none' : 'grid';
+    $('battery').style.display = $('what').value === 'pv' ? 'none' : 'block';
+    $('battery-only').style.display = $('what').value === 'bstc' ? 'grid' : 'none';
+    team();
+  };
+  $('off_grid').addEventListener('change', team);
+  $('installer').addEventListener('change', () => ['designer', 'electrician'].forEach(role => { if (!$(role).value) team(); }));
+  $('what').addEventListener('change', () => {
+    show();
+    panel.querySelectorAll('select[id^="fbc-inverter"][id$="_brand"]').forEach(b => { if (b.value) b.dispatchEvent(new Event('change')); });
+  });
+  show();
+  // Picking a brand fills the next list from Formbay, and so on down to the model.
+  const fill = async (list, target, body) => {
     target.innerHTML = `<option value="">Loading...</option>`;
+    // With a battery on the form the inverter lists are the ones Formbay accepts for battery STCs.
+    if (list.startsWith('inverter_') && $('what').value !== 'pv') list = `battery_${list}`;
     try {
-      const { list } = await fbCall('formbay-create-form', { action, ...body });
-      target.innerHTML = opts(list.map(x => ({ value: String(x), label: String(x) })), list.length === 1 ? String(list[0]) : '', blank);
-      if (list.length === 1) target.dispatchEvent(new Event('change'));
+      const r = await fbCall('formbay-create-form', { action: 'list', list, ...body });
+      target.innerHTML = opts(plain(r.list.map(String)), r.list.length === 1 ? String(r.list[0]) : '', r.list.length ? 'Pick one' : 'None listed');
+      if (r.list.length !== 1) return r.list.length;
+      target.dispatchEvent(new Event('change'));
+      return 1;
     } catch (err) { target.innerHTML = `<option value="">${escapeHtml(err.message)}</option>`; }
   };
-  $('brand').addEventListener('change', () => {
-    $('model').innerHTML = `<option value="">Pick the series first</option>`;
-    if ($('brand').value) fill('series', $('series'), 'Pick one', { brand: $('brand').value });
-  });
-  $('series').addEventListener('change', () => { if ($('series').value) fill('models', $('model'), 'Pick one', { brand: $('brand').value, series: $('series').value }); });
-  if (p.brand) $('brand').dispatchEvent(new Event('change'));
+  const chain = (brand, series, model, lists) => {
+    $(brand).addEventListener('change', async () => {
+      if (series) $(model).innerHTML = `<option value="">Pick the series first</option>`;
+      if (!$(brand).value) return;
+      const found = await fill(lists[0], $(series || model), { brand: $(brand).value });
+      // A brand with no series listed: its models are asked for without one.
+      if (series && found === 0) fill(lists[1], $(model), { brand: $(brand).value, series: '' });
+    });
+    if (series) $(series).addEventListener('change', () => { if ($(series).value) fill(lists[1], $(model), { brand: $(brand).value, series: $(series).value }); });
+    if ($(brand).value) $(brand).dispatchEvent(new Event('change'));
+  };
+  chain('panel_brand', null, 'panel_model', ['panel_models']);
+  const wire = (kind, n) => chain(`${kind}${n}_brand`, `${kind}${n}_series`, `${kind}${n}_model`, [`${kind}_series`, `${kind}_models`]);
+  wire('inverter', '');
+  wire('battery', '');
+  // Add another inverter or battery, up to four of each.
+  [['inverter', 'inverters'], ['battery', 'batteries']].forEach(([kind, box2]) => $(`add-${kind}`).addEventListener('click', () => {
+    const n = $(box2).children.length + 1;
+    $(box2).insertAdjacentHTML('beforeend', equip(kind, n));
+    wire(kind, n);
+    if (n >= 4) $(`add-${kind}`).style.display = 'none';
+  }));
 
   $('go').addEventListener('click', async () => {
     const fields = { commercial: !!p.commercial };
-    ['fname', 'sname', 'email', 'phone', 'unit_number', 'street_number', 'street_name', 'street_type', 'city', 'state', 'postcode', 'nmi', 'date', 'installer', 'brand', 'series', 'model', 'count']
-      .forEach(k => { fields[k] = $(k).value.trim(); });
+    panel.querySelectorAll('input[id^="fbc-"], select[id^="fbc-"]').forEach(i => { fields[i.id.slice(4)] = i.value.trim(); });
     $('go').disabled = true;
     $('msg').innerHTML = `<p class="subtitle" style="margin:0;">Making the form in Formbay...</p>`;
     try {
