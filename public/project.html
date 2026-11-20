@@ -4071,18 +4071,6 @@
                 <textarea id="hd-panel-serials" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" style="min-height:70px;">${escapeHtml(project.panel_serial_numbers || '')}</textarea>
                 <label>Inverter serial numbers (one per line)</label>
                 <textarea id="hd-inverter-serials" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="off" style="min-height:70px;">${escapeHtml(project.inverter_serial_numbers || '')}</textarea>
-                ${pricingVisible ? `
-                <label>Formbay STC lodgement status</label>
-                <select id="hd-formbay-status">
-                  <option value="" ${!project.formbay_lodgement_status ? 'selected' : ''}>-- Not lodged yet --</option>
-                  <option value="pending_installer_action" ${project.formbay_lodgement_status === 'pending_installer_action' ? 'selected' : ''}>Pending installer action</option>
-                  <option value="pending_retailer_action" ${project.formbay_lodgement_status === 'pending_retailer_action' ? 'selected' : ''}>Pending retailer action</option>
-                  <option value="pending_cer_audit" ${project.formbay_lodgement_status === 'pending_cer_audit' ? 'selected' : ''}>Pending CER audit</option>
-                  <option value="approved_for_sale" ${project.formbay_lodgement_status === 'approved_for_sale' ? 'selected' : ''}>Approved for sale</option>
-                  <option value="sold" ${project.formbay_lodgement_status === 'sold' ? 'selected' : ''}>Sold</option>
-                </select>
-                <p class="subtitle" style="margin-top:4px;">Set by hand for now - Formbay isn't wired up to push/pull this automatically yet.</p>
-                ` : ''}
                 <button type="button" id="hd-save-btn" style="margin-top:10px;">Save</button>
                 <div id="hd-save-msg"></div>
                 ${pricingVisible ? `
@@ -4414,7 +4402,9 @@
 
             ${project.job_number && !editMode && pricingVisible ? `
             <div class="settings-panel" id="panel-stcs">
-              <div class="card">
+             <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start;">
+              <div class="card" id="formbay-card" style="flex:1 1 340px; margin:0;"><h2 style="margin:0;">Formbay</h2><p class="subtitle">Loading...</p></div>
+              <div class="card" style="flex:3 1 520px; margin:0; min-width:0;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
                   <h2 style="margin:0;">STCs</h2>
                   <button type="button" id="job-stc-add-btn" style="font-size:12px; padding:6px 12px;">+ Add STCs</button>
@@ -4422,6 +4412,7 @@
                 <p class="subtitle" style="margin:0 0 12px;">One line per Formbay job (solar, battery or hot water). The customer was credited the booked price per STC; the gain is what Formbay pays, less its fee, above that. Figures are ex GST. A sale is filled in automatically when its Formbay payment advice is imported on the <a class="link-quiet" href="/stcs.html">STCs page</a>, or you can type the sale price here.</p>
                 <div id="job-stcs-list"><p class="subtitle">Loading...</p></div>
               </div>
+             </div>
             </div>` : ''}
 
             ${!editMode ? `
@@ -4694,8 +4685,6 @@
             panel_serial_numbers: document.getElementById('hd-panel-serials').value.trim() || null,
             inverter_serial_numbers: document.getElementById('hd-inverter-serials').value.trim() || null,
           };
-          const fbSel = document.getElementById('hd-formbay-status');
-          if (fbSel) updates.formbay_lodgement_status = fbSel.value || null;
           const { error } = await supabaseClient.from('projects').update(updates).eq('id', project.id);
           if (error) throw error;
           Object.assign(project, updates);
@@ -4846,6 +4835,7 @@
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
       loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
       loadJsOnce('/js/job-type.js?v=1', () => typeof renderJobType === 'function').then(() => renderJobType(project, 'job-type-area')).catch(err => console.error('job type:', err.message));
+      loadJsOnce('/js/job-stage.js?v=1', () => typeof initJobStagePicker === 'function').then(() => initJobStagePicker(project)).catch(err => console.error('job stage:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {
         openWarrantyJobPanel(project, (newJob) => { window.location.href = `/project.html?id=${newJob.id}`; });
@@ -5743,6 +5733,7 @@
 
     async function loadJobStcs(project, centres) {
       const el = document.getElementById('job-stcs-list');
+      loadJsOnce('/js/formbay-card.js?v=1', () => typeof renderFormbayCard === 'function').then(() => renderFormbayCard(project, { onChange: () => loadJobStcs(project, centres) }));
       const [r, s] = await Promise.all([
         supabaseClient.from('job_stcs').select('*, formbay_payment_advice_lines(*, formbay_payment_advices(reference_no, advice_date, units, fee_ex_gst))').eq('project_id', project.id).order('created_at'),
         jobStcSettings ? Promise.resolve({ data: jobStcSettings }) : supabaseClient.from('company_settings').select('stc_expected_sale_price, stc_fee_per_certificate').limit(1).maybeSingle(),
@@ -5913,8 +5904,6 @@
       if (firstId && !project.formbay_lodgement_id) patch.formbay_lodgement_id = firstId;
       await supabaseClient.from('projects').update(patch).eq('id', project.id);
       Object.assign(project, patch);
-      const sel = document.getElementById('hd-formbay-status');
-      if (sel) sel.value = status || '';
     }
 
     // ---------- Search within a job ----------
@@ -6423,7 +6412,7 @@
             const badge = document.getElementById('pipeline-stage-badge');
             if (badge) {
               const { data: p } = await supabaseClient.from('projects').select('pipeline_stage').eq('id', projectId).maybeSingle();
-              if (p && p.pipeline_stage) badge.textContent = pipelineStageLabel(p.pipeline_stage);
+              if (p && p.pipeline_stage) { if (badge.tagName === 'SELECT') badge.value = p.pipeline_stage; else badge.textContent = pipelineStageLabel(p.pipeline_stage); } // a dropdown for pricing roles (js/job-stage.js)
             }
           } catch (e) { console.error('Task follow-up failed:', e); }
         })();

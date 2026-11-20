@@ -49,6 +49,6 @@ Installs dependencies and the Supabase CLI, links to Supabase if the env vars ar
 - [docs/EXTERNAL_ACCOUNTS.md](docs/EXTERNAL_ACCOUNTS.md): Twilio, Telstra port, Apple, D-U-N-S and Google Workspace status
 - [docs/GROWTH_PLAN.md](docs/GROWTH_PLAN.md): growth order and the twelve month table
 - [docs/SOLAR_QUOTE_COMPLIANCE_REQUIREMENTS.md](docs/SOLAR_QUOTE_COMPLIANCE_REQUIREMENTS.md) and [docs/BATTERY_QUOTE_COMPLIANCE_REQUIREMENTS.md](docs/BATTERY_QUOTE_COMPLIANCE_REQUIREMENTS.md): the rules behind the quote send gate (`_shared/solar-compliance-rules.js` is distilled from them)
-- [docs/HANDOFF_formbay_stc.md](docs/HANDOFF_formbay_stc.md): Formbay phases 2 to 4, still a plan
+- [docs/archive/HANDOFF_formbay_stc.md](docs/archive/HANDOFF_formbay_stc.md): the Formbay and STC history (October 2026); what is built is in `docs/PROJECT_SPEC.md` A25
 - Finished reviews, kept where code comments point at them: `docs/BUG_REVIEW.md` (19 Oct), `docs/BUG_REVIEW_2026-10-23.md`, `docs/PO_REVIEW.md`; `docs/UX_REVIEW.md` still has delivery 5 to go (backlog item 17)
 - [CLAUDE.md](CLAUDE.md): rules for Claude Code
