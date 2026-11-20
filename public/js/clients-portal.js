@@ -106,7 +106,8 @@ async function loadPortalUsage(clientId, el) {
     <details style="margin-top:4px;"><summary style="cursor:pointer;">Show more (${events.length})</summary><div style="margin-top:4px; max-height:220px; overflow:auto;">${events.map((e) => `<div>${line(e)}</div>`).join('')}</div></details>`;
 }
 
-// The lead reward and referral link (item 74b, step 3a): Off, Pay or Credit; turning it on emails the
+// The lead reward and referral link (item 74b, step 3a): Off or On (a credit off our work, never a
+// payout: owner, 20 Nov 2026); turning it on emails the
 // client their link by itself. Copy, Send link and Regenerate (the old link stops working).
 async function clientReferralCall(body) {
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -124,8 +125,7 @@ function renderClientReferral(client, el) {
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
       <select id="cr-kind" style="width:auto;">
         <option value="off" ${kind === 'off' ? 'selected' : ''}>Off</option>
-        <option value="credit" ${kind === 'credit' ? 'selected' : ''}>Credit off their next invoice</option>
-        <option value="pay" ${kind === 'pay' ? 'selected' : ''}>Pay to their bank account</option>
+        <option value="credit" ${kind !== 'off' ? 'selected' : ''}>On: a credit off their next invoice</option>
       </select>
       <span class="subtitle" style="font-size:12px;">Amounts are in Settings &gt; Rewards. Turning it on emails them their link.</span>
     </div>
@@ -159,45 +159,68 @@ function renderClientReferral(client, el) {
   });
 }
 
-// The client's lead rewards (item 74b step 3b part 1): owed first, then earned (waiting on the deposit),
-// then settled and cancelled. Paid (the bank reference), Credited (the invoice it went on) or Cancel
-// (why), through lead_reward_settle, which checks the role and that the reward is owed.
+// The client's lead rewards (item 74b step 3b): owed first, then earned (waiting on the deposit), then
+// used and cancelled. A reward is a credit off our work and happens by itself: the credit note in Xero,
+// the line on an invoice, the allocation (lead-rewards-background.js). A person only cancels one (why),
+// or presses Try Xero again after fixing what Xero refused. Both go through lead-reward.js.
+async function leadRewardCall(body) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const res = await fetch('/.netlify/functions/lead-reward', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || `Failed (${res.status})`);
+  return data;
+}
 async function renderLeadRewards(client, el) {
   if (!el) return;
-  const { data, error } = await supabaseClient.from('lead_rewards')
-    .select('id, amount, kind, referral_kind, status, quote_total, earned_at, due_at, settled_at, settled_how, settled_reference, cancelled_reason, projects(job_number, name)')
-    .eq('referrer_client_id', client.id).order('earned_at', { ascending: false });
+  const [{ data, error }, { data: account }] = await Promise.all([
+    supabaseClient.from('lead_rewards')
+      .select('id, amount, referral_kind, status, quote_total, earned_at, settled_how, settled_reference, cancelled_reason, applied_invoice_id, xero_credit_note_id, xero_credit_note_number, xero_allocated_invoice_id, xero_error, projects(job_number, name)')
+      .eq('referrer_client_id', client.id).order('earned_at', { ascending: false }),
+    supabaseClient.from('xero_account_mapping').select('xero_account_code').eq('category', 'lead_reward').maybeSingle(),
+  ]);
   if (error) { el.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
   const rows = data || [];
   if (!rows.length) { el.innerHTML = ''; return; }
   const order = { due: 0, earned: 1, settled: 2, cancelled: 3 };
   rows.sort((a, b) => order[a.status] - order[b.status]);
+  const hasAccount = !!String((account && account.xero_account_code) || '').trim();
   const money = (n) => `$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const word = (r) => r.status === 'due' ? `<span class="badge sent">Owed ${r.kind === 'credit' ? '(credit)' : '(pay)'}</span>`
-    : r.status === 'earned' ? '<span class="badge draft">Earned, owed once the deposit is paid</span>'
-    : r.status === 'settled' ? `<span class="badge accepted">${r.settled_how === 'paid' ? 'Paid' : 'Credited'} ${escapeHtml(r.settled_reference || '')}</span>`
-    : `<span class="badge draft">Cancelled: ${escapeHtml(r.cancelled_reason || '')}</span>`;
+  const note = (r) => (r.xero_credit_note_number ? ` (${escapeHtml(r.xero_credit_note_number)})` : '');
+  const word = (r) => {
+    if (r.status === 'earned') return '<span class="badge draft">Earned, a credit once the deposit is paid</span>';
+    if (r.status === 'cancelled') return `<span class="badge draft">Cancelled: ${escapeHtml(r.cancelled_reason || '')}</span>`;
+    if (r.status === 'settled') {
+      if (r.settled_how === 'paid') return `<span class="badge accepted">${escapeHtml(r.settled_reference || 'Refunded in Xero')}</span>`;
+      const inXero = r.xero_allocated_invoice_id ? '' : r.applied_invoice_id ? ', goes to Xero when that invoice is pushed' : '';
+      return `<span class="badge accepted">Credited on ${escapeHtml(r.settled_reference || 'an invoice')}${note(r)}</span>${inXero ? `<span class="subtitle" style="font-size:12px;">${inXero}</span>` : ''}`;
+    }
+    if (!hasAccount) return '<span class="badge sent">Owed</span> <span class="subtitle" style="font-size:12px;">waiting on the Lead rewards account in <a href="/settings.html">Settings &gt; Xero Mapping</a></span>';
+    if (!r.xero_credit_note_id) return '<span class="badge sent">Owed, going to Xero</span>';
+    return `<span class="badge sent">Credit waiting${note(r)}</span> <span class="subtitle" style="font-size:12px;">comes off their next invoice by itself</span>`;
+  };
+  const stuck = hasAccount && rows.some((r) => r.xero_error && ['due', 'settled'].includes(r.status));
   el.innerHTML = `
     <label>Lead rewards</label>
     ${rows.map((r) => `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:4px 0; border-bottom:1px solid var(--border); font-size:13px;">
-        <span><strong>${money(r.amount)}</strong> for ${r.projects ? `J${escapeHtml(r.projects.job_number)} ${escapeHtml(r.projects.name || '')}` : 'a job'} <span class="subtitle" style="font-size:12px;">(${escapeHtml(r.referral_kind)}, job ${money(r.quote_total)})</span> ${word(r)}</span>
-        <span style="display:flex; gap:4px;">
-          ${r.status === 'due' ? `<button type="button" class="secondary lr-act" data-id="${r.id}" data-act="${r.kind === 'credit' ? 'credited' : 'paid'}" style="font-size:12px; padding:4px 10px;">${r.kind === 'credit' ? 'Credited' : 'Paid'}</button>` : ''}
-          ${['due', 'earned'].includes(r.status) ? `<button type="button" class="secondary lr-act" data-id="${r.id}" data-act="cancel" style="font-size:12px; padding:4px 10px;">Cancel</button>` : ''}
-        </span>
+        <span><strong>${money(r.amount)}</strong> for ${r.projects ? `J${escapeHtml(r.projects.job_number)} ${escapeHtml(r.projects.name || '')}` : 'a job'} <span class="subtitle" style="font-size:12px;">(${escapeHtml(r.referral_kind)}, job ${money(r.quote_total)})</span> ${word(r)}
+          ${r.xero_error && ['due', 'settled'].includes(r.status) ? `<div style="color:var(--red); font-size:12px;">Xero: ${escapeHtml(r.xero_error)}</div>` : ''}</span>
+        ${['due', 'earned'].includes(r.status) ? `<button type="button" class="secondary lr-cancel" data-id="${r.id}" style="font-size:12px; padding:4px 10px;">Cancel</button>` : ''}
       </div>`).join('')}
-    ${rows.some((r) => r.status === 'due' && r.kind === 'credit') ? '<p class="subtitle" style="margin:4px 0 0; font-size:12px;">A credit: take it off their next invoice as a line, then press Credited with that invoice number. (The app will do this by itself in the next step.)</p>' : ''}
+    ${stuck ? '<button type="button" class="secondary" id="lr-retry" style="font-size:12px; padding:4px 10px; margin-top:6px;">Try Xero again</button>' : ''}
     <div id="lr-msg"></div>`;
-  el.querySelectorAll('.lr-act').forEach((b) => b.addEventListener('click', async () => {
-    const act = b.dataset.act;
-    const ask = act === 'paid' ? 'The payment reference and date (e.g. "EFT 18 Nov, ref 12345"):' : act === 'credited' ? 'The invoice number it was credited on (e.g. SI4821):' : 'Why is it cancelled? (shown on this card)';
-    const ref = prompt(ask);
-    if (ref === null) return;
+  const msg = (html) => { el.querySelector('#lr-msg').innerHTML = html; };
+  el.querySelectorAll('.lr-cancel').forEach((b) => b.addEventListener('click', async () => {
+    const reason = prompt('Why is it cancelled? (shown on this card)');
+    if (reason === null) return;
     b.disabled = true;
-    const { error: sErr } = await supabaseClient.rpc('lead_reward_settle', { p_id: b.dataset.id, p_action: act, p_reference: ref });
-    if (sErr) { el.querySelector('#lr-msg').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(sErr))}</div>`; b.disabled = false; return; }
-    showToast(act === 'cancel' ? 'Cancelled.' : 'Saved.');
-    renderLeadRewards(client, el);
+    try { await leadRewardCall({ action: 'cancel', rewardId: b.dataset.id, reason }); showToast('Cancelled.'); renderLeadRewards(client, el); }
+    catch (err) { msg(`<div class="error-box">${escapeHtml(err.message)}</div>`); b.disabled = false; }
   }));
+  const retry = el.querySelector('#lr-retry');
+  if (retry) retry.addEventListener('click', async () => {
+    retry.disabled = true;
+    try { await leadRewardCall({ action: 'retry' }); showToast('Done.'); } catch (err) { showToast(err.message); }
+    renderLeadRewards(client, el);
+  });
 }

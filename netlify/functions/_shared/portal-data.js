@@ -209,18 +209,17 @@ async function referralsFor(admin, scope) {
   ]);
   const on = (cl || []).find((c) => c.lead_reward_kind && c.lead_reward_kind !== 'off' && c.referral_token);
   // the Rewards line (item 74b): what is owed, waiting on a deposit, and settled, in plain words
-  const { data: rw } = await admin.from('lead_rewards').select('amount, kind, status, settled_how').in('referrer_client_id', ids).neq('status', 'cancelled');
+  // a reward is only ever a credit off our work (owner, 20 Nov 2026); one refunded by hand in Xero is not shown as credit
+  const { data: rw } = await admin.from('lead_rewards').select('amount, status, settled_how, applied_invoice_id').in('referrer_client_id', ids).neq('status', 'cancelled');
   const sum = (f) => (rw || []).filter(f).reduce((s, r) => s + Number(r.amount || 0), 0);
   const dollars = (n) => `$${Math.round(n).toLocaleString('en-AU')}`;
-  const owedCredit = sum((r) => r.status === 'due' && r.kind === 'credit');
-  const owedPay = sum((r) => r.status === 'due' && r.kind === 'pay');
+  const owedCredit = sum((r) => r.status === 'due');
   const waiting = sum((r) => r.status === 'earned');
-  const settled = sum((r) => r.status === 'settled');
+  const settled = sum((r) => r.status === 'settled' && r.settled_how === 'credited');
   const rewards = [
-    owedCredit ? `${dollars(owedCredit)} credit due, taken off your next invoice` : '',
-    owedPay ? `${dollars(owedPay)} due to you, being paid` : '',
+    owedCredit ? `${dollars(owedCredit)} credit waiting: it comes off your next invoice by itself` : '',
     waiting ? `${dollars(waiting)} won, due once the job's deposit is paid` : '',
-    settled ? `${dollars(settled)} paid or credited so far` : '',
+    settled ? `${dollars(settled)} credited on your invoices so far` : '',
   ].filter(Boolean);
   return { referrals, referLink: on ? `/refer.html?r=${on.referral_token}` : null, rewards };
 }

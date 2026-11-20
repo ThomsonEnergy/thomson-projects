@@ -181,7 +181,10 @@
       const interestDays = Number(inv.interest_days) || 0;
       const interestRate = Number(inv.interest_rate_pct) || 21;
       const totalToPay = Math.round((balanceDue + interestAccrued) * 100) / 100;
-      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - bstcAmount - balanceDue) * 100) / 100);
+      // lead reward credits taken off this invoice (item 74b part 2): one named line each, not part of Amount Applied
+      const rewardCredits = Array.isArray(inv.lead_reward_credits) ? inv.lead_reward_credits : [];
+      const rewardTotal = rewardCredits.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+      const amountApplied = Math.max(0, Math.round((totalIncGst - stcAmount - bstcAmount - rewardTotal - balanceDue) * 100) / 100);
       const isPaid = !!inv.paid_at;
       const isDeposit = !!(inv.is_deposit || /^deposit$/i.test(inv.description || ''));
       const dueDate = inv.due_date ? new Date(inv.due_date + 'T00:00:00') : null;
@@ -320,6 +323,7 @@
               <div><span class="k">Total inc GST</span><span class="v">${money(totalIncGst)}</span></div>
               ${stcAmount > 0 ? `<div><span class="k">STC Credit${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(stcAmount)}</span></div>` : ''}
               ${bstcAmount > 0 ? `<div><span class="k">BSTC Credit (battery)${isCompanyClient ? ' (inc GST)' : ''}</span><span class="v">-${money(bstcAmount)}</span></div>` : ''}
+              ${rewardCredits.map((c) => `<div><span class="k">Lead reward credit${c.job_number ? ` (J${esc(c.job_number)})` : ''}</span><span class="v">-${money(c.amount)}</span></div>`).join('')}
               <div><span class="k">Amount Applied</span><span class="v">${money(amountApplied)}</span></div>
               <div><span class="k">Balance Due</span><span class="v">${money(balanceDue)}</span></div>
               ${interestAccrued > 0 && !isPaid ? `<div><span class="k">Late payment interest to ${esc(dateText(new Date()))} (${interestDays} day${interestDays === 1 ? '' : 's'} at ${interestRate}% pa, GST free)</span><span class="v">${money(interestAccrued)}</span></div><div><span class="k">Total to pay today</span><span class="v">${money(totalToPay)}</span></div>` : ''}
