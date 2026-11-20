@@ -72,6 +72,11 @@
 [functions.formbay-poll-background]
   schedule = "*/15 * * * *"
 
+# Every 15 minutes: reads the account's solar and hot water Formbay forms as they are, so they can be
+# mapped (item 101) - see formbay-read-background.js. Read only; removed once the mapping is built.
+[functions.formbay-read-background]
+  schedule = "*/15 * * * *"
+
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
 # sync-gmail.js. The Sync now buttons (Settings, Inbox) call sync-gmail-now.js
 # instead: Netlify does not allow a scheduled function to be called over HTTP.
