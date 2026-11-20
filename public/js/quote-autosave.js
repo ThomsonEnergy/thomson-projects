@@ -147,7 +147,7 @@ function quoteStepDefs(project, page) {
         // looked up again the next time it is needed.
         const box = document.getElementById('p-address');
         const addressCols = p.client_address === String(project.client_address || '').trim() && project.address_parts ? {}
-          : box && box.value.trim() === p.client_address ? await addressColumnsFor(box) : { address_parts: null };
+          : box && box.value.trim() === p.client_address ? await addressColumnsFor(box, project.client_address) : { address_parts: null };
         const details = { name: p.client_name, email: p.client_email || null, phone: p.client_phone || null, payment_terms: p.payment_terms, address: p.client_address || null, ...addressCols };
         if (clientId && quoteClientsMadeHere[project.id] === clientId) {
           // The client this page made keeps taking what is typed here, the same as if it had all

@@ -93,7 +93,7 @@
             <div class="grid cols-3">
               <div style="grid-column: span 2;">
                 <label>Office / billing address</label>
-                <input id="c-address" />
+                <input id="c-address" data-address />
                 <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Used on invoices, quote covers and the Xero contact. Where the work happens goes under Sites below; a job never changes this address.</p>
               </div>
               <div>
@@ -196,7 +196,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=145"></script>
+  <script src="/js/supabase-client.js?v=147"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=4"></script>
   <script src="/js/theme.js?v=2"></script>
@@ -273,7 +273,7 @@
       row.style.cssText = 'display:grid; grid-template-columns:1fr 2.4fr auto auto; gap:8px; margin-bottom:6px; align-items:center;';
       row.innerHTML = `
         <input class="st-label" placeholder="Label (e.g. Warehouse)" value="${escapeHtml(label)}" style="font-size:13px;" />
-        <input class="st-address" placeholder="Site address" value="${escapeHtml(address)}" style="font-size:13px;" />
+        <input class="st-address" data-address placeholder="Site address" value="${escapeHtml(address)}" style="font-size:13px;" />
         <span class="subtitle" style="font-size:12px; white-space:nowrap;">${jobs ? jobs + ' job' + (jobs === 1 ? '' : 's') : ''}</span>
         <button type="button" class="secondary st-remove" style="padding:6px 10px; font-size:12px;">x</button>
       `;
@@ -518,6 +518,8 @@
         email: document.getElementById('c-email').value.trim(),
         phone: document.getElementById('c-phone').value.trim(),
         address: document.getElementById('c-address').value.trim(),
+        // the address in parts, from Google's lookup (item 103)
+        ...(await (async (c) => addressColumnsFor(document.getElementById('c-address'), c ? c.address : undefined, !!(c && c.address_parts)))(editingClientId ? allClients.find(x => x.id === editingClientId) : null)),
         abn: document.getElementById('c-abn').value.trim() || null,
         payment_terms: document.getElementById('c-terms').value,
         ...(rateCardsLoaded ? { rate_card_id: document.getElementById('c-rate-card').value || null } : {}),
@@ -567,12 +569,14 @@
       if (contactErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a contact did not: ${escapeHtml(contactErrors.join('; '))}</div>`; await loadClients(); return; }
       // Sites keep their ids (jobs link to them): existing rows are updated, new rows added,
       // rows taken off the form deleted (their jobs keep the address text).
-      const siteRows = [...document.querySelectorAll('.site-row')].map(row => ({
+      const before = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_sites || []) : [];
+      const siteRows = (await Promise.all([...document.querySelectorAll('.site-row')].map(async row => ({
         id: row.dataset.id || null,
         label: row.querySelector('.st-label').value.trim() || null,
         address: row.querySelector('.st-address').value.trim(),
-      })).filter(st => st.address);
-      const before = editingClientId ? (allClients.find(x => x.id === editingClientId)?.client_sites || []) : [];
+        // the address in parts, from Google's lookup (item 103); a site left as it was keeps its own
+        parts: await (async (b) => addressColumnsFor(row.querySelector('.st-address'), b ? b.address : undefined, !!(b && b.address_parts)))(row.dataset.id ? before.find(x => x.id === row.dataset.id) : null),
+      })))).filter(st => st.address);
       const keptIds = siteRows.filter(st => st.id).map(st => st.id);
       const removedIds = before.map(st => st.id).filter(id => !keptIds.includes(id));
       const siteErrors = [];
@@ -582,8 +586,8 @@
       }
       for (const st of siteRows) {
         const { error } = st.id
-          ? await supabaseClient.from('client_sites').update({ label: st.label, address: st.address }).eq('id', st.id)
-          : await supabaseClient.from('client_sites').insert({ client_id: clientId, label: st.label, address: st.address });
+          ? await supabaseClient.from('client_sites').update({ label: st.label, address: st.address, ...st.parts }).eq('id', st.id)
+          : await supabaseClient.from('client_sites').insert({ client_id: clientId, label: st.label, address: st.address, ...st.parts });
         if (error) siteErrors.push(/client_sites_client_address_uidx/.test(error.message) ? `"${st.address}" is already a site for this client.` : error.message);
       }
       if (siteErrors.length) { msg.innerHTML = `<div class="error-box">Client saved, but a site did not: ${escapeHtml(siteErrors.join('; '))}</div>`; await loadClients(); return; }

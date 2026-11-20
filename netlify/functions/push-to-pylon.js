@@ -14,22 +14,29 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 // design. Deliberately doesn't touch pricing - Jasper wants pricing
 // worked out in this app, not duplicated into Pylon.
 //
-// Pylon wants a structured site_address (line1/city/state/zip/country),
-// but this app only ever stores a single Google-formatted address
-// string (no structured components requested from the Places
-// Autocomplete - see loadEditAddressAutocomplete in project.html).
-// Splits the standard AU Google format ("123 Smith St, Suburb STATE
-// 1234, Australia") with a regex rather than a second geocoding call -
-// good enough for addresses that actually came from the autocomplete;
-// a hand-typed address that doesn't match this shape fails with a
-// clear message rather than silently sending a broken request.
+// Pylon wants a structured site_address (line1/city/state/zip/country).
+// The job's address in parts (projects.address_parts, from Google's
+// lookup, item 103) is used when the page sends it. A job with no parts
+// falls back to splitting the standard AU Google format ("123 Smith St,
+// Suburb STATE 1234, Australia") with a regex; a hand-typed address
+// that doesn't match this shape fails with a clear message rather than
+// silently sending a broken request.
 //
 // The "owner" relationship is optional in Pylon's docs (defaults to
 // whichever user the API key belongs to), so this doesn't ask for or
 // store any Pylon user mapping.
 
+const { addressColumns } = require('./_shared/address-parts');
 const AU_STATES = 'ACT|NSW|NT|QLD|SA|TAS|VIC|WA';
 const ADDRESS_RE = new RegExp(`^(.+?),\\s*([A-Za-z .'-]+?)\\s+(${AU_STATES})\\s+(\\d{4})\\s*(?:,\\s*Australia)?$`, 'i');
+
+// The parts Google gave, in Pylon's shape (null when the job has none).
+function fromParts(p) {
+  if (!p || !p.suburb || !p.state) return null;
+  const street = [p.unit ? `${p.unit}/${p.street_number}` : p.street_number, p.street_name, p.street_type].filter(Boolean).join(' ');
+  const title = (s) => s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return { line1: title(street), city: title(p.suburb), state: p.state, zip: p.postcode, country: 'Australia' };
+}
 
 function splitAddress(address) {
   const m = (address || '').trim().match(ADDRESS_RE);
@@ -49,12 +56,12 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { name, email, phone, address, referenceNumber, lat, lng } = JSON.parse(event.body || '{}');
+    const { name, email, phone, address, addressParts, referenceNumber, lat, lng } = JSON.parse(event.body || '{}');
     if (!name || !address) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'Client name and site address are required first.' }) };
     }
 
-    const site_address = splitAddress(address);
+    const site_address = fromParts(addressColumns(addressParts, address).address_parts) || splitAddress(address);
     if (!site_address) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: `Could not split "${address}" into street/suburb/state/postcode. Re-pick the address from the autocomplete suggestions, or enter it as "123 Smith St, Suburb STATE 1234".` }) };
     }

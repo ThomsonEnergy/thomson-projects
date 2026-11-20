@@ -420,7 +420,7 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
       <label>Job name</label>
       <input id="id-job-name" value="${escapeHtml(project.name || '')}" />
       <label>Site address</label>
-      <input id="id-site" value="${escapeHtml(project.client_address || '')}" />` : ''}
+      <input id="id-site" data-address value="${escapeHtml(project.client_address || '')}" />` : ''}
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
         <button type="button" id="id-save">Save${inXero ? ' and update Xero' : ''}</button>
         <button type="button" class="secondary" id="id-cancel">Cancel</button>
@@ -454,6 +454,8 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
     invoiceBusy(btn, inXero ? 'Saving and updating Xero...' : 'Saving...');
     msg.innerHTML = '';
     try {
+      // the address in parts, from Google (item 103); looked up after the button is busy so Save cannot be pressed twice
+      if (project) body.siteAddressParts = (await addressColumnsFor(q('#id-site'))).address_parts || null;
       const d = await saveInvoiceDetails(body);
       if (!d.changed) { overlay.remove(); showToast('Nothing changed'); return; }
       overlay.remove();

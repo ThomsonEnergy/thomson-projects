@@ -11,6 +11,7 @@
 // Writes leads, lead-uploads storage, projects (through portal-requests.js for "Me"), activity_log,
 // notifications.
 
+const { addressColumns } = require('./address-parts');
 const crypto = require('crypto');
 const { fmtDay } = require('./schedule-emails');
 const R = require('./portal-requests');
@@ -82,6 +83,17 @@ async function alreadyClient(admin, client, person) {
 
 // body: { who: 'me' | 'other', kind: 'quick' | 'full', type, need, answers, person: { name, phone,
 //   email, address }, told, files, dueDate }
+// A lead keeps its address in its own columns (line, suburb, state, postcode and the map point):
+// filled from Google's lookup on the referral page's address box when it came (item 103).
+function leadAddress(input, address) {
+  const parts = addressColumns(input, address).address_parts;
+  if (!parts) return {};
+  return {
+    address_line: [parts.unit ? `${parts.unit}/${parts.street_number}` : parts.street_number, parts.street_name, parts.street_type].filter(Boolean).join(' '),
+    suburb: parts.suburb || null, state: parts.state || null, postcode: parts.postcode || null, lat: parts.lat, lng: parts.lng,
+  };
+}
+
 async function submitReferral(admin, client, body) {
   // this use is logged first and then counted with the hour's others, so many at the same moment
   // cannot all slip under the limit
@@ -99,7 +111,7 @@ async function submitReferral(admin, client, body) {
   if (body.who === 'me') {
     const scope = { email: 'their referral link', firstName: '', clients: [{ id: client.id, name: client.name, main: true }] };
     const extra = Object.entries(answers).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`).join('\n');
-    const made = await R.createRequest(admin, scope, { clientId: client.id, address: body.person && body.person.address, need: `${type}: ${need}${extra ? `\n${extra}` : ''}`, kind: 'quote', dueDate: body.dueDate, files: body.files });
+    const made = await R.createRequest(admin, scope, { clientId: client.id, address: body.person && body.person.address, addressParts: body.person && body.person.addressParts, need: `${type}: ${need}${extra ? `\n${extra}` : ''}`, kind: 'quote', dueDate: body.dueDate, files: body.files });
     return { kind: 'quote', id: made.id, ref: made.ref };
   }
 
@@ -128,7 +140,7 @@ async function submitReferral(admin, client, body) {
 
   const already = await alreadyClient(admin, client, { email, phone, address });
   const { data: lead, error } = await admin.from('leads').insert({
-    source: 'portal_referral', name, phone: phone || null, email: email || null, address_formatted: address || null,
+    source: 'portal_referral', name, phone: phone || null, email: email || null, address_formatted: address || null, ...leadAddress(person.addressParts, address),
     details: { ...answers, job_type: type, what_they_need: need, referred_by: client.name },
     referrer_client_id: client.id, referral_kind: kind, already_client: already, status: 'new',
   }).select('id').single();
