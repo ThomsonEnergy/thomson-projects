@@ -99,6 +99,13 @@
       return data.byProject;
     }
 
+    // What is typed on the quote steps is saved before a PDF is made or the quote is emailed, so
+    // neither goes out with an old price. Throws, with the reason, when a step cannot save.
+    async function quoteStepsSaved() {
+      const stuck = typeof quoteAutosaveFlush === 'function' ? (await quoteAutosaveFlush())[0] : null;
+      if (stuck) throw new Error(`${stuck.label} is not saved: ${stuck.why}. Fix that first.`);
+    }
+
     // A stage's quoted hours: the quantities on its labour lines.
     function quotedHoursOf(centre) {
       return (centre.cost_centre_line_items || []).filter(li => li.item_type === 'labour').reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
@@ -106,7 +113,7 @@
 
     async function loadProject() {
       // anything typed on the quote steps is saved before the quote is read again (js/quote-autosave.js, loaded with a quote)
-      if (typeof quoteAutosaveFlush === 'function') await quoteAutosaveFlush();
+      if (typeof quoteAutosaveFlush === 'function') await quoteAutosaveFlush({ callerReloads: true });
       // Item 96: the slow accrued-labour function starts straight away, alongside the
       // job itself, instead of after it. Its own failure is logged and skipped below.
       const accruedPromise = fetchAccruedLabourCost([projectId]).then(byProject => ({ byProject }), err => ({ err }));
@@ -1182,7 +1189,7 @@
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.scrollIntoView({ block: 'center', behavior: 'smooth' });
           el.focus();
-          showToast(`${s.solarKw} kW put in step 3. Press Save pricing there to keep it: the size also sets the STC credit.`);
+          showToast(`${s.solarKw} kW put in step 3, where it saves itself: the size also sets the STC credit.`);
         });
         const useBattery = byId('bill-use-battery');
         if (useBattery) useBattery.addEventListener('click', () => {
@@ -1254,7 +1261,7 @@
         const unsaved = byId('bc-solar-unsaved');
         const live = currentSolarKw(), saved = savedSolarKw();
         unsaved.innerHTML = currentTemplate !== 'battery' && Math.abs(live - saved) > 0.001
-          ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">The solar size on step 3 (${live} kW) is not saved yet; the proposal still says ${saved || 'nothing'}${saved ? ' kW' : ''}. Press Save pricing on step 3.</p>`
+          ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">The solar size on step 3 (${live} kW) is not saved yet; the proposal still says ${saved || 'nothing'}${saved ? ' kW' : ''}. It saves itself in a moment.</p>`
           : '';
       }
 
@@ -3519,7 +3526,7 @@
     async function wireQuoteSteps(project) {
       try {
         // the steps save themselves: that file loads while the rest is wired, and is mounted last
-        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=1', () => typeof mountQuoteAutosave === 'function');
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=2', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
@@ -3713,16 +3720,17 @@
             setSowDocs: (list) => { sowDocs = list.slice(); renderEditSowDocList(); },
             // the stage table as it would be saved; a stage made on the page gets its id here
             stages: () => readStagesPayload().map(({ rowEl, ...stage }) => ({ ...stage, id: stage.id || (rowEl.dataset.id = quoteNewId()) })),
-            // a stage whose name box was emptied would read as a removed stage: wait for its name
-            stagesProblem: () => ([...document.querySelectorAll('#cc-rows .cc-row')]
-              .some(r => !r.querySelector('.cc-name').value.trim() && (r.dataset.id || r.querySelector('.li-row, .pg-row'))) ? 'Not saved yet: every stage needs a name' : null),
+            // A stage with no name is left out of a save, so one that was saved before, or has lines or
+            // photos typed in, waits for its name (it would read as removed, or lose what was typed).
+            // A blank row just added is not in the way.
+            stagesProblem: () => ([...document.querySelectorAll('#cc-rows .cc-row')].some(r => !r.querySelector('.cc-name').value.trim() && (
+              r.dataset.id
+              || [...r.querySelectorAll('.li-row')].some(li => li.querySelector('.li-desc').value.trim() || (li.querySelector('.li-type').value === 'labour' && li.querySelector('.li-tier').value))
+              || [...r.querySelectorAll('.pg-row')].some(pg => pg.querySelector('.pg-desc').value.trim() || (pg.dataset.photos || '[]') !== '[]')
+            )) ? 'Not saved yet: every stage needs a name' : null),
             setStages: (stages) => {
               document.getElementById('cc-rows').innerHTML = '';
-              stages.forEach(st => addRow({
-                ...st,
-                lineItems: (st.lineItems || []).map(li => ({ ...li, prebuild_client_description: li.prebuild_client_description ?? '' })),
-                photoGroups: (st.photoGroups || []).map(pg => ({ description: pg.description, photos: (pg.photos || []).map(ph => ph.url || ph) })),
-              }));
+              stages.forEach(st => addRow(st));
               updateEditTotal();
               renderCustomerGets();
             },
@@ -3742,10 +3750,12 @@
             ticks: () => quoteStepTicks(project, project.cost_centres || []),
             refreshBar,
             readyCheck: () => refreshReadyCheck(project),
-            reload: async () => {
+            // the whole quote read again and redrawn, then the tab asked for (the Quote tab when none is)
+            reload: async (tab) => {
               const refreshed = await loadProject();
               if (!refreshed) return;
               render(refreshed, true);
+              if (tab) document.querySelector(`#job-tabs .settings-tab[data-panel="${tab}"]`)?.click();
               if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
             },
           },
@@ -4920,6 +4930,7 @@
         emailQuoteBtn.disabled = true; emailQuoteBtn.textContent = 'Checking...';
         msgEl.innerHTML = '';
         try {
+          await quoteStepsSaved();
           // Ready-to-send gate: stops on missing pre-quote answers, pricing or compliance items
           // unless Admin / Finance send anyway with a reason.
           if (!(await quoteSendGate(project))) { emailQuoteBtn.disabled = false; emailQuoteBtn.textContent = label; return; }
@@ -4944,6 +4955,7 @@
         generateQuotePdfBtn.textContent = 'Generating...';
         msgEl.innerHTML = '';
         try {
+          await quoteStepsSaved();
           await generateClientPdf('quote', project.id);
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;

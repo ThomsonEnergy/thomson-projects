@@ -5,7 +5,7 @@
 -- money, so the browser no longer writes the stages piece by piece: it sends every stage of the
 -- quote to this one function, which saves all of them or none.
 --
--- save_quote_stages(quote, stages):
+-- save_quote_stages(quote, stages, remove):
 --  * Pricing roles only, and only a quote that can still be edited (not a job, not an approved
 --    quote: those are changed in the job's own editor). The quote's row is locked for the save,
 --    so two saves of one quote never interleave.
@@ -13,16 +13,17 @@
 --    sent twice updates the stage instead of adding a second one). A stage already on the quote
 --    is updated in place, a new one is added, and its line items and photo groups are replaced.
 --    An id that belongs to another quote or job fails on the primary key and nothing is saved.
---  * A stage of the quote that is not in the list is removed, unless it has invoices, claims,
---    purchase orders, logged time, materials or a variation against it: then nothing is saved
---    and the message says which stage.
+--  * Only the stages named in remove are taken off the quote (the ones the page had and no
+--    longer shows). A stage the page never saw, added meanwhile in another tab or by someone
+--    else, is left alone. A stage with invoices, claims, purchase orders, logged time, materials
+--    or a variation against it is not removed: then nothing is saved and the message says which.
 --  * The totals (quoted amount, estimated labour and materials) are the ones the page worked out
 --    from the line items, as before: this function stores them, it does not reprice the quote.
 --
 -- Runs as the caller (security invoker), so the row level security on cost_centres and its line
 -- items still applies on top of the role check here.
 
-create or replace function public.save_quote_stages(p_project_id uuid, p_stages jsonb)
+create or replace function public.save_quote_stages(p_project_id uuid, p_stages jsonb, p_remove uuid[] default '{}')
 returns jsonb
 language plpgsql
 set search_path = public
@@ -115,7 +116,8 @@ begin
   end loop;
 
   for v_gone in
-    select id, name from cost_centres where project_id = p_project_id and not (id = any (v_keep))
+    select id, name from cost_centres
+    where project_id = p_project_id and id = any (coalesce(p_remove, '{}')) and not (id = any (v_keep))
   loop
     if exists (select 1 from invoices where cost_centre_id = v_gone.id)
       or exists (select 1 from invoice_claims where cost_centre_id = v_gone.id)
@@ -135,5 +137,5 @@ begin
 end;
 $$;
 
-revoke execute on function public.save_quote_stages(uuid, jsonb) from public, anon;
-grant execute on function public.save_quote_stages(uuid, jsonb) to authenticated;
+revoke execute on function public.save_quote_stages(uuid, jsonb, uuid[]) from public, anon;
+grant execute on function public.save_quote_stages(uuid, jsonb, uuid[]) to authenticated;

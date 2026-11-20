@@ -38,10 +38,35 @@ let quoteAutosaveLive = null;      // the quote steps now on screen
 let quoteTypedEarly = false;       // something was typed before the steps were ready: save it all once
 const quoteClientsMadeHere = {};   // quote id -> the client this page made for it
 
-// Saves everything typed and waits for it. The page calls this before it reloads the quote, so a
-// save that would redraw the quote (a new proposal type) leaves the redraw to the caller.
-async function quoteAutosaveFlush() {
-  if (quoteAutosaveLive) await quoteAutosaveLive.flush({ callerReloads: true });
+// Saves everything typed and waits for it. Gives back what could not be saved, as
+// [{ label, why }]: nothing when all of it is in. The page calls this before it reloads the
+// quote (callerReloads: a save that would redraw the quote, a new proposal type, leaves the
+// redraw to the caller) and before it makes a PDF or emails the quote.
+async function quoteAutosaveFlush({ callerReloads = false } = {}) {
+  return quoteAutosaveLive ? quoteAutosaveLive.flush({ callerReloads }) : [];
+}
+
+// Stages out of a save point, made safe to draw: numbers are numbers, ids look like ids, and
+// every line has an id of its own (the row drawing tells a stage's lines apart by id).
+function quoteCleanStages(stages) {
+  const num = (v) => { const n = Number(v); return v === null || v === undefined || v === '' || !Number.isFinite(n) ? null : n; };
+  const uuid = (v) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || '')) ? String(v) : '');
+  return (Array.isArray(stages) ? stages : []).map(st => ({
+    id: uuid(st.id), name: String(st.name || ''), description: String(st.description || ''),
+    markup_percent: num(st.markup_percent), stc_total: num(st.stc_total) || 0, stc_quantity: num(st.stc_quantity),
+    stc_system_kw: num(st.stc_system_kw), stc_zone_rating: num(st.stc_zone_rating), stc_install_year: num(st.stc_install_year),
+    stc_price_per_certificate: num(st.stc_price_per_certificate),
+    lineItems: (Array.isArray(st.lineItems) ? st.lineItems : []).map(li => ({
+      id: quoteNewId(), description: String(li.description || ''), item_type: li.item_type === 'labour' ? 'labour' : 'material',
+      quantity: num(li.quantity) || 0, unit_cost: num(li.unit_cost) || 0, rate_tier_id: uuid(li.rate_tier_id),
+      prebuild_group_id: uuid(li.prebuild_group_id) || null, prebuild_client_description: String(li.prebuild_client_description || ''),
+      prebuild_base_quantity: num(li.prebuild_base_quantity), ai_suggested: !!li.ai_suggested,
+    })),
+    photoGroups: (Array.isArray(st.photoGroups) ? st.photoGroups : []).map(pg => ({
+      description: String(pg.description || ''),
+      photos: (Array.isArray(pg.photos) ? pg.photos : []).map(ph => String((ph && ph.url) || (typeof ph === 'string' ? ph : ''))).filter(Boolean),
+    })),
+  }));
 }
 
 // An id for a stage made on the page. The page gives a new stage its id, so a save that is sent
@@ -313,8 +338,12 @@ function quoteStepDefs(project, page) {
       key: 'stages', label: 'Stages and prices', card: el('qstep-3'), head: el('qstage-head'), foot: 'Stages and prices', typingMs: 1500,
       read: () => page.stages(),
       hold: () => page.stagesProblem(),
-      save: async (p) => {
-        const { error } = await supabaseClient.rpc('save_quote_stages', { p_project_id: project.id, p_stages: p });
+      save: async (p, before) => {
+        // Only stages this page has seen are ever removed: one added meanwhile in another tab, or
+        // by someone else, is not on this page and is left alone.
+        const seen = (Array.isArray(before) ? before : (project.cost_centres || [])).map(st => st.id).filter(Boolean);
+        const here = new Set(p.map(st => st.id));
+        const { error } = await supabaseClient.rpc('save_quote_stages', { p_project_id: project.id, p_stages: p, p_remove: seen.filter(id => !here.has(id)) });
         if (error) throw error;
       },
       after: (saved) => {
@@ -327,7 +356,7 @@ function quoteStepDefs(project, page) {
         page.stagesSaved();
         tick(3, 'Pricing');
       },
-      apply: (p) => page.setStages(p),
+      apply: (p) => page.setStages(quoteCleanStages(p)),
       preview: (p) => {
         const total = p.reduce((sum, st) => sum + (Number(st.quoted_amount) || 0), 0);
         return `${p.length} stage${p.length === 1 ? '' : 's'}, ${money(total)} ex GST: ${short(p.map(st => st.name).join(', '), 70)}`;
@@ -360,6 +389,7 @@ function mountQuoteAutosave({ project, page }) {
   let dead = false;
   let settleTimer = null;
   let summaryDue = false;      // the scope changed: the installer summary is rewritten once the scope box is left
+  let tabsStale = false;       // the stages changed: the other tabs (Summary, Cost Centres) still show the old ones
   const changed = new Set();   // steps saved since the PDF and ready check were last redone
   const read = (s) => { try { return s.read(); } catch (e) { console.error(`Quote autosave: could not read ${s.key}`, e); return s.saved; } };
   const dirty = (s) => quoteCanon(read(s)) !== s.savedJson;
@@ -511,7 +541,7 @@ function mountQuoteAutosave({ project, page }) {
       let reload = false;
       try {
         const before = s.saved;
-        if (s === stagesStep && !loggedStages) loggedStages = Array.isArray(before) ? before : [];
+        if (s === stagesStep && !loggedStages) loggedStages = Array.isArray(before) ? before : (project.cost_centres || []).map(c => ({ ...c }));
         const result = (await s.save(p, before)) || {};
         s.saved = result.payload || p;
         s.savedJson = quoteCanon(s.saved);
@@ -519,6 +549,7 @@ function mountQuoteAutosave({ project, page }) {
         s.failed = null;
         changed.add(s.key);
         if (s.key === 'scope') summaryDue = true;
+        if (s === stagesStep) tabsStale = true;
         if (s.after) s.after(s.saved, before);
         reload = !!result.reload;
         settleSoon();
@@ -537,13 +568,15 @@ function mountQuoteAutosave({ project, page }) {
     })();
     return s.promise;
   }
-  // Saves what can be saved, and waits for it.
+  // Saves what can be saved, waits for it, and gives back what could not be: [{ label, why }].
   async function flush(opts = {}) {
-    if (gone()) return;
+    if (gone()) return [];
     steps.forEach(s => { clearTimeout(s.timer); s.timer = null; s.typing = false; });
     await Promise.all(steps.map(s => s.promise));
     await Promise.all(steps.map(s => run(s, { force: true, callerReloads: !!opts.callerReloads })));
     await Promise.all(steps.map(s => s.promise));
+    if (gone()) return [];
+    return steps.filter(dirty).map(s => ({ label: s.label, why: (s.failed ? s.failed.message : s.held || 'it is still saving').replace(/^Not saved yet: /, '') }));
   }
   async function savePoint(reason) {
     if (gone()) return;
@@ -636,6 +669,15 @@ function mountQuoteAutosave({ project, page }) {
   const opened = typedEarly ? { stored: true } : { taken_at: new Date().toISOString(), reason: 'opened', snapshot: snapshotNow(), stored: false };
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onDocKey);
+  // The other tabs were drawn when the page opened. Once the stages have changed, opening one
+  // reads the quote again and redraws, the way Save pricing used to straight after each save.
+  const tabs = document.getElementById('job-tabs');
+  if (tabs) tabs.addEventListener('click', (e) => {
+    const tab = e.target.closest('.settings-tab');
+    if (!tab || tab.dataset.panel === 'quote' || !tabsStale || dead) return;
+    tabsStale = false;
+    page.reload(tab.dataset.panel);
+  });
 
   // Boxes the page is still filling in just after it opens (stage rows that finish drawing, a tick
   // the page sets itself) are part of the quote as opened, not a change to save.
