@@ -1,9 +1,11 @@
-// Formbay battery (BSTC) forms and the job they belong to (item 101). How it works, in one place:
+// Formbay forms (solar PV, battery BSTC, and the two together) and the job they belong to (item 101).
+// How it works, in one place:
 //   syncForm        reads one form from Formbay, keeps it in formbay_forms and brings the job up to date
 //   fileFormDocs    files the form's photos and documents on the job (photos, Documents, the CCEW card)
 //   findForms       Formbay forms not yet on a job, the ones at this job's address first
 //   createOptions   what the Create Formbay form panel needs: people, brands, the job's details
 //   createForm      makes the form in Formbay as a draft and links it to the job
+//   equipmentList   Formbay's own panel, inverter and battery lists for the panel's pick lists
 // Called by formbay-sync.js, formbay-create-form.js (a person, pricing roles) and
 // formbay-poll-background.js (every 15 minutes). Service role throughout.
 // Writes: formbay_forms, job_stcs (the Formbay number and status), projects (NMI, Formbay status,
@@ -19,6 +21,11 @@ const STC_STATUS = {
   submitted: 'pending_cer_audit', uploaded: 'pending_cer_audit', approved: 'approved_for_sale', rejected: 'pending_retailer_action',
 };
 const STC_ORDER = ['not_lodged', 'pending_installer_action', 'pending_retailer_action', 'pending_cer_audit', 'approved_for_sale', 'sold', 'paid'];
+// The two kinds of form: Formbay's addresses for each, the STC line it feeds and the job's own figures.
+const KINDS = {
+  bstc: { label: 'battery', form: 'bstc_form', list: 'bstc_form_list', docsList: 'bstc_docs_list', count: 'calbstc', jobCount: 'bstc_quantity', jobPrice: 'bstc_price_per_certificate' },
+  pv: { label: 'solar', form: 'pv_form', list: 'pv_form_list', docsList: 'pv_docs_list', count: 'calrec', jobCount: 'stc_quantity', jobPrice: 'stc_price_per_certificate' },
+};
 const NOT_FILED = /selfie|installer photo/i;         // photos of the installer, no use on the job
 const IS_CCEW = /certificate of testing|ccew|compliance.*electrical/i;
 const MAX_PHOTO = 1920;
@@ -34,18 +41,30 @@ const formAddress = (f) => [[f.punitnum, f.pstreetnum].filter(Boolean).join('/')
 
 // ---------- read one form, bring the job up to date ----------
 
-// formId: Formbay's number. projectId is needed only the first time (it links the form to the job).
+// formId: Formbay's number; ftype: 'pv' or 'bstc' (worked out from Formbay's lists when not given).
+// projectId is needed only the first time (it links the form to the job).
 // Returns { ok, row } or { ok: false, error }.
 // confirmed: a person said yes to a form whose address is not the job's (linking only).
-async function syncForm(db, token, { formId, projectId = null, userId = null, confirmed = false }) {
+async function syncForm(db, token, { formId, ftype = null, projectId = null, userId = null, confirmed = false }) {
   const id = String(formId).trim();
-  const r = await formbayCall(token, `bstc_form?formid=${encodeURIComponent(id)}`);
+  if (!ftype) {
+    let unanswered = false;
+    for (const t of Object.keys(KINDS)) {
+      const list = await formbayCall(token, KINDS[t].list);
+      if (!Array.isArray(list.json)) unanswered = true;
+      else if (list.json.map(String).includes(id)) { ftype = t; break; }
+    }
+    if (!ftype) return { ok: false, error: unanswered ? 'Formbay did not answer. Try again.' : `Formbay has no solar or battery form ${id}.` };
+  }
+  const kind = KINDS[ftype];
+  if (!kind) return { ok: false, error: 'Unknown kind of Formbay form.' };
+  const r = await formbayCall(token, `${kind.form}?formid=${encodeURIComponent(id)}`);
   const form = r.status === 200 && r.json && !Array.isArray(r.json) && STC_STATUS[r.json.status] ? r.json : null;
 
-  const { data: existing, error: exErr } = await db.from('formbay_forms').select('*').eq('ftype', 'bstc').eq('formbay_job_id', id).maybeSingle();
+  const { data: existing, error: exErr } = await db.from('formbay_forms').select('*').eq('ftype', ftype).eq('formbay_job_id', id).maybeSingle();
   if (exErr) return { ok: false, error: exErr.message };
   if (!form) {
-    const error = r.status === 404 ? `Formbay has no battery form ${id}.` : `Formbay did not answer (${r.status || r.text}).`;
+    const error = r.status === 404 ? `Formbay has no ${kind.label} form ${id}.` : `Formbay did not answer (${r.status || r.text}).`;
     if (existing) await db.from('formbay_forms').update({ sync_error: error }).eq('id', existing.id);
     return { ok: false, error };
   }
@@ -53,19 +72,24 @@ async function syncForm(db, token, { formId, projectId = null, userId = null, co
   if (existing && projectId && existing.project_id !== projectId) return { ok: false, error: 'This Formbay form is already linked to another job.' };
   // The poll, the tab opening and Check now can land together: one read in 15 seconds is enough.
   if (existing && existing.synced_at && !existing.sync_error && Date.now() - new Date(existing.synced_at).getTime() < 15000) return { ok: true, row: existing };
+  if (!existing) {
+    // One form of each kind per job: a second would add a second STC line at the job's full count.
+    const { data: sameKind } = await db.from('formbay_forms').select('formbay_job_id').eq('project_id', projectId).eq('ftype', ftype).limit(1);
+    if (sameKind && sameKind.length) return { ok: false, error: `This job already has Formbay ${kind.label} form ${sameKind[0].formbay_job_id}.` };
+  }
   if (!existing && !confirmed) {
     const { data: job } = await db.from('projects').select('client_address').eq('id', projectId).maybeSingle();
     if (!job) return { ok: false, error: 'Job not found.' };
     if (!sameAddress(form, job.client_address)) return { ok: false, confirm: true, error: `Formbay form ${id} is at ${formAddress(form)}, which is not this job's address.` };
   }
 
-  const docsRes = await formbayCall(token, 'bstc_docs_list', { form: { formid: id, group_id: form.group_id || '' } });
+  const docsRes = await formbayCall(token, kind.docsList, { form: { formid: id, group_id: form.group_id || '' } });
   const patch = { job_status: form.sold_date ? 'sold' : form.status, form, synced_at: new Date().toISOString(), sync_error: null };
   if (Array.isArray(docsRes.json)) patch.docs = docsRes.json;
 
   const write = existing
     ? db.from('formbay_forms').update(patch).eq('id', existing.id)
-    : db.from('formbay_forms').insert({ ...patch, project_id: projectId, ftype: 'bstc', formbay_job_id: id, created_by: userId });
+    : db.from('formbay_forms').insert({ ...patch, project_id: projectId, ftype, formbay_job_id: id, created_by: userId });
   const { data: row, error } = await write.select('*').single();
   if (error) return { ok: false, error: error.message };
 
@@ -81,15 +105,16 @@ async function syncForm(db, token, { formId, projectId = null, userId = null, co
 async function applyToJob(db, row) {
   const form = row.form;
   const { data: project, error: pErr } = await db.from('projects')
-    .select('id, client_id, client_address, nmi, formbay_lodgement_id, bstc_quantity, bstc_price_per_certificate, inverter_serial_numbers, clients(name)')
+    .select('id, client_id, client_address, nmi, formbay_lodgement_id, stc_quantity, stc_price_per_certificate, bstc_quantity, bstc_price_per_certificate, panel_serial_numbers, inverter_serial_numbers, clients(name)')
     .eq('id', row.project_id).single();
   if (pErr) throw pErr;
 
-  // The STC line: the one this form already has, else the job's battery line with no Formbay number, else a new one.
+  // The STC line: the one this form already has, else the job's line of this kind with no Formbay number, else a new one.
+  const kind = KINDS[row.ftype];
   const { data: stcs, error: sErr } = await db.from('job_stcs').select('id, stc_type, status, formbay_job_id, sold_on').eq('project_id', project.id).order('created_at');
   if (sErr) throw sErr;
-  let line = stcs.find(s => s.id === row.job_stc_id) || stcs.find(s => s.formbay_job_id === row.formbay_job_id)
-    || stcs.find(s => s.stc_type === 'bstc' && !s.formbay_job_id);
+  let line = stcs.find(s => s.id === row.job_stc_id) || stcs.find(s => s.stc_type === row.ftype && s.formbay_job_id === row.formbay_job_id)
+    || stcs.find(s => s.stc_type === row.ftype && !s.formbay_job_id);
   const status = row.job_status === 'sold' ? 'sold' : STC_STATUS[form.status];
   const linePatch = { formbay_job_id: row.formbay_job_id, commercial: String(form.commercial) === '1', updated_at: new Date().toISOString() };
   // The line follows the form forwards only (a status typed ahead of Formbay, and Paid from the
@@ -100,9 +125,9 @@ async function applyToJob(db, row) {
     const { error } = await db.from('job_stcs').update(linePatch).eq('id', line.id);
     if (error) throw error;
   } else {
-    const count = Math.round(Number(project.bstc_quantity)) || Math.round(Number(form.calbstc)) || 0;
-    const insert = { ...linePatch, project_id: project.id, stc_type: 'bstc', stc_count: count, created_by: row.created_by };
-    if (Number(project.bstc_price_per_certificate) > 0) insert.booked_price = Number(project.bstc_price_per_certificate);
+    const count = Math.round(Number(project[kind.jobCount])) || Math.round(Number(form[kind.count])) || 0;
+    const insert = { ...linePatch, project_id: project.id, stc_type: row.ftype, stc_count: count, created_by: row.created_by };
+    if (Number(project[kind.jobPrice]) > 0) insert.booked_price = Number(project[kind.jobPrice]);
     const { data, error } = await db.from('job_stcs').insert(insert).select('id, status').single();
     if (error) throw error;
     line = data;
@@ -118,36 +143,49 @@ async function applyToJob(db, row) {
   if (!project.formbay_lodgement_id) projectPatch.formbay_lodgement_id = row.formbay_job_id;
 
   if (isoDate(form.installer_signee_date)) {
-    const inverterSerials = await makeEquipment(db, row, project);
-    const merged = unique([...lines(project.inverter_serial_numbers), ...inverterSerials]);
-    if (merged.length > lines(project.inverter_serial_numbers).length) projectPatch.inverter_serial_numbers = merged.join('\n');
+    // The job's own serial boxes (the handover check reads them) take the form's serials too, added to what is there.
+    const serials = await makeEquipment(db, row, project);
+    for (const [column, found] of [['panel_serial_numbers', serials.panels], ['inverter_serial_numbers', serials.inverters]]) {
+      const merged = unique([...lines(project[column]), ...found]);
+      if (merged.length > lines(project[column]).length) projectPatch[column] = merged.join('\n');
+    }
   }
   const { error: upErr } = await db.from('projects').update(projectPatch).eq('id', project.id);
   if (upErr) throw upErr;
 }
 
-// One Customer equipment row for the battery and one per inverter model on the form. A row this
-// form already made is updated; a row typed by hand on the job (same kind, a shared serial number or
-// the only one of its kind) is taken over and never doubled; typed values are kept.
-// Returns the inverter serial numbers (the job's handover field carries them too).
+// One Customer equipment row for each thing on the form: the battery and its inverters (a battery
+// form), the panels and the inverter (a solar form). A row this form already made is updated; a row
+// typed by hand on the job (same kind, a shared serial number or the only one of its kind) is taken
+// over and never doubled; typed values are kept.
+// Returns { panels, inverters }: the serial numbers the job's handover fields carry too.
 async function makeEquipment(db, row, project) {
   const form = row.form;
   const installed = isoDate(form.idate);
-  const battery = (form.batteries || [])[0];
-  const wanted = [];
-  if (battery) {
-    wanted.push({
-      asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
-      serials: unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]),
-      notes: `${Number(battery.usable_capacity) || ''} kWh usable. From Formbay form ${row.formbay_job_id}.`,
-    });
-  }
+  const from = `From Formbay form ${row.formbay_job_id}.`;
   const inverterSerials = unique(form.inverterserialnumbersname || []);
-  (form.inverters || []).forEach((inv, i) => wanted.push({
-    asset_type: 'inverter', make: inv.brand_short_name || inv.brand, model: inv.model, quantity: Number(inv.quantity) || 1,
-    serials: i === 0 ? inverterSerials : [], notes: `From Formbay form ${row.formbay_job_id}.`,
-  }));
-  if (!wanted.length) return inverterSerials;
+  const wanted = [];
+  let panelSerials = [];
+  if (row.ftype === 'pv') {
+    panelSerials = unique(form.serialnumbersname || []);
+    if (form.model) wanted.push({ asset_type: 'solar', make: form.brand, model: form.model, quantity: Number(form.npanels) || 1, serials: panelSerials, notes: `${Number(form.ratedpower) || ''} kW. ${from}` });
+    if (form.modeli) wanted.push({ asset_type: 'inverter', make: form.brandi, model: form.modeli, quantity: 1, serials: inverterSerials, notes: from });
+  } else {
+    const battery = (form.batteries || [])[0];
+    if (battery) {
+      wanted.push({
+        asset_type: 'battery', make: battery.brand_short_name || battery.brand, model: battery.model, quantity: Number(battery.quantity) || 1,
+        serials: unique([...(form.battery_serials || []), ...(form.serialnumbersname || [])]),
+        notes: `${Number(battery.usable_capacity) || ''} kWh usable. ${from}`,
+      });
+    }
+    (form.inverters || []).forEach((inv, i) => wanted.push({
+      asset_type: 'inverter', make: inv.brand_short_name || inv.brand, model: inv.model, quantity: Number(inv.quantity) || 1,
+      serials: i === 0 ? inverterSerials : [], notes: from,
+    }));
+  }
+  const found = { panels: panelSerials, inverters: inverterSerials };
+  if (!wanted.length) return found;
 
   const { data: onJob, error } = await db.from('customer_assets').select('*').eq('project_id', project.id).neq('status', 'decommissioned').order('created_at');
   if (error) throw error;
@@ -158,6 +196,18 @@ async function makeEquipment(db, row, project) {
     const mine = sameKind.find(a => a.formbay_form_id === row.id)
       || sameKind.find(a => !a.formbay_form_id && lines(a.serial_numbers).some(s => w.serials.includes(s)))
       || (sameKind.length === 1 && !sameKind[0].formbay_form_id ? sameKind[0] : null);
+    // A hybrid inverter is on both a job's solar form and its battery form: the row the other form
+    // made (a shared serial number, or the same model) gets this form's serials and stays one row.
+    const shared = mine ? null : onJob.find(a => a.asset_type === w.asset_type && a.formbay_form_id && a.formbay_form_id !== row.id
+      && (lines(a.serial_numbers).some(x => w.serials.includes(x)) || (!!w.model && a.model === w.model)));
+    if (shared) {
+      const merged = unique([...lines(shared.serial_numbers), ...w.serials]);
+      if (merged.length > lines(shared.serial_numbers).length) {
+        const { error: e } = await db.from('customer_assets').update({ serial_numbers: merged.join('\n') }).eq('id', shared.id);
+        if (e) throw e;
+      }
+      continue;
+    }
     if (mine) taken.add(mine.id);
     if (mine) {
       const patch = { formbay_form_id: row.id, serial_numbers: unique([...lines(mine.serial_numbers), ...w.serials]).join('\n') };
@@ -170,7 +220,7 @@ async function makeEquipment(db, row, project) {
     } else {
       const { error: e } = await db.from('customer_assets').insert({
         client_id: project.client_id, project_id: project.id, client_name: project.clients ? project.clients.name : null,
-        site_address: project.client_address, asset_type: w.asset_type, name: [w.make, w.model].filter(Boolean).join(' ') || 'Battery',
+        site_address: project.client_address, asset_type: w.asset_type, name: [w.make, w.model].filter(Boolean).join(' ') || w.asset_type,
         make: w.make, model: w.model, serial_numbers: w.serials.join('\n'), quantity: w.quantity, installed_at: installed,
         notes: w.notes, formbay_form_id: row.id, created_by: row.created_by, ...(await warrantyFor(db, w, installed)),
       });
@@ -178,7 +228,7 @@ async function makeEquipment(db, row, project) {
     }
   }
   if (!row.equipment_made_at) await db.from('formbay_forms').update({ equipment_made_at: new Date().toISOString() }).eq('id', row.id);
-  return inverterSerials;
+  return found;
 }
 
 // The warranty for a model is asked once (on the first one, on the job's Formbay card) and
@@ -215,7 +265,7 @@ async function fileFormDocs(db, token, row, { limit = 8 } = {}) {
       // Claimed before the download, so a second run that overlaps this one leaves it alone.
       filed[doc.fileid] = { claimed: Date.now() };
       await db.from('formbay_forms').update({ filed }).eq('id', row.id);
-      const file = await formbayFile(token, doc.fileid);
+      const file = await formbayFile(token, row.ftype, doc.fileid);
       const isPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(doc.filename || '');
       filed[doc.fileid] = isPdf ? await filePdf(db, row, doc, file.bytes) : await filePhoto(db, row, doc, file.bytes);
       done++;
@@ -277,24 +327,24 @@ function sameAddress(form, jobAddress) {
     && a.includes(` ${String(form.pstreetnum).toUpperCase()} `) && a.includes(` ${form.ppostalcode} `) && a.includes(` ${word} `);
 }
 
-// Formbay battery forms not on any job yet (newest 12), the ones at this job's address first.
+// Formbay solar and battery forms not on any job yet (newest 10 of each), the ones at this job's address first.
 async function findForms(db, token, projectId) {
   const { data: project, error } = await db.from('projects').select('client_address').eq('id', projectId).single();
   if (error) return { ok: false, error: error.message };
-  const list = await formbayCall(token, 'bstc_form_list');
-  if (!Array.isArray(list.json)) return { ok: false, error: `Formbay did not answer (${list.status || list.text}).` };
-  const { data: linked } = await db.from('formbay_forms').select('formbay_job_id').eq('ftype', 'bstc');
-  const taken = new Set((linked || []).map(l => l.formbay_job_id));
-  const forms = [];
-  for (const id of list.json.map(String).filter(i => !taken.has(i)).slice(-12).reverse()) {
-    const r = await formbayCall(token, `bstc_form?formid=${encodeURIComponent(id)}`);
-    const f = r.json;
-    if (!f || !f.status) continue;
-    forms.push({
-      formId: id, address: formAddress(f), owner: [f.ofname, f.osname].filter(Boolean).join(' '), status: f.status,
-      installDate: isoDate(f.idate), model: f.model || '', match: sameAddress(f, project.client_address),
-    });
-  }
+  const { data: linked } = await db.from('formbay_forms').select('project_id, ftype, formbay_job_id');
+  const taken = new Set((linked || []).map(l => `${l.ftype} ${l.formbay_job_id}`));
+  // A job takes one form of each kind, so a kind it already has is left out.
+  const has = new Set((linked || []).filter(l => l.project_id === projectId).map(l => l.ftype));
+  const kinds = Object.keys(KINDS).filter(t => !has.has(t));
+  const lists = await Promise.all(kinds.map(t => formbayCall(token, KINDS[t].list)));
+  const bad = lists.find(l => !Array.isArray(l.json));
+  if (bad) return { ok: false, error: `Formbay did not answer (${bad.status || bad.text}).` };
+  const wanted = kinds.flatMap((ftype, i) => lists[i].json.map(String).filter(id => !taken.has(`${ftype} ${id}`)).slice(-10).reverse().map(id => ({ ftype, id })));
+  const read = await Promise.all(wanted.map(w => formbayCall(token, `${KINDS[w.ftype].form}?formid=${encodeURIComponent(w.id)}`)));
+  const forms = wanted.map((w, i) => ({ ...w, f: read[i].json })).filter(x => x.f && x.f.status).map(({ ftype, id, f }) => ({
+    formId: id, ftype, kind: KINDS[ftype].label, address: formAddress(f), owner: [f.ofname, f.osname].filter(Boolean).join(' '),
+    status: f.status, installDate: isoDate(f.idate), model: f.model || '', match: sameAddress(f, project.client_address),
+  }));
   forms.sort((x, y) => Number(y.match) - Number(x.match));
   return { ok: true, forms };
 }
@@ -324,51 +374,98 @@ function parseAddress(text, streetTypes = {}) {
   return out;
 }
 
+// Formbay's own equipment lists, by the panel's name for each (brand and series narrow the next one).
+const LISTS = {
+  battery_series: (q) => `pv_inverter_battery_series?${new URLSearchParams({ b_brand: q.brand, bstc: 1 })}`,
+  battery_models: (q) => `pv_inverter_battery_models?${new URLSearchParams({ b_brand: q.brand, b_series: q.series, bstc: 1 })}`,
+  panel_models: (q) => `pv_panel_models?${new URLSearchParams({ brand: q.brand })}`,
+  inverter_series: (q) => `pv_inverter_series?${new URLSearchParams({ brand: q.brand })}`,
+  inverter_models: (q) => `pv_inverter_models?${new URLSearchParams({ brand: q.brand, series: q.series })}`,
+};
+const names = (json) => (Array.isArray(json) ? json : []).map(b => (typeof b === 'string' ? b : (b && (b.model || b.series || b.brand || b.name)) || '')).filter(Boolean);
+async function equipmentList(token, list, q) {
+  if (!LISTS[list]) return { ok: false, error: 'Unknown list' };
+  const r = await formbayCall(token, LISTS[list]({ brand: String(q.brand || ''), series: String(q.series || '') }));
+  return Array.isArray(r.json) ? { ok: true, list: names(r.json) } : { ok: false, error: 'Formbay did not send its list. Try again.' };
+}
+
+// What the Create panel opens with: who can be the installer, Formbay's brand lists, and the job's
+// own details. `what` is the kind of form the job looks like: 'pv' (solar), 'pv_bstc' (solar and
+// battery) or 'bstc' (battery), from the quote's STC and battery STC counts and its template.
 async function createOptions(db, token, projectId) {
   const { data: project, error } = await db.from('projects')
-    .select('id, job_number, client_address, nmi, clients(name, email, phone, client_type)').eq('id', projectId).single();
+    .select('id, job_number, client_address, nmi, proposal_template, stc_quantity, bstc_quantity, clients(name, email, phone, client_type)').eq('id', projectId).single();
   if (error) return { ok: false, error: error.message };
-  const [installers, brands, streetTypes, lines2, last] = await Promise.all([
-    formbayCall(token, 'pv_installers'), formbayCall(token, 'pv_inverter_battery_brands?bstc=1'), formbayCall(token, 'street_types'),
+  const [installers, batteryBrands, panelBrands, inverterBrands, streetTypes, lines2, last] = await Promise.all([
+    formbayCall(token, 'pv_installers'), formbayCall(token, 'pv_inverter_battery_brands?bstc=1'), formbayCall(token, 'pv_panel_brands'),
+    formbayCall(token, 'pv_inverter_brands'), formbayCall(token, 'street_types'),
     db.from('cost_centre_line_items').select('description, cost_centres!inner(project_id)').eq('cost_centres.project_id', projectId).limit(300),
     db.from('formbay_forms').select('form').order('created_at', { ascending: false }).limit(1),
   ]);
   if (!Array.isArray(installers.json)) return { ok: false, error: `Formbay did not answer (${installers.status || installers.text}).` };
   const types = streetTypes.json && !Array.isArray(streetTypes.json) ? streetTypes.json : {};
-  const brandList = (Array.isArray(brands.json) ? brands.json : []).map(b => (typeof b === 'string' ? b : (b.brand || b.name || ''))).filter(Boolean);
   // The brand whose first word is on one of the quote's lines ("Sungrow SBH 25kW ..." -> Sungrow ...).
   const quoteText = ` ${((lines2.data || []).map(l => l.description).join(' ')).toLowerCase()} `;
-  const brand = brandList.find(b => { const w = b.toLowerCase().split(/\s+/)[0]; return w.length > 3 && quoteText.includes(` ${w}`); }) || '';
+  const guess = (list) => list.find(b => { const w = b.toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9]/g, ''); return w.length > 2 && new RegExp(`\\b${w}\\b`).test(quoteText); }) || '';
+  const lists = { battery: names(batteryBrands.json), panel: names(panelBrands.json), inverter: names(inverterBrands.json) };
   const client = project.clients || {};
-  const names = String(client.name || '').trim().split(/\s+/);
+  const person = String(client.name || '').trim().split(/\s+/);
   const lastForm = last.data && last.data[0] ? last.data[0].form : null;
+  // A kind of form the job already has is not offered again ("Add a battery form" on a job with a solar one).
+  const { data: has } = await db.from('formbay_forms').select('ftype').eq('project_id', projectId);
+  const got = new Set((has || []).map(h => h.ftype));
+  const solar = !got.has('pv') && (got.has('bstc') || Number(project.stc_quantity) > 0 || project.proposal_template === 'solar');
+  const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,
     installers: installers.json.map(i => ({ id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' ') })),
-    brands: brandList, streetTypes: types,
+    brands: lists, streetTypes: types,
     prefill: {
-      fname: names[0] || '', sname: names.slice(1).join(' '), email: client.email || '', phone: String(client.phone || '').replace(/\s+/g, ''),
-      ...parseAddress(project.client_address, types), nmi: project.nmi || '', brand,
+      what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
+      fname: person[0] || '', sname: person.slice(1).join(' '), email: client.email || '', phone: String(client.phone || '').replace(/\s+/g, ''),
+      ...parseAddress(project.client_address, types), nmi: project.nmi || '',
+      battery_brand: guess(lists.battery), panel_brand: guess(lists.panel), inverter_brand: guess(lists.inverter),
       installer: lastForm ? String(lastForm.iid || '') : '', commercial: client.client_type === 'company',
     },
   };
 }
 
-// f: the Create panel's fields. Makes the form in Formbay (a draft: nothing is signed or submitted),
-// links it to the job and reads it straight back. A refusal comes back with Formbay's own words.
+// f: the Create panel's fields; f.what is 'pv', 'pv_bstc' or 'bstc'. Makes the form in Formbay (a
+// draft: nothing is signed or submitted), links it to the job and reads it straight back. Solar with
+// a battery comes back as two linked forms, and both go on the job. A refusal comes back with
+// Formbay's own words.
 async function createForm(db, token, { projectId, userId, f }) {
-  const { data: already } = await db.from('formbay_forms').select('formbay_job_id').eq('project_id', projectId).eq('ftype', 'bstc').limit(1);
-  if (already && already.length) return { ok: false, error: `This job already has Formbay form ${already[0].formbay_job_id}.` };
+  const what = ['pv', 'pv_bstc', 'bstc'].includes(f.what) ? f.what : 'bstc';
+  const solar = what !== 'bstc';
+  const battery = what !== 'pv';
+  const { data: already } = await db.from('formbay_forms').select('ftype, formbay_job_id').eq('project_id', projectId);
+  const clash = (already || []).find(x => (x.ftype === 'pv' && solar) || (x.ftype === 'bstc' && battery));
+  if (clash) return { ok: false, error: `This job already has Formbay ${KINDS[clash.ftype].label} form ${clash.formbay_job_id}.` };
   const clean = (v, n = 120) => String(v == null ? '' : v).trim().slice(0, n);
+  const whole = (v, min) => Math.max(min, Math.round(Number(v)) || min);
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean(f.date));
-  const need = { 'First name': f.fname, 'Last name': f.sname, 'Street number': f.street_number, 'Street name': f.street_name, Suburb: f.city, State: f.state, Postcode: f.postcode, Installer: f.installer, 'Battery brand': f.brand, 'Battery model': f.model, 'Install date': date };
+  const need = { 'First name': f.fname, 'Last name': f.sname, 'Street number': f.street_number, 'Street name': f.street_name, Suburb: f.city, State: f.state, Postcode: f.postcode, Installer: f.installer, 'Install date': date };
+  if (solar) Object.assign(need, { 'Panel brand': f.panel_brand, 'Panel model': f.panel_model, 'Number of panels': Number(f.panel_count) > 0, 'Inverter brand': f.inverter_brand, 'Inverter model': f.inverter_model });
+  if (battery) Object.assign(need, { 'Battery brand': f.battery_brand, 'Battery model': f.battery_model });
   const missing = Object.keys(need).filter(k => !need[k] || !clean(need[k]));
   if (missing.length) return { ok: false, error: `Still needed: ${missing.join(', ')}.` };
 
   const person = Number(clean(f.installer));
+  const equipment = [];
+  if (solar) {
+    equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
+    equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
+  }
+  if (battery) {
+    equipment.push({
+      type: 3, brand: clean(f.battery_brand), series: clean(f.battery_series), model: clean(f.battery_model), count: whole(f.battery_count, 1),
+      setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: 0,
+    });
+  }
   const body = {
-    v: 2, type: 'bstc', date: `${date[3]}/${date[2]}/${date[1]}`,
-    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: 2, meter_no: '' },   // 2: on the grid with a battery, as on our forms so far
+    v: 2, type: solar ? 'pv' : 'bstc', date: `${date[3]}/${date[2]}/${date[1]}`,
+    // 1: on the grid with no battery, 2: on the grid with a battery (as on the forms made in Formbay so far)
+    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: battery ? 2 : 1, meter_no: '' },
     team: { designer: person, installer: person, electrician: person },
     address: {
       city: clean(f.city).toUpperCase(), state: clean(f.state, 3).toUpperCase(), postcode: clean(f.postcode, 4),
@@ -376,12 +473,11 @@ async function createForm(db, token, { projectId, userId, f }) {
       street_number: clean(f.street_number, 12), street_name: clean(f.street_name).toUpperCase(), street_type: clean(f.street_type, 8).toUpperCase(),
     },
     customers: { owner: { fname: clean(f.fname), sname: clean(f.sname), email: clean(f.email), phone: clean(f.phone, 20).replace(/[^\d+]/g, '') } },
-    equipment: [{
-      type: 3, brand: clean(f.brand), series: clean(f.series), model: clean(f.model), count: Math.max(1, Math.round(Number(f.count)) || 1),
-      setting: 0, aggregated: 0, existing_model: '', existing_modules: 0, number_of_modules: Math.max(0, Math.round(Number(f.modules)) || 0),
-    }],
+    equipment,
     commercial: f.commercial ? 1 : 0,
   };
+  if (solar) body.installation = Math.min(3, Math.max(0, Math.round(Number(f.installation)) || 0));   // 0 new, 1 replacement, 2 additional, 3 extension
+  if (what === 'pv_bstc') { body.is_bstc = 1; body.battery_installation = { type: 0, comment: '', additional_wattage: '' }; }
   // NSW: Formbay makes the CCEW with the form, under the company's contractor licence.
   if (body.address.state === 'NSW') {
     const groups = await formbayCall(token, 'clients');
@@ -394,18 +490,28 @@ async function createForm(db, token, { projectId, userId, f }) {
   const r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
   // Kept so a refusal can be read later (finance roles): what Formbay was sent and what it said.
   await db.from('formbay_webhook_events').insert({ event_type: 'create.attempt', formbay_job_id: `project ${projectId}`, payload: { status: r.status, sent: body, answer: r.json || r.text } });
-  const formId = r.json && (r.json.bstc_formid || r.json.formid);
-  if (!formId) {
+  const made = [];
+  if (r.json && solar && (r.json.pv_formid || r.json.formid)) made.push(['pv', String(r.json.pv_formid || r.json.formid)]);
+  if (r.json && battery && (r.json.bstc_formid || (!solar && r.json.formid))) made.push(['bstc', String(r.json.bstc_formid || r.json.formid)]);
+  if (!made.length) {
     const fields = r.json && (r.json.fields || r.json.errors);
     const detail = fields && typeof fields === 'object' ? Object.entries(fields).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('; ') : '';
     const said = (r.json && (r.json.error || r.json.error_message || r.json.message)) || r.text || 'no answer';
     return { ok: false, error: `Formbay did not make the form: ${said}${detail ? ` (${detail})` : ''}` };
   }
-  const synced = await syncForm(db, token, { formId, projectId, userId, confirmed: true });
-  if (synced.ok) return synced;
-  // Formbay made the form but reading it back failed: keep the link, the 15 minute check fills it in.
-  if (!synced.row) await db.from('formbay_forms').insert({ project_id: projectId, ftype: 'bstc', formbay_job_id: String(formId), created_by: userId, sync_error: synced.error });
-  return { ok: true, formId: String(formId), warning: `Formbay made form ${formId}. Its details will show here within 15 minutes.` };
+  let warning = what === 'pv_bstc' && made.length < 2 ? 'Formbay made the solar form but did not say which battery form goes with it. Use Add a battery form to find it.' : '';
+  const read = await Promise.all(made.map(([ftype, formId]) => syncForm(db, token, { formId, ftype, projectId, userId, confirmed: true })));
+  for (let i = 0; i < made.length; i++) {
+    if (read[i].ok) continue;
+    const [ftype, formId] = made[i];
+    // Formbay made the form but reading it back failed: keep the link, the 15 minute check fills it in.
+    if (!read[i].row) {
+      const { error: linkErr } = await db.from('formbay_forms').insert({ project_id: projectId, ftype, formbay_job_id: formId, created_by: userId, sync_error: read[i].error });
+      if (linkErr) { warning = `Formbay made ${KINDS[ftype].label} form ${formId}, but it could not be put on this job. Use Find this job in Formbay, do not create it again.`; continue; }
+    }
+    warning = warning || `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
+  }
+  return warning ? { ok: true, warning } : { ok: true };
 }
 
-module.exports = { syncForm, fileFormDocs, findForms, createOptions, createForm, isoDate };
+module.exports = { syncForm, fileFormDocs, findForms, createOptions, createForm, equipmentList, isoDate };
