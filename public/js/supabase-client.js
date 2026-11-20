@@ -3534,7 +3534,7 @@ async function clockOutActiveEntry(entry, opts = {}) {
 // with real "before you go" actions: log a site photo, jot a note (with
 // an optional signature), or head to the job.
 // The waterfall sliders for a split (js/split-sliders.js), loaded the first time a split is shown.
-const loadSplitSliders = () => loadJsOnce('/js/split-sliders.js?v=1', () => typeof mountSplitSliders === 'function');
+const loadSplitSliders = () => loadJsOnce('/js/split-sliders.js?v=2', () => typeof mountSplitSliders === 'function');
 
 // `entry` needs id/staff_id/project_id/cost_centre_id/
 // selected_cost_centre_ids/time_category/clock_in. Calls `onDone` (if

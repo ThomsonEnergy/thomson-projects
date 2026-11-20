@@ -187,7 +187,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=144"></script>
-  <script src="/js/split-sliders.js?v=1"></script>
+  <script src="/js/split-sliders.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
@@ -751,6 +751,7 @@
             <h2>Edit timesheet${isSelf ? '' : ` - ${escapeHtml(staffName || 'staff member')}`} - ${new Date(dateStr + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' })}</h2>
             <p class="subtitle" style="margin-bottom:14px;">You can be logged against more than one job in a day - add a block per job and split each one across its own stages.</p>
             <div id="day-blocks"></div>
+            <div id="day-waterfall" style="display:none; padding:14px; background:var(--surface-2); border-radius:8px; margin-bottom:12px;"></div>
             <button type="button" class="secondary" id="day-add-block-btn" style="margin-top:6px;">+ Add another job for this day</button>
             <div id="day-break-section" style="padding:14px; background:var(--surface-2); border-radius:8px; margin:16px 0 0;">
               <label style="margin-top:0">Lunch break</label>
@@ -774,6 +775,7 @@
           blocksEl.appendChild(el);
           await renderBlock(block, el);
         }
+        refreshDayWaterfall();
 
         overlay.querySelector('#day-break-yes').addEventListener('click', () => { dayBreak.taken = true; renderBreakSection(); });
         overlay.querySelector('#day-break-no').addEventListener('click', () => { dayBreak.taken = false; renderBreakSection(); });
@@ -819,7 +821,7 @@
       }
 
       async function renderBlock(block, el) {
-        block.el = el; // so an answer given on one block can redraw the others on the same job
+        block.el = el; // so an answer given on one block can redraw the others on the same job, and the day waterfall can move its times
         await ensureCentresLoaded(block);
 
         el.innerHTML = `
@@ -940,8 +942,8 @@
             refreshBlockSplit(block, el);
           });
         });
-        el.querySelector('.day-block-start').addEventListener('input', (e) => { block.clockInTime = e.target.value; refreshBlockSplit(block, el); });
-        el.querySelector('.day-block-end').addEventListener('input', (e) => { block.clockOutTime = e.target.value; refreshBlockSplit(block, el); });
+        el.querySelector('.day-block-start').addEventListener('input', (e) => { block.clockInTime = e.target.value; refreshBlockSplit(block, el); refreshDayWaterfall(); });
+        el.querySelector('.day-block-end').addEventListener('input', (e) => { block.clockOutTime = e.target.value; refreshBlockSplit(block, el); refreshDayWaterfall(); });
         el.querySelector('.day-block-remove').addEventListener('click', async () => {
           if (block.id) dayRemovedBlocks.push(block);
           dayBlocks = dayBlocks.filter(b => b.key !== block.key);
@@ -950,6 +952,72 @@
         });
 
         refreshBlockSplit(block, el);
+        refreshDayWaterfall();
+      }
+
+      // One waterfall across the whole day (backlog item 104, owner 20 Nov 2026): a slider per block,
+      // and sliding moves time between the blocks. The day's first start and last finish stay put,
+      // the gaps between blocks (lunch, travel) keep their length, and the blocks keep their order;
+      // each block's start and finish boxes follow as it slides. A block already in Xero, or a TAFE
+      // day, is locked and the others work around it. Shown once two blocks have a start and finish.
+      const dayMin = (t, isEnd) => {
+        if (!/^\d{2}:\d{2}$/.test(t || '')) return null;
+        const [h, m] = t.split(':').map(Number);
+        return isEnd && h === 0 && m === 0 ? 1440 : h * 60 + m; // a finish of 00:00 is midnight at the end of the day
+      };
+      const dayTime = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+      function refreshDayWaterfall() {
+        const host = overlay.querySelector('#day-waterfall');
+        if (!host || typeof mountSplitSliders !== 'function') return;
+        const items = dayBlocks
+          .map(b => ({ b, start: dayMin(b.clockInTime), end: dayMin(b.clockOutTime, true) }))
+          .filter(x => x.start !== null && x.end !== null && x.end > x.start)
+          .sort((x, y) => x.start - y.start);
+        if (items.length < 2) { host.style.display = 'none'; host.innerHTML = ''; return; }
+        items.forEach(x => { x.locked = x.b.xeroPushed || (!x.b.projectId && x.b.timeCategory === 'tafe'); x.min = x.end - x.start; });
+        const free = items.map((x, i) => (x.locked ? -1 : i)).filter(i => i >= 0);
+        const totalMin = items.reduce((sum, x) => sum + x.min, 0);
+        // A locked block between two free ones would have to move, and two blocks over the same time
+        // cannot be laid end to end: then the times are changed in the blocks themselves.
+        const why = items.some((x, i) => i && x.start < items[i - 1].end) ? 'Two blocks cover the same time: fix their times first, then slide here.'
+          : free.length < 2 ? 'Only one block can change (the others are in Xero), so there is nothing to slide.'
+          : items.some((x, i) => x.locked && i > free[0] && i < free[free.length - 1]) ? 'A block in the middle of the day is already in Xero, so change the times in the blocks themselves.'
+          : '';
+        const pcts = (() => { // whole numbers that add to 100, as close to the real minutes as they can be
+          let before = 0;
+          return items.map(x => { const from = Math.round(100 * before / totalMin); before += x.min; return Math.round(100 * before / totalMin) - from; });
+        })();
+        const gaps = items.map((x, i) => (i < items.length - 1 ? items[i + 1].start - x.end : 0));
+        const freeMin = free.reduce((sum, i) => sum + items[i].min, 0);
+        mountSplitSliders(host, {
+          rows: items.map(x => ({
+            number: x.b.projectId ? shortRef(x.b.projectLabel) : timeCategoryLabel(x.b.timeCategory),
+            name: x.b.centres.filter(c => x.b.ccIds.includes(c.id)).map(c => c.name).join(', '),
+            locked: x.locked || !!why,
+          })),
+          percentages: pcts, totalMin,
+          intro: why || `Slide to move time between these blocks. The day still starts at ${dayTime(items[0].start)} and finishes at ${dayTime(items[items.length - 1].end)}, and the gaps between blocks stay as they are.`,
+          onChange: () => {
+            // the free blocks share their minutes as the sliders say (rounded on the running total, so
+            // they always add to exactly what they had), laid end to end from the first free start
+            const freePct = free.reduce((sum, i) => sum + pcts[i], 0) || 1;
+            let cum = 0, placed = 0, cursor = items[free[0]].start;
+            free.forEach(i => {
+              cum += pcts[i];
+              const upTo = Math.round(freeMin * cum / freePct);
+              const x = items[i];
+              x.b.clockInTime = dayTime(cursor);
+              x.b.clockOutTime = dayTime(cursor + upTo - placed);
+              cursor += upTo - placed + gaps[i];
+              placed = upTo;
+              if (x.b.el) {
+                x.b.el.querySelector('.day-block-start').value = x.b.clockInTime;
+                x.b.el.querySelector('.day-block-end').value = x.b.clockOutTime;
+                refreshBlockSplit(x.b, x.b.el);
+              }
+            });
+          },
+        });
       }
 
       // Shows the percentage-slider split control only once 2+ stages are
