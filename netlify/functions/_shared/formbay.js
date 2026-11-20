@@ -44,9 +44,9 @@ async function formbayCall(token, path, { form = null, json = null, timeout = 20
   }
 }
 
-// One document or photo off a battery form, as bytes. Formbay answers with the address of the file.
-async function formbayFile(token, fileId) {
-  const res = await fetch(`${TRADING}/client_api/bstc_doc?fileid=${encodeURIComponent(fileId)}`, {
+// One document or photo off a form ('pv' or 'bstc'), as bytes. Formbay answers with the address of the file.
+async function formbayFile(token, ftype, fileId) {
+  const res = await fetch(`${TRADING}/client_api/${ftype === 'pv' ? 'pv_doc' : 'bstc_doc'}?fileid=${encodeURIComponent(fileId)}`, {
     headers: { Authorization: `Bearer ${token}` }, timeout: 45000, size: 30 * 1024 * 1024,
   });
   if (!res.ok) throw new Error(`Formbay file ${fileId}: HTTP ${res.status}`);

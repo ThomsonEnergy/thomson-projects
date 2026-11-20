@@ -1,5 +1,5 @@
 // POST /.netlify/functions/formbay-sync  (pricing roles; the job's STCs tab, public/js/formbay-card.js)
-//   { action: 'find', projectId }             Formbay battery forms not on a job yet, this job's address first
+//   { action: 'find', projectId }             Formbay solar and battery forms not on a job yet, this job's address first
 //   { action: 'link', projectId, formId, confirmed }   put that form on this job and read it; a form at another
 //                                             address comes back { confirm: true } until a person says yes
 //   { action: 'refresh', projectId }          read this job's forms again now
@@ -26,13 +26,14 @@ exports.handler = async (event) => {
     if (action === 'find') return answer(200, await findForms(db, token, projectId));
     if (action === 'link') {
       if (!/^\d{1,12}$/.test(String(formId || '').trim())) return answer(400, { ok: false, error: 'The Formbay job number is digits only.' });
-      return answer(200, await syncForm(db, token, { formId, projectId, userId: auth.user.id, confirmed: input.confirmed === true }));
+      const ftype = ['pv', 'bstc'].includes(input.ftype) ? input.ftype : null;   // a typed number: worked out from Formbay's lists
+      return answer(200, await syncForm(db, token, { formId, ftype, projectId, userId: auth.user.id, confirmed: input.confirmed === true }));
     }
     if (action === 'refresh') {
-      const { data: rows, error } = await db.from('formbay_forms').select('formbay_job_id').eq('project_id', projectId);
+      const { data: rows, error } = await db.from('formbay_forms').select('ftype, formbay_job_id').eq('project_id', projectId);
       if (error) throw error;
       const results = [];
-      for (const row of rows || []) results.push(await syncForm(db, token, { formId: row.formbay_job_id }));
+      for (const row of rows || []) results.push(await syncForm(db, token, { formId: row.formbay_job_id, ftype: row.ftype }));
       const failed = results.find(r => !r.ok);
       return answer(200, failed ? { ok: false, error: failed.error } : { ok: true });
     }

@@ -66,7 +66,7 @@ Manual steps only a person can do (the code is live):
 **Tier 3: growth**
 1. ~~Gantt-style job windows driving scheduling and ordering (M3).~~ Built as A36 (item 92, 17 Nov 2026).
 2. Xero Division tracking category on invoices, credit notes and job bills (H5).
-3. Formbay: solar (PV) forms the same way as battery forms, and posting settlements to Xero (Part L).
+3. Formbay: hot water (SWH) forms the same way as solar and battery forms, and posting settlements to Xero (Part L).
 4. Job page charts and flags (Part J).
 5. Stay logged in and Face ID login (B4).
 6. Offline support (G2), only if poor signal proves a real problem.
@@ -415,7 +415,8 @@ Manual steps only a person can do (the code is live):
   - **Create Formbay form** fills the owner, address, installer and battery brand from the job, the client and the quote lines; the battery series and model are picked from Formbay's own lists; the NMI box is optional (Formbay finds it from the address). It makes a draft in Formbay (`create_form`, with the CCEW block for NSW from the company's contractor licence), adds the job's battery STC line if there is none, and links the form. Signing and Submit stay in Formbay's app. Not sent: the eligibility questions and install type (answered in Formbay). A refusal shows Formbay's own words and is kept in `formbay_webhook_events` (`create.attempt`).
   - **Kept up to date by itself:** every 15 minutes (`formbay-poll-background.js`) and when the tab opens (if the last check is over two minutes old). The card shows Formbay's stage, what it is waiting on, who has signed, the NMI, install date, model and serial count. The STC line's status follows the form (never moved back from Paid), the job's NMI is filled when blank, and the job's Formbay status follows the STC lines as before, so the by-hand status dropdown on the Handover card is gone.
   - **Once the installer has signed:** Customer equipment gets the battery (and any inverter on the form) with make, model, serial numbers and install date; a row typed by hand is taken over, never doubled. The warranty for a model is asked once on the card (years) and copied to every later one of that model. The form's photos go to the job's Photos (made smaller, Formbay's name as the caption; installer selfies left out), its PDFs to Documents > Formbay, and a certificate of testing to the job's CCEW card when the job has none.
-  - Not built: solar (PV) and hot water forms (none exist on the account to map from), the sale price (it comes from the payment advice import), Formbay's webhook (the 15 minute check replaced it).
+  - **Solar and solar with battery forms too (built 20 Nov 2026, mapped from J7088's real solar form 1303287):** Find lists solar and battery forms (a typed number is looked up in both lists); Create asks "What is going in" (Solar, Solar and battery, Battery; picked from the quote's STC and battery STC counts) and takes the panels, inverter and battery from Formbay's lists; a solar and battery job comes back as two linked forms and both go on the job, each feeding its own STC line. A solar form makes a Solar row (panels, count, kW, serials) and an Inverter row under Customer equipment, and its serials also land in the job's panel and inverter serial boxes, which the handover check reads. A job with one kind of form shows **Add a battery form** or **Add a solar form**.
+  - Not built: hot water (SWH) forms (none exist on the account to map from), the sale price (it comes from the payment advice import), Formbay's webhook (the 15 minute check replaced it).
 
 ### A26. HR, incidents and letters
 - **Staff profile** (`staff.html`, admin/finance, plus staff self-view of their own): overview, signed and HR documents, photos, written warnings, KPIs (migration 147, private `staff-files` bucket), and a Leave card (annual, sick and long service hours from Xero, see A1).
@@ -647,7 +648,7 @@ In-app pricing: panels, inverters, batteries, roof type, gateway, install kits, 
 
 ## PART L: Formbay automation
 
-Built: STC records and the payment advice import (A25, Phase 1); creating battery forms, their stage, serials, equipment, photos and CCEW by themselves (A25, item 101, 20 Nov 2026). Still to do: solar (PV) and hot water forms the same way once the account has one; posting settlements to Xero (accountant's method first). History: `docs/archive/HANDOFF_formbay_stc.md`.
+Built: STC records and the payment advice import (A25, Phase 1); creating solar, battery and solar with battery forms, their stage, serials, equipment, photos and CCEW by themselves (A25, item 101, 20 Nov 2026). Still to do: hot water (SWH) forms the same way once the account has one; posting settlements to Xero (accountant's method first). History: `docs/archive/HANDOFF_formbay_stc.md`.
 
 ## PART M: Bugs & Updates board (open)
 
