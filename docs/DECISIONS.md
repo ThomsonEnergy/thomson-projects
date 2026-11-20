@@ -2,6 +2,11 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 21 Nov 2026
+
+- Website prices, owner 21 Nov 2026: the website's old battery and off-grid ranges are retired. The rule is $1,000 per kW of solar and $500 per kWh of battery after the rebates, a small job carries a minimum $1,800 labour charge (so 9 kWh on its own is $8,000 before the rebate, about $5,750 after), 27 kWh is $19,000 before the rebate, and every off-grid tier is $15,000 lower (`docs/BUSINESS_FACTS.md`, "Where we work"). The website branch `claude/affectionate-davinci-1wsvms` carries them, not live until the owner says go.
+- Planned (waiting on yes), owner 21 Nov 2026: **item 105, website prices set in TEops** (a Website prices card in Settings, the website rebuilds itself, a dated rebate change takes effect by itself). Until it is built, the reminder to redo the website battery prices by 1 January 2027 is in the owner to-dos at the top of `docs/IDEAS_BACKLOG.md`.
+
 ## 20 Nov 2026
 
 - Website (repo `website-updates-9e18ed`, branch `claude/affectionate-davinci-1wsvms`, not live until the owner says go), owner 20 Nov 2026: FAQs rewritten short with per kW and per kWh prices, a short FAQ block on every service and area page, a new Western Australia page, and remote work stated site wide. New facts (WA statewide with a Kenwick warehouse, promoted for commercial, mining and industrial work including FIFO and never as "no homes in Perth"; the WA page is `/western-australia/`, remote work anywhere in NSW, QLD and WA, Winaico recommended with TCL and JA Solar also installed, the price guide) are in `docs/BUSINESS_FACTS.md` under "Where we work".
