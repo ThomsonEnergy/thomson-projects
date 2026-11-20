@@ -247,7 +247,7 @@ async function runLeadRewards(admin, { limit = 20, force = false } = {}) {
   const since = new Date(now - TELL_WITHIN_MS).toISOString();
   const { data: toTell } = await admin.from('lead_rewards').select(FIELDS).is('told_at', null).not('xero_credit_note_id', 'is', null).in('status', ['due', 'settled']).gte('due_at', since).limit(limit);
   for (const r of toTell || []) {
-    if (r.status === 'settled' && r.settled_how !== 'credited') continue;
+    if (r.status === 'settled' && (r.settled_how !== 'credited' || !r.applied_invoice_id)) continue; // closed by hand in Xero: nothing to tell
     try { await tellReferrer(admin, r); out.told += 1; } catch (err) { console.error('lead reward email not sent:', err.message); }
   }
   return out;
