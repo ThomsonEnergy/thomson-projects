@@ -99,7 +99,21 @@
       return data.byProject;
     }
 
+    // What is typed on the quote steps is saved before a PDF is made or the quote is emailed, so
+    // neither goes out with an old price. Throws, with the reason, when a step cannot save.
+    async function quoteStepsSaved() {
+      const stuck = typeof quoteAutosaveFlush === 'function' ? (await quoteAutosaveFlush())[0] : null;
+      if (stuck) throw new Error(`${stuck.label} is not saved: ${stuck.why}. Fix that first.`);
+    }
+
+    // A stage's quoted hours: the quantities on its labour lines.
+    function quotedHoursOf(centre) {
+      return (centre.cost_centre_line_items || []).filter(li => li.item_type === 'labour').reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
+    }
+
     async function loadProject() {
+      // anything typed on the quote steps is saved before the quote is read again (js/quote-autosave.js, loaded with a quote)
+      if (typeof quoteAutosaveFlush === 'function') await quoteAutosaveFlush({ callerReloads: true });
       // Item 96: the slow accrued-labour function starts straight away, alongside the
       // job itself, instead of after it. Its own failure is logged and skipped below.
       const accruedPromise = fetchAccruedLabourCost([projectId]).then(byProject => ({ byProject }), err => ({ err }));
@@ -176,9 +190,7 @@
         centre.actual_labour_cost = accruedByCentre[centre.id]?.actualLabourCost || 0;
         centre.actual_indirect_overhead = accruedByCentre[centre.id]?.actualIndirectOverhead || 0;
         centre.labour_budget_percent = accruedByCentre[centre.id]?.labourBudgetPercent;
-        centre.quoted_hours = (centre.cost_centre_line_items || [])
-          .filter(li => li.item_type === 'labour')
-          .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
+        centre.quoted_hours = quotedHoursOf(centre);
       }
 
       project.accrued_material_cost = 0;
@@ -751,6 +763,9 @@
       return lines;
     }
 
+    // The AI scope button: the notes are kept, so once a scope exists the same button rewrites it.
+    function scopeButtonLabel(scopeText) { return String(scopeText || '').trim() ? 'Regenerate with AI' : 'Generate scope of works with AI'; }
+
     function renderCustomerGets() {
       const el = document.getElementById('customer-gets');
       if (!el) return;
@@ -768,7 +783,7 @@
         document.getElementById('p-phone').value = client.phone || '';
         document.getElementById('p-payment-terms').value = client.payment_terms || 'cod';
       } else {
-        note.textContent = 'No client selected - search above, or just fill in the fields below to create one when you save.';
+        note.textContent = 'No client selected: search above, or type a client name below and a new client is made when you leave that box.';
       }
       if (sitePicker) sitePicker.setClient(client);
       document.getElementById('client-search-results').style.display = 'none';
@@ -1174,7 +1189,7 @@
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.scrollIntoView({ block: 'center', behavior: 'smooth' });
           el.focus();
-          showToast(`${s.solarKw} kW put in step 3. Press Save pricing there to keep it: the size also sets the STC credit.`);
+          showToast(`${s.solarKw} kW put in step 3, where it saves itself: the size also sets the STC credit.`);
         });
         const useBattery = byId('bill-use-battery');
         if (useBattery) useBattery.addEventListener('click', () => {
@@ -1246,7 +1261,7 @@
         const unsaved = byId('bc-solar-unsaved');
         const live = currentSolarKw(), saved = savedSolarKw();
         unsaved.innerHTML = currentTemplate !== 'battery' && Math.abs(live - saved) > 0.001
-          ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">The solar size on step 3 (${live} kW) is not saved yet; the proposal still says ${saved || 'nothing'}${saved ? ' kW' : ''}. Press Save pricing on step 3.</p>`
+          ? `<p style="margin:6px 0 0; font-size:12px; color:${AMBER};">The solar size on step 3 (${live} kW) is not saved yet; the proposal still says ${saved || 'nothing'}${saved ? ' kW' : ''}. It saves itself in a moment.</p>`
           : '';
       }
 
@@ -1831,6 +1846,7 @@
         btn.disabled = true;
         msg.innerHTML = '';
         try {
+          await quoteAutosaveSavePoint('ai_scope'); // the notes typed and the scope as it stands are saved, and kept for Undo
           btn.textContent = 'Drafting stage names and descriptions...';
           const { data: { session: aiSession } } = await supabaseClient.auth.getSession();
           const aiHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${aiSession.access_token}` };
@@ -1874,7 +1890,7 @@
           msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
         } finally {
           btn.disabled = false;
-          btn.textContent = 'Generate scope of works with AI';
+          btn.textContent = scopeButtonLabel(document.getElementById('p-sow').value);
         }
       });
 
@@ -3202,12 +3218,17 @@
       return steps.map(([n, label]) => `<a class="btn secondary qstep-link" href="#qstep-${n}" data-step="${n}" style="font-size:13px; padding:8px 12px; ${ticks[n] ? 'border-color:var(--green);' : ''}">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${label}</a>`).join('');
     }
 
+    // The "Claimed with stage" lists on the Pricing step.
+    function stageOptionsHtml(centres, selected) {
+      return `<option value="">Last stage</option>${(centres || []).map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}`;
+    }
+
     function quoteStepsPanelHtml(project, centres) {
       const template = project.proposal_template || 'new_build';
       const info = TEMPLATE_INFO[template] || TEMPLATE_INFO.new_build;
       const ticks = quoteStepTicks(project, centres);
       const stepHead = (n, title, note) => `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;"><h2 style="margin:0;" id="qstep-${n}-head">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${title}</h2></div><p class="subtitle" style="margin:0 0 12px;">${note}</p>`;
-      const stageOptions = (selected) => `<option value="">Last stage</option>${(centres || []).map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}`;
+      const stageOptions = (selected) => stageOptionsHtml(centres, selected);
       const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
       return `
             <div class="settings-panel active" id="panel-quote">
@@ -3217,7 +3238,7 @@
 
               <div class="card" id="qstep-client">
                 <h2 style="margin:0 0 4px;">Quote and client</h2>
-                <p class="subtitle" style="margin:0 0 12px;">The quote's name, who it is for and where the work is. Notes stay internal.</p>
+                <p class="subtitle" style="margin:0 0 12px;">The quote's name, who it is for and where the work is. Notes stay internal. Saves itself as you type.</p>
                 <label style="margin-top:0">Quote name</label>
                 <input id="p-name" placeholder="e.g. 14 Miller St - New Build" value="${escapeHtml(project.name || '')}" />
 
@@ -3229,7 +3250,7 @@
                   </div>
                   <button type="button" class="secondary" id="clear-client-btn" style="flex-shrink:0;">Clear</button>
                 </div>
-                <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected - search above, or just fill in the fields below to create one when you save.</p>
+                <p class="subtitle" id="selected-client-note" style="margin:6px 0 0;">No client selected: search above, or type a client name below and a new client is made when you leave that box.</p>
 
                 <div class="grid cols-3" style="margin-top:14px;">
                   <div><label style="margin-top:0">Client name</label><input id="p-client" value="${escapeHtml(project.client_name || '')}" /></div>
@@ -3257,8 +3278,6 @@
 
                 <label>Internal notes</label>
                 <textarea id="p-notes" placeholder="Background that should stick around, e.g. what a lead originally asked for. Not shown to the client.">${escapeHtml(project.notes || '')}</textarea>
-                <div style="margin-top:14px;"><button type="button" id="qs0-save">Save quote and client</button></div>
-                <div id="qs0-msg"></div>
               </div>
 
               <div class="card" id="qstep-1">
@@ -3270,7 +3289,7 @@
                     <select id="qs1-template">
                       ${Object.keys(TEMPLATE_INFO).map(t => `<option value="${t}" ${t === template ? 'selected' : ''}>${TEMPLATE_INFO[t].label}</option>`).join('')}
                     </select>
-                    <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new type takes effect on Save answers, with its deposit and payment stages.</p>
+                    <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new type takes effect straight away, with its deposit and payment stages.</p>
                   </div>
                 </div>
                 <div class="grid cols-2" id="template-questions"></div>
@@ -3301,11 +3320,7 @@
                   <div id="roi-estimate"></div>
                   <div id="bc-plans"></div>
                 </div>
-                <div style="margin-top:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                  <button type="button" id="qs1-save">Save answers</button>
-                  <span class="subtitle" id="qs1-missing" style="font-size:12px;"></span>
-                </div>
-                <div id="qs1-msg"></div>
+                <p class="subtitle" id="qs1-missing" style="margin:14px 0 0; font-size:12px;"></p>
               </div>
 
               <div class="card" id="qstep-2">
@@ -3319,8 +3334,6 @@
                   <input id="qs2-reason" placeholder="e.g. Standard tin roof, photos from the client are enough" value="${escapeHtml(project.site_visit_reason || '')}" />
                 </div>
                 <div id="qs2-inspection-area" style="margin-top:10px;"></div>
-                <div style="margin-top:14px;"><button type="button" id="qs2-save">Save site visit</button></div>
-                <div id="qs2-msg"></div>
               </div>
 
               <div class="card" id="qstep-3">
@@ -3340,8 +3353,8 @@
                   <div id="pylon-msg"></div>
                 </div>
 
-                <label style="margin-top:0; font-weight:600;">Stages / cost centres</label>
-                <p class="subtitle" style="margin:2px 0 10px; font-size:12px;">A new stage starts at the markup in Settings.</p>
+                <label id="qstage-head" style="margin:0; font-weight:600;">Stages / cost centres</label>
+                <p class="subtitle" style="margin:2px 0 10px; font-size:12px;">A new stage starts at the markup in Settings. Stages and prices save themselves as you type.</p>
                 <div id="cc-rows"></div>
                 <button type="button" class="secondary" id="add-row">+ Add stage</button>
                 <button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
@@ -3396,8 +3409,6 @@
                 </div>
                 <div id="referral-chip"></div><!-- js/referral-chip.js: referred by, and the reward if won (item 74b) -->
                 <div id="job-window-card"></div><!-- js/job-window.js: days on site and the wait to tell the client (item 92) -->
-                <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
-                <div id="qs3-msg"></div>
               </div>
 
               <div class="card" id="qstep-4">
@@ -3406,12 +3417,13 @@
                 <div id="customer-gets" class="readout" style="white-space:pre-wrap; min-height:48px;"></div>
 
                 <label style="margin-top:14px; font-weight:600;">Write the scope of works with AI</label>
+                <p class="subtitle" style="margin:2px 0 6px;">Your notes to the AI are kept. To change the scope, change or add a sentence here and press the button again.</p>
                 <textarea id="p-brief" placeholder="A few rough notes, e.g. 10 kW on the north face, hybrid inverter, 13.5 kWh battery in the garage, backup for fridge and lights">${escapeHtml(project.sow_brief || '')}</textarea>
                 <label>Supporting documents (optional)</label>
                 <div id="sow-doc-list" style="margin-bottom:8px;"></div>
                 <input type="file" id="sow-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple />
                 <div id="sow-doc-msg"></div>
-                <button type="button" id="generate-scope-btn" style="margin-top:10px;">Generate scope of works with AI</button>
+                <button type="button" id="generate-scope-btn" style="margin-top:10px;">${scopeButtonLabel(project.sow_text)}</button>
                 <div id="generate-msg"></div>
 
                 <div class="qs-pair">
@@ -3427,8 +3439,6 @@
                 </div>
 
                 <div id="quote-pictures"></div>
-                <div style="margin-top:14px;"><button type="button" id="qs4-save">Save scope of works</button></div>
-                <div id="qs4-msg"></div>
               </div>
 
               <div class="card" id="qstep-5">
@@ -3458,7 +3468,7 @@
             </div>`;
     }
 
-    // The Quote tab's "Quote and client" card: client search, site picker and its Save. The typed
+    // The Quote tab's "Quote and client" card: client search and site picker (it saves itself, js/quote-autosave.js). The typed
     // name, email and phone apply to this quote only for an existing client; payment terms are the
     // client's (the deposit invoice's due date reads them), so a change there saves to the client.
     async function wireQuoteClientCard(project) {
@@ -3511,53 +3521,12 @@
         }
       }
       loadEditAddressAutocomplete(companySettings.google_maps_api_key);
-
-      document.getElementById('qs0-save').addEventListener('click', async () => {
-        const btn = document.getElementById('qs0-save');
-        const msg = document.getElementById('qs0-msg');
-        const name = document.getElementById('p-name').value.trim();
-        const client_name = document.getElementById('p-client').value.trim();
-        const client_email = document.getElementById('p-email').value.trim();
-        const client_phone = document.getElementById('p-phone').value.trim();
-        const client_address = document.getElementById('p-address').value.trim();
-        const notes = document.getElementById('p-notes').value.trim() || null;
-        const payment_terms = document.getElementById('p-payment-terms').value;
-        msg.innerHTML = '';
-        if (!name || !client_name) { msg.innerHTML = `<div class="error-box">Fill in the quote name and client name.</div>`; return; }
-        btn.disabled = true; btn.textContent = 'Saving...';
-        try {
-          let clientId = selectedClientId;
-          if (clientId) {
-            const currentTerms = (sitePicker.client() || {}).payment_terms || 'cod';
-            if (payment_terms && payment_terms !== currentTerms) {
-              const { error: termsErr } = await supabaseClient.from('clients').update({ payment_terms }).eq('id', clientId);
-              if (termsErr) throw termsErr;
-            }
-          } else {
-            // A new client's first site is the best guess for their office address until it is set on the Clients page.
-            const { data: newClient, error: clientErr } = await supabaseClient.from('clients')
-              .insert({ name: client_name, email: client_email || null, phone: client_phone || null, payment_terms, address: client_address || null }).select().single();
-            if (clientErr) throw clientErr;
-            clientId = newClient.id;
-            selectedClientId = clientId;
-            await sitePicker.setClient(newClient);
-          }
-          const client_site_id = await resolveClientSite(clientId, client_address, (sitePicker.client() || {}).address || client_address);
-          const fields = { name, client_id: clientId, client_name, client_email: client_email || null, client_phone: client_phone || null, client_address, client_site_id, notes };
-          const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-          if (error) throw error;
-          Object.assign(project, fields);
-          setJobTitle(project);
-          showToast('Quote and client saved.');
-          if (typeof ensureSiteSun === 'function') ensureSiteSun(); // a changed address gets its own sun figures
-        } catch (err) {
-          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-        } finally { btn.disabled = false; btn.textContent = 'Save quote and client'; }
-      });
     }
 
     async function wireQuoteSteps(project) {
       try {
+        // the steps save themselves: that file loads while the rest is wired, and is mounted last
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=2', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
@@ -3572,7 +3541,6 @@
         const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
         const refreshBar = () => { const bar = document.getElementById('quote-steps-bar'); if (bar) bar.innerHTML = quoteStepsBarHtml(project, project.cost_centres || []); };
         const say = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-        const busy = (btn, on, label) => { btn.disabled = on; btn.textContent = on ? 'Saving...' : label; };
 
         await wireQuoteClientCard(project);
 
@@ -3610,62 +3578,6 @@
           if (billCard) billCard.style.display = ['solar', 'battery'].includes(currentTemplate) ? '' : 'none';
         });
         wireBillCard(project, qEl, showMissing, refreshBar);
-        document.getElementById('qs1-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs1-save');
-          busy(btn, true, 'Save answers');
-          try {
-            const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
-            // blanked answers drop out
-            Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; });
-            const prevTemplate = project.proposal_template || 'new_build';
-            const changedTemplate = currentTemplate !== prevTemplate;
-            const fields = { template_answers: answers, proposal_template: currentTemplate };
-            let newMilestones = null;
-            if (changedTemplate) {
-              // A new proposal type gets that type's photos (Settings > portfolio photos), its deposit and
-              // payment stages where the quote still has the old type's defaults, and the estimate wording.
-              const [{ data: settings }, { data: milestones, error: msReadErr }] = await Promise.all([
-                supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single(),
-                supabaseClient.from('payment_milestones').select('label, percent').eq('project_id', project.id).order('sort_order'),
-              ]);
-              if (msReadErr) throw msReadErr;
-              const wantCategory = TEMPLATE_INFO[currentTemplate].photoCategory;
-              fields.cover_photos = ((settings && settings.portfolio_photos) || []).filter(ph => (ph.category || 'general') === wantCategory);
-              const pay = paymentDefaultsOnTypeChange(prevTemplate, currentTemplate, { deposit_percent: project.deposit_percent, milestones: milestones || [] });
-              if ('deposit_percent' in pay) fields.deposit_percent = pay.deposit_percent;
-              if (pay.milestones) newMilestones = pay.milestones;
-              if (currentTemplate === 'quick_estimate' && !(project.estimate_disclaimer_text || '').trim()) fields.estimate_disclaimer_text = companySettings.default_estimate_disclaimer || '';
-            }
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-            if (newMilestones) {
-              const { error: delErr } = await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
-              if (delErr) throw delErr;
-              if (newMilestones.length) {
-                const { error: insErr } = await supabaseClient.from('payment_milestones').insert(newMilestones.map((m, i) => ({ label: m.label, percent: m.percent, sort_order: i, project_id: project.id })));
-                if (insErr) throw insErr;
-              }
-            }
-            project.template_answers = answers;
-            templateAnswers = answers;
-            showToast('Answers saved.');
-            if (changedTemplate) {
-              project.proposal_template = currentTemplate;
-              const refreshed = await loadProject();
-              if (refreshed) {
-                render(refreshed, true);
-                if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
-              }
-              return;
-            }
-            const h = document.getElementById('qstep-1-head');
-            if (h) h.innerHTML = `${quoteStepTicks(project, centres)[1] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}1. Pre-quote information`;
-            refreshBar();
-            refreshReadyCheck(project);
-          } catch (err) {
-            say('qs1-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save answers'); }
-        });
 
         // ----- step 2: site visit -----
         const inspArea = document.getElementById('qs2-inspection-area');
@@ -3697,23 +3609,6 @@
           refreshInspectionArea();
         }));
         refreshInspectionArea();
-        document.getElementById('qs2-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs2-save');
-          const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || null;
-          if (!decision) { say('qs2-msg', `<div class="error-box">Pick one: needs a site visit, or not needed.</div>`); return; }
-          busy(btn, true, 'Save site visit');
-          try {
-            const reason = decision === 'not_needed' ? (document.getElementById('qs2-reason').value.trim() || null) : null;
-            const { error } = await supabaseClient.from('projects').update({ site_visit_decision: decision, site_visit_reason: reason, needs_site_visit: decision === 'needed' }).eq('id', project.id);
-            if (error) throw error;
-            project.site_visit_decision = decision; project.site_visit_reason = reason; project.needs_site_visit = decision === 'needed';
-            showToast('Saved.');
-            say('qs2-msg', '');
-            await refreshInspectionArea();
-          } catch (err) {
-            say('qs2-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save site visit'); }
-        });
 
         // ----- step 3: pricing -----
         centres.forEach(stage => {
@@ -3736,7 +3631,8 @@
         if (!centres.length) addRow({ name: { solar: 'Solar system', battery: 'Battery system' }[currentTemplate] || 'Stage 1' });
         updateEditTotal();
         document.getElementById('add-row').addEventListener('click', () => addRow());
-        document.getElementById('suggest-prebuilds-btn').addEventListener('click', () => {
+        document.getElementById('suggest-prebuilds-btn').addEventListener('click', async () => {
+          await quoteAutosaveSavePoint('ai_prebuilds'); // the stages as they stand are saved, and kept for Undo
           Object.assign(templateAnswers, readTemplateAnswers(qEl));
           suggestStagePrebuilds({
             projectId: project.id, template: currentTemplate,
@@ -3769,59 +3665,6 @@
         };
         ['q-bstc-qty', 'q-bstc-price'].forEach(id => document.getElementById(id).addEventListener('input', bstcCalc));
 
-        document.getElementById('qs3-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs3-save');
-          const msg = document.getElementById('qs3-msg');
-          msg.innerHTML = '';
-          busy(btn, true, 'Save pricing');
-          try {
-            const pylonLinkTyped = document.getElementById('p-pylon-link').value.trim();
-            if (pylonLinkTyped && !safePylonLink(pylonLinkTyped)) throw new Error('The Pylon link must start with https://');
-            const stagesPayload = readStagesPayload();
-            const existingCentres = project.cost_centres || [];
-            const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
-            const removedCentres = existingCentres.filter(c => !keptIds.includes(c.id));
-            for (const centre of removedCentres) {
-              const reasons = await checkCostCentreHasActivity(centre);
-              if (reasons.length) throw new Error(`Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.`);
-            }
-            await applyStagesPayload(project, stagesPayload, removedCentres);
-            await logStageChanges(project.id, existingCentres, stagesPayload);
-
-            const num = (id) => { const v = parseFloat(document.getElementById(id).value); return Number.isFinite(v) ? v : null; };
-            const fields = {
-              deposit_percent: parseFloat(document.getElementById('p-deposit').value) || 0,
-              show_investment_breakdown: document.getElementById('p-breakdown').checked,
-              pylon_link: document.getElementById('p-pylon-link').value.trim(),
-              pylon_project_id: document.getElementById('p-pylon-id').value.trim(),
-              stc_quantity: num('q-stc-qty'), stc_system_kw: num('q-stc-kw'), stc_zone_rating: num('q-stc-zone') || 1.382,
-              stc_install_year: parseInt(document.getElementById('q-stc-year').value, 10) || null,
-              stc_price_per_certificate: num('q-stc-price'), stc_total: num('q-stc-total') || 0,
-              stc_cost_centre_id: document.getElementById('q-stc-stage').value || null,
-              bstc_quantity: num('q-bstc-qty'), bstc_price_per_certificate: num('q-bstc-price'), bstc_total: num('q-bstc-total') || 0,
-              bstc_cost_centre_id: document.getElementById('q-bstc-stage').value || null,
-              bstc_not_claimed: document.getElementById('q-bstc-none').checked,
-            };
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-
-            await supabaseClient.from('payment_milestones').delete().eq('project_id', project.id);
-            const milestonesPayload = readMilestones();
-            if (milestonesPayload.length) {
-              const { error: msErr } = await supabaseClient.from('payment_milestones').insert(milestonesPayload.map(m => ({ ...m, project_id: project.id })));
-              if (msErr) throw msErr;
-            }
-            await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
-            showToast('Pricing saved.');
-            if (stagesPayload.some(st => st.quoted_amount > 0)) autoGenerateQuotePdf(project);
-            const refreshed = await loadProject();
-            if (refreshed) { render(refreshed, true); const t = document.querySelector('#job-tabs .settings-tab[data-panel="quote"]'); if (t) t.click(); const el = document.getElementById('qstep-3'); if (el) el.scrollIntoView({ block: 'start' }); }
-          } catch (err) {
-            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-            busy(btn, false, 'Save pricing');
-          }
-        });
-
         // ----- step 4: scope of works -----
         renderEditSowDocList();
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
@@ -3829,31 +3672,6 @@
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
-        document.getElementById('qs4-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs4-save');
-          busy(btn, true, 'Save scope of works');
-          try {
-            const fields = {
-              sow_text: document.getElementById('p-sow').value,
-              sow_brief: document.getElementById('p-brief').value.trim(),
-              terms_text: document.getElementById('p-terms').value,
-              sow_documents: sowDocs,
-            };
-            const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
-            if (error) throw error;
-            Object.assign(project, fields);
-            showToast('Scope of works saved.');
-            if (fields.sow_text.trim()) { try { await requestInstallerSummary(project.id, { onlyIfStale: true }); } catch (e) { console.error('Installer summary refresh failed:', e); } }
-            if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project);
-            const h = document.getElementById('qstep-4-head');
-            if (h) h.innerHTML = `${fields.sow_text.trim() ? '<span style="color:var(--green);">&#10003;</span> ' : ''}4. Scope of works`;
-            refreshBar();
-            refreshReadyCheck(project);
-            say('qs4-msg', '');
-          } catch (err) {
-            say('qs4-msg', `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`);
-          } finally { busy(btn, false, 'Save scope of works'); }
-        });
 
         // ----- step 5: send ----- (the email and PDF buttons are wired with the rest of the page)
         wireComplianceCard(project);
@@ -3864,6 +3682,84 @@
           const el = document.getElementById(`qstep-${a.dataset.step}`);
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }));
+
+        // Every step saves itself as it is typed, with Undo (js/quote-autosave.js). These are the
+        // things only this page knows; the saving itself lives in that file.
+        await autosaveReady;
+        mountQuoteAutosave({
+          project,
+          page: {
+            clientId: () => selectedClientId,
+            sitePicker: () => sitePicker,
+            linkClient: (client) => setSelectedEditClient(client),
+            clientMade: (client) => {
+              selectedClientId = client.id;
+              document.getElementById('client-search-input').value = client.name;
+              document.getElementById('selected-client-note').innerHTML = `New client made: <strong>${escapeHtml(client.name)}</strong>. <a class="link-quiet" href="/clients.html" target="_blank">View on Clients page</a>.`;
+            },
+            clientSaved: (addressChanged) => { setJobTitle(project); if (addressChanged && typeof ensureSiteSun === 'function') ensureSiteSun(); }, // a changed address gets its own sun figures
+            template: () => currentTemplate,
+            answers: () => {
+              const answers = Object.assign({}, templateAnswers, readTemplateAnswers(qEl));
+              Object.keys(answers).forEach(k => { if (!String(answers[k] ?? '').trim()) delete answers[k]; }); // blanked answers drop out
+              return answers;
+            },
+            answersSaved: (answers) => { templateAnswers = answers; },
+            setAnswers: (answers) => { templateAnswers = { ...answers }; renderTemplateQuestions(qEl, currentTemplate, templateAnswers); showMissing(); renderCustomerGets(); },
+            defaultDisclaimer: () => companySettings.default_estimate_disclaimer || '',
+            visitSaved: () => refreshInspectionArea(),
+            pylonLinkOk: (link) => !!safePylonLink(link),
+            milestones: readMilestones,
+            setMilestones: (list) => {
+              document.getElementById('milestone-rows').innerHTML = list.map(m => milestoneRowHtml(m)).join('');
+              wireMilestoneRows();
+              refreshMilestoneTotal();
+            },
+            scopeButtonLabel,
+            sowDocs: () => sowDocs,
+            setSowDocs: (list) => { sowDocs = list.slice(); renderEditSowDocList(); },
+            // the stage table as it would be saved; a stage made on the page gets its id here
+            stages: () => readStagesPayload().map(({ rowEl, ...stage }) => ({ ...stage, id: stage.id || (rowEl.dataset.id = quoteNewId()) })),
+            // A stage with no name is left out of a save, so one that was saved before, or has lines or
+            // photos typed in, waits for its name (it would read as removed, or lose what was typed).
+            // A blank row just added is not in the way.
+            stagesProblem: () => ([...document.querySelectorAll('#cc-rows .cc-row')].some(r => !r.querySelector('.cc-name').value.trim() && (
+              r.dataset.id
+              || [...r.querySelectorAll('.li-row')].some(li => li.querySelector('.li-desc').value.trim() || (li.querySelector('.li-type').value === 'labour' && li.querySelector('.li-tier').value))
+              || [...r.querySelectorAll('.pg-row')].some(pg => pg.querySelector('.pg-desc').value.trim() || (pg.dataset.photos || '[]') !== '[]')
+            )) ? 'Not saved yet: every stage needs a name' : null),
+            setStages: (stages) => {
+              document.getElementById('cc-rows').innerHTML = '';
+              stages.forEach(st => addRow(st));
+              updateEditTotal();
+              renderCustomerGets();
+            },
+            // what hangs off the stages on this page, redrawn from the quote in memory when they save
+            stagesSaved: () => {
+              (project.cost_centres || []).forEach(c => { c.quoted_hours = quotedHoursOf(c); });
+              refreshQuoteMoney(project);
+              ['q-stc-stage', 'q-bstc-stage'].forEach(id => {
+                const sel = document.getElementById(id);
+                const picked = sel.value;
+                sel.innerHTML = stageOptionsHtml(project.cost_centres, picked);
+                sel.value = [...sel.options].some(o => o.value === picked) ? picked : '';
+              });
+            },
+            // the When card works its days out from the labour hours
+            stagesSettled: () => { if (typeof initJobWindow === 'function') initJobWindow(project); },
+            ticks: () => quoteStepTicks(project, project.cost_centres || []),
+            refreshBar,
+            readyCheck: () => refreshReadyCheck(project),
+            // the whole quote read again and redrawn, then the tab asked for (the Quote tab when none is)
+            reload: async (tab) => {
+              const refreshed = await loadProject();
+              if (!refreshed) return;
+              render(refreshed, true);
+              if (tab) document.querySelector(`#job-tabs .settings-tab[data-panel="${tab}"]`)?.click();
+              if ((refreshed.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(refreshed);
+            },
+          },
+        });
       } catch (err) {
         console.error('wireQuoteSteps failed:', err);
         const bar = document.getElementById('quote-steps-bar');
@@ -3871,8 +3767,9 @@
       }
     }
 
-    function render(project, pricingVisible) {
-      const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+    // What the stages add up to: the quote total, what it costs and the profit. render() draws the
+    // page from it, and the quote steps call refreshQuoteMoney() when a stage price saves.
+    function stageMoney(centres) {
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
       // estimated_labour_cost is a SELL total (hours x the rate tier's sell
       // rate - there's no separate cost rate in this app), not a cost. For
@@ -3891,16 +3788,39 @@
       }, 0);
       const materialCostTotal = centres.reduce((s, c) => s + Number(c.estimated_material_cost || 0), 0);
       const cost = labourCostTotal + materialCostTotal;
-      const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const profit = quoted - cost;
+      const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
+      const quotedIndirectTotal = quotedHoursTotal * indirectRate;
+      return { directRate, indirectRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal };
+    }
+
+    // The three money tiles at the top of a quote or quoted job.
+    function quoteMoneyTilesHtml({ quoted, cost, profit, quotedIndirectTotal, quotedHoursTotal }) {
+      return `
+                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>`;
+    }
+
+    // A quote's money tiles redrawn from the quote in memory (its stages just saved themselves).
+    // A quote shows only these three tiles; a job's header has more and is drawn by render().
+    function refreshQuoteMoney(project) {
+      const box = document.querySelector('.job-money');
+      if (!box || project.job_number || project.proposal_template === 'direct_job') return;
+      box.innerHTML = quoteMoneyTilesHtml(stageMoney(project.cost_centres || []));
+      applyOverheadsToCosts(project);
+    }
+
+    function render(project, pricingVisible) {
+      const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+      const { directRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal } = stageMoney(centres);
+      const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);
       const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
       const actualLabourTotal = centres.reduce((s, c) => s + Number(c.actual_labour_cost || 0), 0);
-      const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
       const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
       const actualIndirectTotal = centres.reduce((s, c) => s + Number(c.actual_indirect_overhead || 0), 0);
-      const quotedIndirectTotal = quotedHoursTotal * indirectRate;
       const inclOverheads = (amt) => `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">incl. overheads ${money(amt)}</div>`;
 
       // "Cost allocated" and "Profit" on jobs must always reflect real
@@ -4036,9 +3956,7 @@
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                   <div class="stat" title="Work done and not yet on an invoice, at the price the next invoice would carry"><div class="label">Left to invoice</div><div class="value" id="job-left-to-invoice">...</div></div>
         ` : `
-                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  ${quoteMoneyTilesHtml({ quoted, cost, profit, quotedIndirectTotal, quotedHoursTotal })}
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                   <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>` : ''}
           ${project.job_number ? `
@@ -5001,6 +4919,7 @@
         emailQuoteBtn.disabled = true; emailQuoteBtn.textContent = 'Checking...';
         msgEl.innerHTML = '';
         try {
+          await quoteStepsSaved();
           // Ready-to-send gate: stops on missing pre-quote answers, pricing or compliance items
           // unless Admin / Finance send anyway with a reason.
           if (!(await quoteSendGate(project))) { emailQuoteBtn.disabled = false; emailQuoteBtn.textContent = label; return; }
@@ -5025,6 +4944,7 @@
         generateQuotePdfBtn.textContent = 'Generating...';
         msgEl.innerHTML = '';
         try {
+          await quoteStepsSaved();
           await generateClientPdf('quote', project.id);
         } catch (err) {
           msgEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
