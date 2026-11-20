@@ -99,6 +99,11 @@
       return data.byProject;
     }
 
+    // A stage's quoted hours: the quantities on its labour lines.
+    function quotedHoursOf(centre) {
+      return (centre.cost_centre_line_items || []).filter(li => li.item_type === 'labour').reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
+    }
+
     async function loadProject() {
       // anything typed on the quote steps is saved before the quote is read again (js/quote-autosave.js, loaded with a quote)
       if (typeof quoteAutosaveFlush === 'function') await quoteAutosaveFlush();
@@ -178,9 +183,7 @@
         centre.actual_labour_cost = accruedByCentre[centre.id]?.actualLabourCost || 0;
         centre.actual_indirect_overhead = accruedByCentre[centre.id]?.actualIndirectOverhead || 0;
         centre.labour_budget_percent = accruedByCentre[centre.id]?.labourBudgetPercent;
-        centre.quoted_hours = (centre.cost_centre_line_items || [])
-          .filter(li => li.item_type === 'labour')
-          .reduce((sum, li) => sum + (Number(li.quantity) || 0), 0);
+        centre.quoted_hours = quotedHoursOf(centre);
       }
 
       project.accrued_material_cost = 0;
@@ -3208,12 +3211,17 @@
       return steps.map(([n, label]) => `<a class="btn secondary qstep-link" href="#qstep-${n}" data-step="${n}" style="font-size:13px; padding:8px 12px; ${ticks[n] ? 'border-color:var(--green);' : ''}">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${label}</a>`).join('');
     }
 
+    // The "Claimed with stage" lists on the Pricing step.
+    function stageOptionsHtml(centres, selected) {
+      return `<option value="">Last stage</option>${(centres || []).map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}`;
+    }
+
     function quoteStepsPanelHtml(project, centres) {
       const template = project.proposal_template || 'new_build';
       const info = TEMPLATE_INFO[template] || TEMPLATE_INFO.new_build;
       const ticks = quoteStepTicks(project, centres);
       const stepHead = (n, title, note) => `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;"><h2 style="margin:0;" id="qstep-${n}-head">${ticks[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${title}</h2></div><p class="subtitle" style="margin:0 0 12px;">${note}</p>`;
-      const stageOptions = (selected) => `<option value="">Last stage</option>${(centres || []).map(c => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}`;
+      const stageOptions = (selected) => stageOptionsHtml(centres, selected);
       const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
       return `
             <div class="settings-panel active" id="panel-quote">
@@ -3338,8 +3346,8 @@
                   <div id="pylon-msg"></div>
                 </div>
 
-                <label style="margin-top:0; font-weight:600;">Stages / cost centres</label>
-                <p class="subtitle" style="margin:2px 0 10px; font-size:12px;">A new stage starts at the markup in Settings.</p>
+                <label id="qstage-head" style="margin:0; font-weight:600;">Stages / cost centres</label>
+                <p class="subtitle" style="margin:2px 0 10px; font-size:12px;">A new stage starts at the markup in Settings. Stages and prices save themselves as you type.</p>
                 <div id="cc-rows"></div>
                 <button type="button" class="secondary" id="add-row">+ Add stage</button>
                 <button type="button" class="secondary" id="suggest-prebuilds-btn" title="Reads the scope of works and the pre-quote answers and adds prebuilds from the library to each stage, tagged for you to check">&#10024; Suggest prebuilds with AI</button>
@@ -3394,8 +3402,6 @@
                 </div>
                 <div id="referral-chip"></div><!-- js/referral-chip.js: referred by, and the reward if won (item 74b) -->
                 <div id="job-window-card"></div><!-- js/job-window.js: days on site and the wait to tell the client (item 92) -->
-                <div style="margin-top:14px;"><button type="button" id="qs3-save">Save pricing</button></div>
-                <div id="qs3-msg"></div>
               </div>
 
               <div class="card" id="qstep-4">
@@ -3528,7 +3534,6 @@
         const centres = (project.cost_centres || []).slice().sort((a, b) => a.sort_order - b.sort_order);
         const refreshBar = () => { const bar = document.getElementById('quote-steps-bar'); if (bar) bar.innerHTML = quoteStepsBarHtml(project, project.cost_centres || []); };
         const say = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-        const busy = (btn, on, label) => { btn.disabled = on; btn.textContent = on ? 'Saving...' : label; };
 
         await wireQuoteClientCard(project);
 
@@ -3619,7 +3624,8 @@
         if (!centres.length) addRow({ name: { solar: 'Solar system', battery: 'Battery system' }[currentTemplate] || 'Stage 1' });
         updateEditTotal();
         document.getElementById('add-row').addEventListener('click', () => addRow());
-        document.getElementById('suggest-prebuilds-btn').addEventListener('click', () => {
+        document.getElementById('suggest-prebuilds-btn').addEventListener('click', async () => {
+          await quoteAutosaveSavePoint('ai_prebuilds'); // the stages as they stand are saved, and kept for Undo
           Object.assign(templateAnswers, readTemplateAnswers(qEl));
           suggestStagePrebuilds({
             projectId: project.id, template: currentTemplate,
@@ -3651,39 +3657,6 @@
           if (qty) document.getElementById('q-bstc-total').value = (qty * price).toFixed(2);
         };
         ['q-bstc-qty', 'q-bstc-price'].forEach(id => document.getElementById(id).addEventListener('input', bstcCalc));
-
-        document.getElementById('qs3-save').addEventListener('click', async () => {
-          const btn = document.getElementById('qs3-save');
-          const msg = document.getElementById('qs3-msg');
-          msg.innerHTML = '';
-          busy(btn, true, 'Save pricing');
-          try {
-            // The other boxes save themselves: let them land first. Anything that cannot save (a Pylon link
-            // without https://, no client name) stops here, because the redraw below would drop it.
-            // (A new proposal type that is waiting for this very save is not in the way.)
-            const stuck = (await quoteAutosaveFlush()).find(u => !u.waitsForStages);
-            if (stuck) throw new Error(`${stuck.label}: not saved, ${stuck.why}. Fix that first, then press Save pricing.`);
-            const stagesPayload = readStagesPayload();
-            const existingCentres = project.cost_centres || [];
-            const keptIds = stagesPayload.map(st => st.id).filter(Boolean);
-            const removedCentres = existingCentres.filter(c => !keptIds.includes(c.id));
-            for (const centre of removedCentres) {
-              const reasons = await checkCostCentreHasActivity(centre);
-              if (reasons.length) throw new Error(`Can't remove "${centre.name}" - it ${reasons.join(', ')}. Adjust its line items instead of deleting the stage, or add it back.`);
-            }
-            await applyStagesPayload(project, stagesPayload, removedCentres);
-            quoteAutosaveStagesSaved(); // a waiting proposal type change saves with the reload below
-            await logStageChanges(project.id, existingCentres, stagesPayload);
-            await logActivity('project', project.id, 'stage_updated', 'Quote pricing updated');
-            showToast('Pricing saved.');
-            if (stagesPayload.some(st => st.quoted_amount > 0)) autoGenerateQuotePdf(project);
-            const refreshed = await loadProject();
-            if (refreshed) { render(refreshed, true); const t = document.querySelector('#job-tabs .settings-tab[data-panel="quote"]'); if (t) t.click(); const el = document.getElementById('qstep-3'); if (el) el.scrollIntoView({ block: 'start' }); }
-          } catch (err) {
-            msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
-            busy(btn, false, 'Save pricing');
-          }
-        });
 
         // ----- step 4: scope of works -----
         renderEditSowDocList();
@@ -3738,7 +3711,34 @@
             scopeButtonLabel,
             sowDocs: () => sowDocs,
             setSowDocs: (list) => { sowDocs = list.slice(); renderEditSowDocList(); },
-            stages: () => readStagesPayload().map(({ rowEl, ...stage }) => stage),
+            // the stage table as it would be saved; a stage made on the page gets its id here
+            stages: () => readStagesPayload().map(({ rowEl, ...stage }) => ({ ...stage, id: stage.id || (rowEl.dataset.id = quoteNewId()) })),
+            // a stage whose name box was emptied would read as a removed stage: wait for its name
+            stagesProblem: () => ([...document.querySelectorAll('#cc-rows .cc-row')]
+              .some(r => !r.querySelector('.cc-name').value.trim() && (r.dataset.id || r.querySelector('.li-row, .pg-row'))) ? 'Not saved yet: every stage needs a name' : null),
+            setStages: (stages) => {
+              document.getElementById('cc-rows').innerHTML = '';
+              stages.forEach(st => addRow({
+                ...st,
+                lineItems: (st.lineItems || []).map(li => ({ ...li, prebuild_client_description: li.prebuild_client_description ?? '' })),
+                photoGroups: (st.photoGroups || []).map(pg => ({ description: pg.description, photos: (pg.photos || []).map(ph => ph.url || ph) })),
+              }));
+              updateEditTotal();
+              renderCustomerGets();
+            },
+            // what hangs off the stages on this page, redrawn from the quote in memory when they save
+            stagesSaved: () => {
+              (project.cost_centres || []).forEach(c => { c.quoted_hours = quotedHoursOf(c); });
+              refreshQuoteMoney(project);
+              ['q-stc-stage', 'q-bstc-stage'].forEach(id => {
+                const sel = document.getElementById(id);
+                const picked = sel.value;
+                sel.innerHTML = stageOptionsHtml(project.cost_centres, picked);
+                sel.value = [...sel.options].some(o => o.value === picked) ? picked : '';
+              });
+            },
+            // the When card works its days out from the labour hours
+            stagesSettled: () => { if (typeof initJobWindow === 'function') initJobWindow(project); },
             ticks: () => quoteStepTicks(project, project.cost_centres || []),
             refreshBar,
             readyCheck: () => refreshReadyCheck(project),
@@ -3757,8 +3757,9 @@
       }
     }
 
-    function render(project, pricingVisible) {
-      const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+    // What the stages add up to: the quote total, what it costs and the profit. render() draws the
+    // page from it, and the quote steps call refreshQuoteMoney() when a stage price saves.
+    function stageMoney(centres) {
       const quoted = centres.reduce((s, c) => s + Number(c.quoted_amount || 0), 0);
       // estimated_labour_cost is a SELL total (hours x the rate tier's sell
       // rate - there's no separate cost rate in this app), not a cost. For
@@ -3777,16 +3778,39 @@
       }, 0);
       const materialCostTotal = centres.reduce((s, c) => s + Number(c.estimated_material_cost || 0), 0);
       const cost = labourCostTotal + materialCostTotal;
-      const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const profit = quoted - cost;
+      const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
+      const quotedIndirectTotal = quotedHoursTotal * indirectRate;
+      return { directRate, indirectRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal };
+    }
+
+    // The three money tiles at the top of a quote or quoted job.
+    function quoteMoneyTilesHtml({ quoted, cost, profit, quotedIndirectTotal, quotedHoursTotal }) {
+      return `
+                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
+                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
+                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>`;
+    }
+
+    // A quote's money tiles redrawn from the quote in memory (its stages just saved themselves).
+    // A quote shows only these three tiles; a job's header has more and is drawn by render().
+    function refreshQuoteMoney(project) {
+      const box = document.querySelector('.job-money');
+      if (!box || project.job_number || project.proposal_template === 'direct_job') return;
+      box.innerHTML = quoteMoneyTilesHtml(stageMoney(project.cost_centres || []));
+      applyOverheadsToCosts(project);
+    }
+
+    function render(project, pricingVisible) {
+      const centres = project.cost_centres.sort((a, b) => a.sort_order - b.sort_order);
+      const { directRate, indirectRate, quoted, labourSellTotal, labourCostTotal, materialCostTotal, cost, profit, quotedHoursTotal, quotedIndirectTotal } = stageMoney(centres);
+      const invoiced = centres.reduce((s, c) => s + Number(c.invoiced_amount || 0), 0);
       const pctComplete = quoted ? Math.min(100, Math.round((invoiced / quoted) * 100)) : 0;
       const remaining = Math.max(0, quoted - invoiced);
       const quoteUrl = `${shareOrigin()}/quote.html?token=${project.quote_token}`;
       const actualLabourTotal = centres.reduce((s, c) => s + Number(c.actual_labour_cost || 0), 0);
-      const quotedHoursTotal = centres.reduce((s, c) => s + Number(c.quoted_hours || 0), 0);
       const actualHoursTotal = centres.reduce((s, c) => s + Number(c.actual_hours || 0), 0);
       const actualIndirectTotal = centres.reduce((s, c) => s + Number(c.actual_indirect_overhead || 0), 0);
-      const quotedIndirectTotal = quotedHoursTotal * indirectRate;
       const inclOverheads = (amt) => `<div class="subtitle" style="margin:2px 0 0; font-size:12px;">incl. overheads ${money(amt)}</div>`;
 
       // "Cost allocated" and "Profit" on jobs must always reflect real
@@ -3922,9 +3946,7 @@
                   <div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                   <div class="stat" title="Work done and not yet on an invoice, at the price the next invoice would carry"><div class="label">Left to invoice</div><div class="value" id="job-left-to-invoice">...</div></div>
         ` : `
-                  <div class="stat"><div class="label">Quote total</div><div class="value">${money(quoted)}</div></div>
-                  <div class="stat" data-oh-cost="${cost}" data-oh-indirect="${quotedIndirectTotal}" data-oh-hours="${quotedHoursTotal}" data-oh-price="${quoted}" data-oh-profit="${profit}"><div class="label">Cost estimate</div><div class="value">${money(cost)}</div></div>
-                  <div class="stat"><div class="label">Estimated profit</div><div class="value ${profit >= 0 ? 'positive' : 'negative'}">${money(profit)}</div></div>
+                  ${quoteMoneyTilesHtml({ quoted, cost, profit, quotedIndirectTotal, quotedHoursTotal })}
                   ${project.job_number ? `<div class="stat"><div class="label">Invoiced</div><div class="value">${money(invoiced)}</div></div>
                   <div class="stat"><div class="label">Left to invoice</div><div class="value">${money(remaining)}</div></div>` : ''}
           ${project.job_number ? `
