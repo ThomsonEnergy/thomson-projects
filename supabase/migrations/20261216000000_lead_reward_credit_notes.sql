@@ -8,11 +8,13 @@
 --    raises the credit note in Xero to the account on the new Settings > Xero Mapping row "Lead
 --    rewards". The row is seeded with no account, so nothing happens until the owner picks one.
 --  * lead_reward_apply() takes a reward off one invoice billed to the referrer (never an interest
---    invoice, never split, the invoice must still owe something after), and get_invoice_balance_due()
+--    invoice or one with a pay online link already made, never split, the invoice must still owe
+--    something after), and get_invoice_balance_due()
 --    takes it off what the invoice owes, so every screen that shows a balance follows. The worker then
 --    allocates the note to the invoice in Xero.
 --  * lead_reward_release() puts it back to owed when the invoice can no longer carry it (a credit
---    note, a new bill-to, an edit, the invoice deleted); it then takes the next invoice.
+--    note, a new bill-to, an edit, the invoice deleted); it then takes the next invoice. Two triggers
+--    (invoice amounts changed, a credit note's claims) call it too, so no path can leave a balance below zero.
 --  * lead_reward_settle() is now the server's: Cancel from the Clients page (lead-reward.js voids the
 --    note in Xero first), or what Xero shows when a note was refunded or allocated there by hand.
 -- Money is recorded here and in Xero, never moved: each function is all or nothing and checks its own
@@ -103,7 +105,9 @@ $$;
 revoke execute on function public.invoice_bill_to_client(uuid) from public, anon, authenticated;
 
 -- Take one owed reward off one invoice. True when it went on. Refused (false, nothing changed) unless
--- the reward is owed, its credit note is in Xero, the invoice is unpaid, not an interest invoice,
+-- the reward is owed, its credit note is in Xero and not still allocated to an invoice it stepped off
+-- (the worker removes that first), the invoice is unpaid, not an interest invoice, has no pay online
+-- link made yet (a link already made stays payable at the old amount),
 -- billed to the referrer, and still owes at least a cent after the credit. Server only.
 create or replace function public.lead_reward_apply(p_reward uuid, p_invoice uuid)
 returns boolean
@@ -113,10 +117,12 @@ set search_path = public
 as $$
 declare r lead_rewards; inv invoices; v_balance numeric; v_job integer;
 begin
-  select * into r from lead_rewards where id = p_reward for update;
-  if not found or r.status <> 'due' or r.applied_invoice_id is not null or r.xero_credit_note_id is null then return false; end if;
+  -- the invoice first, then the reward: every path that holds both takes them in this order
   select * into inv from invoices where id = p_invoice for update;
-  if not found or inv.paid_at is not null or inv.interest_of_invoice_id is not null or coalesce(inv.interest_amount, 0) > 0 then return false; end if;
+  if not found or inv.paid_at is not null or inv.interest_of_invoice_id is not null or coalesce(inv.interest_amount, 0) > 0
+     or inv.airwallex_payment_link_url is not null then return false; end if;
+  select * into r from lead_rewards where id = p_reward for update;
+  if not found or r.status <> 'due' or r.applied_invoice_id is not null or r.xero_credit_note_id is null or r.xero_allocated_invoice_id is not null then return false; end if;
   if invoice_bill_to_client(p_invoice) is distinct from r.referrer_client_id then return false; end if;
   v_balance := get_invoice_balance_due(p_invoice);
   if v_balance - r.amount < 0.01 then return false; end if;
@@ -133,30 +139,8 @@ end;
 $$;
 revoke execute on function public.lead_reward_apply(uuid, uuid) from public, anon, authenticated;
 
--- A new invoice: every owed reward of the client it is billed to that fits, oldest first. Returns how
--- many went on. Called by create-invoice.js and create-job-from-quote.js (the deposit). Server only.
-create or replace function public.lead_reward_apply_to_invoice(p_invoice uuid)
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare v_client uuid; r record; n integer := 0;
-begin
-  v_client := invoice_bill_to_client(p_invoice);
-  if v_client is null then return 0; end if;
-  for r in select id from lead_rewards
-           where referrer_client_id = v_client and status = 'due' and applied_invoice_id is null and xero_credit_note_id is not null
-           order by due_at, id loop
-    if lead_reward_apply(r.id, p_invoice) then n := n + 1; end if;
-  end loop;
-  return n;
-end;
-$$;
-revoke execute on function public.lead_reward_apply_to_invoice(uuid) from public, anon, authenticated;
-
 -- The unpaid invoices an owed reward could go on, oldest first: billed to the referrer, not an
--- interest invoice, owing at least a cent more than the reward. The worker checks Xero's own amount
+-- interest invoice, no pay online link made yet, owing at least a cent more than the reward. The worker checks Xero's own amount
 -- due on each (a part payment only Xero knows about) before lead_reward_apply. Server only.
 create or replace function public.lead_reward_candidates(p_reward uuid)
 returns table (invoice_id uuid, invoice_number text, xero_invoice_id text)
@@ -168,7 +152,8 @@ as $$
   select i.id, i.invoice_number, i.xero_invoice_id
   from lead_rewards r
   join invoices i on i.paid_at is null and i.interest_of_invoice_id is null and coalesce(i.interest_amount, 0) = 0
-  where r.id = p_reward and r.status = 'due' and r.applied_invoice_id is null and r.xero_credit_note_id is not null
+    and i.airwallex_payment_link_url is null
+  where r.id = p_reward and r.status = 'due' and r.applied_invoice_id is null and r.xero_credit_note_id is not null and r.xero_allocated_invoice_id is null
     and invoice_bill_to_client(i.id) = r.referrer_client_id
     and get_invoice_balance_due(i.id) - r.amount >= 0.01
   order by coalesce(i.due_date, (i.sent_at at time zone 'Australia/Sydney')::date) nulls last, i.sent_at, i.invoice_number
@@ -187,7 +172,7 @@ set search_path = public
 as $$
 declare r record; n integer := 0; v_no text; v_total numeric := 0;
 begin
-  select invoice_number into v_no from invoices where id = p_invoice;
+  select invoice_number into v_no from invoices where id = p_invoice for update;
   for r in select lr.id, lr.amount, lr.referrer_client_id, p.job_number
            from lead_rewards lr left join projects p on p.id = lr.project_id
            where lr.applied_invoice_id = p_invoice for update of lr loop
@@ -219,6 +204,7 @@ set search_path = public
 as $$
 begin
   if not exists (select 1 from lead_rewards where applied_invoice_id = p_invoice) then return 0; end if;
+  perform 1 from invoices where id = p_invoice for update;
   if get_invoice_balance_due(p_invoice) - coalesce(p_less, 0) >= -0.004 then return 0; end if;
   return lead_reward_release(p_invoice, p_why);
 end;
@@ -245,6 +231,65 @@ drop trigger if exists invoices_release_lead_rewards on public.invoices;
 create trigger invoices_release_lead_rewards
   before delete on public.invoices
   for each row execute function public.invoices_release_lead_rewards();
+
+-- Safety net in the database: whatever changes an invoice's amounts (Edit amounts in the browser,
+-- edit_invoice_lines) or credits it (a credit note's claims), a reward the invoice can no longer carry
+-- steps off, so no path can leave a balance below zero. Never a reason to stop the edit or the credit note.
+create or replace function public.invoices_lead_reward_fit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_invoice uuid;
+begin
+  if tg_table_name = 'invoices' then
+    v_invoice := new.id;
+  else
+    select invoice_id into v_invoice from credit_notes where id = new.credit_note_id;
+  end if;
+  if v_invoice is not null then
+    perform lead_reward_release_if_short(v_invoice, 0, case when tg_table_name = 'invoices' then 'the invoice was edited below the credit' else 'a credit note' end);
+  end if;
+  return new;
+exception when others then
+  raise warning 'invoices_lead_reward_fit: %', sqlerrm;
+  return new;
+end;
+$$;
+revoke execute on function public.invoices_lead_reward_fit() from public, anon, authenticated;
+drop trigger if exists invoices_lead_reward_fit on public.invoices;
+create trigger invoices_lead_reward_fit
+  after update of labour_amount, material_amount, stc_amount, bstc_amount, interest_amount on public.invoices
+  for each row execute function public.invoices_lead_reward_fit();
+drop trigger if exists credit_note_claims_lead_reward_fit on public.credit_note_claims;
+create trigger credit_note_claims_lead_reward_fit
+  after insert or update on public.credit_note_claims
+  for each row execute function public.invoices_lead_reward_fit();
+
+-- A reward must outlive what it was earned on once it is in Xero. A referred job deleted later no longer
+-- takes its reward with it (the same link to projects, re-made to leave the reward in place), and a
+-- reward with a credit note in Xero cannot be removed with its client: cancel it first.
+alter table public.lead_rewards alter column project_id drop not null;
+alter table public.lead_rewards drop constraint if exists lead_rewards_project_id_fkey;
+alter table public.lead_rewards add constraint lead_rewards_project_id_fkey foreign key (project_id) references public.projects(id) on delete set null; -- second link ok: the one link, re-made
+create or replace function public.lead_rewards_keep_live()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if old.xero_credit_note_id is not null and old.status in ('due', 'settled') then
+    raise exception 'This client has a lead reward with a credit note in Xero (%). Cancel the reward on the Clients page first; a reward already used on an invoice stays with the client.', coalesce(old.xero_credit_note_number, 'see their Lead rewards');
+  end if;
+  return old;
+end;
+$$;
+revoke execute on function public.lead_rewards_keep_live() from public, anon, authenticated;
+drop trigger if exists lead_rewards_keep_live on public.lead_rewards;
+create trigger lead_rewards_keep_live
+  before delete on public.lead_rewards
+  for each row execute function public.lead_rewards_keep_live();
 
 -- Close a reward, from the server only (lead-reward.js checks who is asking; the worker reports what
 -- Xero shows). p_action: 'cancel' (p_reference: why; only a reward not yet on an invoice),

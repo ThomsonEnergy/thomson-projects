@@ -164,15 +164,6 @@ exports.handler = async (event) => {
     const { data: result, error: editErr } = await supabaseAdmin.rpc('edit_invoice_lines', { p_invoice_id: invoiceId, p_payload: payload });
     if (editErr) return bad(editErr.message.replace(/^.*?: /, ''));
 
-    // A lead reward credit on this invoice steps off when the edited invoice can no longer carry it
-    // (item 74b part 2). The invoice is not in Xero yet, so there is nothing to undo there.
-    try {
-      const { error: rewardErr } = await supabaseAdmin.rpc('lead_reward_release_if_short', { p_invoice: invoiceId, p_less: 0, p_why: 'the invoice was edited below the credit' });
-      if (rewardErr) throw rewardErr;
-    } catch (rewardErr) {
-      console.error('update-invoice-lines lead reward step off failed:', rewardErr.message);
-    }
-
     // The Bill ticks (item 41): the same marks create-invoice.js saves, never a reason to fail the edit.
     try {
       const ids = (o, k) => [...new Set((Array.isArray(o?.[k]) ? o[k] : []).filter(v => typeof v === 'string'))];
