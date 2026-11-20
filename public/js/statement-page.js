@@ -90,6 +90,9 @@
     const interestNote = interest > 0
       ? `Interest at ${esc(s.late_interest_rate_pct || 21)}% per annum is accruing on overdue invoices: ${money(interest)} to ${dateText(keyDate(asAt))}, not included in the total above. It is invoiced separately; paying an invoice online by card includes its interest to that day.`
       : '';
+    // lead reward credit not yet on an invoice (item 74b part 2): it comes off their next invoice, so it is not in the total
+    const waitingCredit = (Array.isArray(data.credits_waiting) ? data.credits_waiting : []).reduce((t, c) => t + (Number(c.amount) || 0), 0);
+    const creditNote = waitingCredit > 0 ? `You have ${money(waitingCredit)} of lead reward credit waiting. It comes off your next invoice with us by itself.` : '';
     const bankRows = [
       s.bank_name ? ['Bank', s.bank_name] : null,
       s.bank_account_name ? ['Acc. Name', s.bank_account_name] : null,
@@ -102,6 +105,7 @@
       <div class="st-final">
         <div class="st-aging">${aging.map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${money(v)}</div></div>`).join('')}</div>
         ${interestNote ? `<p class="st-note">${interestNote}</p>` : ''}
+        ${creditNote ? `<p class="st-note">${creditNote}</p>` : ''}
         <div class="st-howto">
           <h4>How To Pay</h4>
           ${rows.length ? `
@@ -127,6 +131,7 @@
         <div class="ds-kicker">Statement for ${esc(client.name || '')} as at ${dateText(keyDate(asAt))}</div>
         <div class="ds-amount">${money(total)}</div>
         ${overdue > 0 ? `<div class="ds-late">${money(overdue)} overdue</div>` : ''}
+        ${creditNote ? `<div>${creditNote}</div>` : ''}
         ${rows.length ? `
         <h3>Invoices (tap one to open or pay it)</h3>
         ${rows.map((r) => `<div class="ds-row"><span class="k"><a href="${esc(r.url)}">${esc(invNo(r.invoice_number))}</a>${r.job_number ? ` J${esc(r.job_number)}` : ''}${r.late ? ` <span class="ds-late">overdue</span>` : ''}</span><span class="v">${money(r.balance)}</span></div>`).join('')}

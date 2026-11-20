@@ -52,7 +52,7 @@
   <script src="/js/email-compose.js?v=13"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/job-schedule.js?v=6"></script>
-  <script src="/js/job-contacts.js?v=5"></script>
+  <script src="/js/job-contacts.js?v=6"></script>
   <script src="/js/share-with-client.js?v=1"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/assets.js?v=3"></script>
@@ -4915,7 +4915,7 @@
       if (editToggleBtn) editToggleBtn.addEventListener('click', () => enterEditMode(project));
       if (document.getElementById('panel-quote')) wireQuoteSteps(project);
       if (document.getElementById('client-due-card') && project.portal_requested_at) loadJsOnce('/js/client-due.js?v=1', () => typeof initClientDue === 'function').then(() => initClientDue(project)); // item 74
-      if (document.getElementById('referral-chip') && project.referrer_client_id) loadJsOnce('/js/referral-chip.js?v=1', () => typeof initReferralChip === 'function').then(() => initReferralChip(project)); // item 74b
+      if (document.getElementById('referral-chip') && project.referrer_client_id) loadJsOnce('/js/referral-chip.js?v=2', () => typeof initReferralChip === 'function').then(() => initReferralChip(project)); // item 74b
       if (document.getElementById('job-window-card')) loadJsOnce('/js/job-window.js?v=2', () => typeof initJobWindow === 'function').then(() => initJobWindow(project)); // item 92
 
       document.getElementById('toggle-line-items-btn').addEventListener('click', (e) => {

@@ -32,6 +32,7 @@ const { computeDueDate } = require('./_shared/compute-due-date');
 const { priceInvoiceItems, commercialAgreementRow, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
 const { rateCardFor } = require('./_shared/rate-cards');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { creditNewInvoice } = require('./_shared/lead-rewards');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -381,6 +382,10 @@ exports.handler = async (event) => {
     // bank transfer and never clicks the button at all.
 
     await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', actorId: user.id, detail: `${claimLabel || 'Invoice'}: ${claimRows.length} stage${claimRows.length === 1 ? '' : 's'}` });
+
+    // A lead reward credit the client it is billed to has waiting comes off this invoice by itself (item
+    // 74b part 2). Never throws, and does nothing for a client with no credit waiting.
+    await creditNewInvoice(supabaseAdmin, insertedInvoice.id);
 
     return {
       statusCode: 200,

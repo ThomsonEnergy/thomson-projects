@@ -1,6 +1,6 @@
 # Business Facts
 
-Last updated 12 Nov 2026
+Last updated 20 Nov 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
 
@@ -22,6 +22,7 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
   | 2003-2 | STC Trading Fees |
 
 - The owner is the bookkeeper. Tax, super and STP classification is their (or their accountant's) call: explain the options, don't decide.
+- **Lead rewards are credits only** (owner, 20 Nov 2026): a referrer, builder or home owner, gets a credit off our work, never a payout. Each reward is one Xero sales credit note to the account on the Lead rewards row in Settings > Xero Mapping (the owner picks the account; tax type seeded GST Free Expenses, theirs or the accountant's call).
 
 ## Suppliers
 
