@@ -392,6 +392,24 @@ async function equipmentList(token, list, q) {
   return Array.isArray(r.json) ? { ok: true, list: names(r.json) } : { ok: false, error: 'Formbay did not send its list. Try again.' };
 }
 
+// Who may be put on a form, from Formbay's own list of the company's people. Formbay shows each
+// person's accreditations: grid connected, stand-alone (off-grid) and the battery endorsement.
+// A battery on the grid needs the battery endorsement; anything off-grid needs the stand-alone one.
+function people(json) {
+  return (Array.isArray(json) ? json : []).map(i => ({
+    id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' '),
+    grid: String(i.grid_connected_install) === '1', gridDesign: String(i.grid_connected_design) === '1',
+    offGrid: String(i.sps_install) === '1', offGridDesign: String(i.sps_design) === '1',
+    battery: /battery/i.test(String(i.endorsement || '')),
+  }));
+}
+// role: 'installer' or 'designer'. The same rule the panel uses to offer people.
+function mayDo(person, role, { offGrid, battery }) {
+  if (offGrid) return role === 'designer' ? person.offGridDesign : person.offGrid;
+  if (battery) return person.battery && (role === 'designer' ? person.gridDesign : person.grid);
+  return role === 'designer' ? person.gridDesign : person.grid;
+}
+
 // What the Create panel opens with: who can be the installer, Formbay's brand lists, and the job's
 // own details. `what` is the kind of form the job looks like: 'pv' (solar), 'pv_bstc' (solar and
 // battery) or 'bstc' (battery), from the quote's STC and battery STC counts and its template.
@@ -421,7 +439,7 @@ async function createOptions(db, token, projectId) {
   const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,
-    installers: installers.json.map(i => ({ id: String(i.iid), name: [i.ifname, i.isname].filter(Boolean).join(' ') })),
+    installers: people(installers.json), reference: project.job_number ? `J${project.job_number}` : '',
     brands: lists, streetTypes: types,
     prefill: {
       what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
@@ -456,7 +474,20 @@ async function createForm(db, token, { projectId, userId, f }) {
   const missing = Object.keys(need).filter(k => !need[k] || !clean(need[k]));
   if (missing.length) return { ok: false, error: `Still needed: ${missing.join(', ')}.` };
 
-  const person = Number(clean(f.installer));
+  // The people on the form must hold the accreditation for this kind of job (owner, 20 Nov 2026):
+  // checked here against Formbay's list, not only in the panel.
+  const offGrid = f.off_grid === true || f.off_grid === 'yes';
+  const staff = people((await formbayCall(token, 'pv_installers')).json);
+  const team = { installer: clean(f.installer), designer: clean(f.designer) || clean(f.installer), electrician: clean(f.electrician) || clean(f.installer) };
+  for (const role of ['installer', 'designer']) {
+    const who = staff.find(x => x.id === team[role]);
+    if (!who) return { ok: false, error: `Pick the ${role} from the list.` };
+    if (!mayDo(who, role, { offGrid, battery })) {
+      return { ok: false, error: `${who.name} is not accredited in Formbay as the ${role} for ${offGrid ? 'an off-grid' : battery ? 'a grid connected battery' : 'a grid connected'} job. Pick someone else.` };
+    }
+  }
+  if (!staff.some(x => x.id === team.electrician)) return { ok: false, error: 'Pick the electrician from the list.' };
+  const { data: job } = await db.from('projects').select('job_number').eq('id', projectId).maybeSingle();
   const equipment = [];
   if (solar) equipment.push({ type: 0, brand: clean(f.panel_brand), model: clean(f.panel_model), count: whole(f.panel_count, 1) });
   equipment.push({ type: 1, brand: clean(f.inverter_brand), series: clean(f.inverter_series), model: clean(f.inverter_model), count: whole(f.inverter_count, 1) });
@@ -468,9 +499,10 @@ async function createForm(db, token, { projectId, userId, f }) {
   }
   const body = {
     v: 2, type: solar ? 'pv' : 'bstc', date: `${date[3]}/${date[2]}/${date[1]}`,
-    // 1: on the grid with no battery, 2: on the grid with a battery (as on the forms made in Formbay so far)
-    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: battery ? 2 : 1, meter_no: '' },
-    team: { designer: person, installer: person, electrician: person },
+    // Formbay's grid codes, read off the forms made in its own app: 0 on the grid with no battery
+    // (J7088), 2 on the grid with a battery (J7009, J7081). 1 is taken to be off-grid: not yet seen on a real form.
+    grid: { nmi: clean(f.nmi, 11).replace(/\D/g, ''), type: offGrid ? 1 : battery ? 2 : 0, meter_no: '' },
+    team: { designer: Number(team.designer), installer: Number(team.installer), electrician: Number(team.electrician) },
     address: {
       city: clean(f.city).toUpperCase(), state: clean(f.state, 3).toUpperCase(), postcode: clean(f.postcode, 4),
       unit_type: clean(f.unit_number) ? 'UNIT' : '', unit_number: clean(f.unit_number, 10),
@@ -491,7 +523,14 @@ async function createForm(db, token, { projectId, userId, f }) {
     if (c) body.ccew = { licence_id: c.licence_id, associated_person_id: Number(c.associated_person_id), special_conditions: { generator: 0, high_voltage: 0, over_100_amps: 0, hazardous_area: 0, unmetered_supply: 0 } };
   }
 
-  const r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  // Our job number goes on as Formbay's "Your job reference". If Formbay will not take it this way,
+  // the form is made without it rather than not at all.
+  if (job && job.job_number) body.urref = `J${job.job_number}`;
+  let r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  if (body.urref && r.status === 400 && /urref/i.test(JSON.stringify(r.json || r.text || ''))) {
+    delete body.urref;
+    r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  }
   // Kept so a refusal can be read later (finance roles): what Formbay was sent and what it said.
   await db.from('formbay_webhook_events').insert({ event_type: 'create.attempt', formbay_job_id: `project ${projectId}`, payload: { status: r.status, sent: body, answer: r.json || r.text } });
   const made = [];

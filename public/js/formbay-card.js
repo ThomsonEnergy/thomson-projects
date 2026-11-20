@@ -196,7 +196,8 @@ async function fbDrawCreate(panel, project, changed) {
       ${box('city', 'Suburb', p.city)}${box('state', 'State', p.state, 'maxlength="3"')}${box('postcode', 'Postcode', p.postcode, 'inputmode="numeric" maxlength="4"')}
       ${box('nmi', 'NMI (optional)', p.nmi, 'inputmode="numeric" placeholder="Formbay finds it from the address"')}
       ${box('date', 'Install date', sydneyDateKey(new Date()), 'type="date"')}
-      ${pick('installer', 'Installer', o.installers.map(i => ({ value: i.id, label: i.name })), p.installer)}
+      ${pick('off_grid', 'Grid', [{ value: 'no', label: 'Grid connected' }, { value: 'yes', label: 'Off-grid' }], 'no', 'Pick one')}
+      ${pick('installer', 'Installer', [], '')}${pick('designer', 'Designer', [], '')}${pick('electrician', 'Electrician', [], '')}
     </div>
     <div id="fbc-solar" style="${grid} margin-top:10px;">
       ${pick('installation', 'Solar on this site', [{ value: '0', label: 'New system' }, { value: '1', label: 'Replacement' }, { value: '2', label: 'Additional' }, { value: '3', label: 'Extension' }], '0', 'Pick one')}
@@ -216,16 +217,33 @@ async function fbDrawCreate(panel, project, changed) {
       ${pick('battery_model', 'Battery model', [], '', 'Pick the series first', 'style="grid-column:span 2;"')}
       ${box('battery_count', 'Number of batteries', '1', 'type="number" min="1" inputmode="numeric"')}
     </div>
-    <p class="subtitle" style="margin:8px 0 0;">The installer is also put down as the designer and the electrician; change that in Formbay if it is someone else.</p>
+    <p class="subtitle" style="margin:8px 0 0;">Only people Formbay has accredited for this kind of job can be picked. ${o.reference ? `Formbay's job reference is set to ${escapeHtml(o.reference)}.` : ''}</p>
     <div style="display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap;">
       <button type="button" id="fbc-go">Create in Formbay</button>
       <div id="fbc-msg" style="flex:1; min-width:200px;"></div>
     </div>`;
   const $ = (id) => panel.querySelector(`#fbc-${id}`);
+  // Who Formbay has accredited for this kind of job: off-grid needs the stand-alone accreditation, a
+  // battery on the grid needs the battery endorsement. The server checks the same rule again.
+  const may = (i, role) => {
+    const design = role === 'designer';
+    if ($('off_grid').value === 'yes') return design ? i.offGridDesign : i.offGrid;
+    if ($('what').value !== 'pv' && !i.battery) return false;
+    return design ? i.gridDesign : i.grid;
+  };
+  const team = () => ['installer', 'designer', 'electrician'].forEach(role => {
+    const was = $(role).value || (role === 'installer' ? p.installer : $('installer').value);
+    const list = o.installers.map(i => ({ ...i, ok: role === 'electrician' || may(i, role) }));
+    const keep = list.find(i => i.ok && i.id === was) || (list.filter(i => i.ok).length === 1 ? list.find(i => i.ok) : null);
+    $(role).innerHTML = `<option value="">Pick one</option>${list.map(i => `<option value="${escapeHtml(i.id)}" ${i.ok ? '' : 'disabled'} ${keep && keep.id === i.id ? 'selected' : ''}>${escapeHtml(i.name)}${i.ok ? '' : ' (not accredited for this job)'}</option>`).join('')}`;
+  });
   const show = () => {
     $('solar').style.display = $('what').value === 'bstc' ? 'none' : 'grid';
     $('battery').style.display = $('what').value === 'pv' ? 'none' : 'grid';
+    team();
   };
+  $('off_grid').addEventListener('change', team);
+  $('installer').addEventListener('change', () => ['designer', 'electrician'].forEach(role => { if (!$(role).value) team(); }));
   $('what').addEventListener('change', () => { show(); if ($('inverter_brand').value) $('inverter_brand').dispatchEvent(new Event('change')); });
   show();
   // Picking a brand fills the next list from Formbay, and so on down to the model.
