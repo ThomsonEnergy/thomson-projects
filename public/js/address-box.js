@@ -126,3 +126,15 @@ async function addressBoxColumns(input) {
   const parts = await addressBoxParts(input);
   return parts ? { address_parts: parts, lat: parts.lat, lng: parts.lng } : { address_parts: null };
 }
+
+// A job saved before addresses were kept in parts: looked up once and saved, so Formbay, Pylon and
+// the map point read Google's answer and not a split of the text. An address Google does not know
+// is marked so it is not asked about on every open. Returns the parts, or null.
+async function addressKeepJob(project) {
+  if (!project || project.address_parts || !String(project.client_address || '').trim()) return (project && project.address_parts) || null;
+  const found = await addressLookUp(project.client_address);
+  const fields = found ? { address_parts: found, lat: found.lat, lng: found.lng } : { address_parts: { unknown: true, formatted: String(project.client_address).trim() } };
+  const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
+  if (!error) Object.assign(project, fields);
+  return found;
+}

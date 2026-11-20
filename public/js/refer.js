@@ -41,6 +41,7 @@
 
   async function start() {
     try { S.info = await call({ action: 'info' }); } catch (e) { showError(e.message); return; }
+    window.ADDRESS_BOX_KEY = S.info.mapsKey || '';   // the address box offers Google's addresses (item 103)
     drawWho();
   }
 
@@ -103,6 +104,8 @@
     };
     typeSel.addEventListener('change', drawQs);
     drawQs();
+    // a Quick referral may only know the suburb, so that box stays plain typing
+    if (!(other && S.kind === 'quick')) wireAddressBox(root.querySelector('#rf-address'));
     root.querySelector('#rf-send').addEventListener('click', send);
   }
 
@@ -152,7 +155,7 @@
       const told = root.querySelector('#rf-told');
       const out = await call({
         action: 'submit', who: S.who, kind: S.kind, type: v('rf-type'), need: v('rf-need'), answers, files, dueDate: v('rf-due'),
-        person: { name: v('rf-name'), phone: v('rf-phone'), email: v('rf-email'), address: v('rf-address') }, told: told ? told.checked : false,
+        person: { name: v('rf-name'), phone: v('rf-phone'), email: v('rf-email'), address: v('rf-address'), addressParts: await addressBoxParts(root.querySelector('#rf-address')) }, told: told ? told.checked : false,
       });
       root.innerHTML = `<div class="rf-card" style="margin-top:20px;"><h1 style="font-size:20px; margin:0 0 6px;">Thank you</h1><p>${out.kind === 'quote' ? `We have your job${out.ref ? ` (${esc(out.ref)})` : ''} and will be in touch. You can follow it in your portal.` : 'We have their details and will be in touch with them soon.'}</p><button type="button" class="secondary" id="rf-again">Send another</button></div>`;
       root.querySelector('#rf-again').addEventListener('click', drawWho);

@@ -14,6 +14,7 @@
 // Writes projects, cost_centres, client_sites, project_documents (and storage), job_client_messages,
 // client_contacts, activity_log, notifications.
 
+const { addressColumns } = require('./address-parts');
 const crypto = require('crypto');
 const { sydneyToday, addDays, fmtDay, jobRef } = require('./schedule-emails');
 const { sendPortalInvite } = require('./portal-invite');
@@ -109,7 +110,7 @@ async function createRequest(admin, scope, input) {
   // the site: one of theirs, or a new address saved as a site
   let site = null;
   if (input.siteId) {
-    const { data } = await admin.from('client_sites').select('id, address').eq('id', input.siteId).eq('client_id', client.id).maybeSingle();
+    const { data } = await admin.from('client_sites').select('id, address, address_parts, lat, lng').eq('id', input.siteId).eq('client_id', client.id).maybeSingle();
     if (!data) throw new Refused('Pick one of your sites, or type the address.');
     site = data;
   } else {
@@ -117,11 +118,12 @@ async function createRequest(admin, scope, input) {
     if (address.length < 6) throw new Refused('Type the site address.');
     // the same match as the unique index (lower case, trimmed)
     const norm = (a) => String(a || '').trim().toLowerCase();
-    const { data: sites } = await admin.from('client_sites').select('id, address').eq('client_id', client.id);
+    const { data: sites } = await admin.from('client_sites').select('id, address, address_parts, lat, lng').eq('client_id', client.id);
     const same = (sites || []).find((x) => norm(x.address) === norm(address));
     if (same) site = same;
     else {
-      const { data: made, error } = await admin.from('client_sites').insert({ client_id: client.id, address, created_by: null }).select('id, address').single();
+      // the address in parts from Google's lookup on the portal's address box (item 103), when it came
+      const { data: made, error } = await admin.from('client_sites').insert({ client_id: client.id, address, created_by: null, ...addressColumns(input.addressParts, address) }).select('id, address, address_parts, lat, lng').single();
       if (error) throw error;
       site = made;
     }
@@ -133,7 +135,7 @@ async function createRequest(admin, scope, input) {
   const base = {
     // the client's own email; a portal login's when the client has none (never a label like "their referral link")
     name, client_id: cl.id, client_name: cl.name, client_email: cl.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(scope.email) ? scope.email : null), client_phone: cl.phone || null,
-    client_address: site.address, client_site_id: site.id, portal_requested_at: new Date().toISOString(), portal_requested_by: scope.email,
+    client_address: site.address, client_site_id: site.id, ...(site.address_parts ? { address_parts: site.address_parts, lat: site.lat, lng: site.lng } : {}), portal_requested_at: new Date().toISOString(), portal_requested_by: scope.email,
   };
 
   let project;

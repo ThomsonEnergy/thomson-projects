@@ -356,7 +356,7 @@ function openCreateFromEmailModal(threadId) {
         <div><label>Client</label><input id="cf-client" value="${v(x.client_name)}" /></div>
         <div><label>Client email</label><input id="cf-email" type="email" value="${v(x.client_email)}" /></div>
         <div><label>Client phone</label><input id="cf-phone" value="${v(x.client_phone)}" /></div>
-        <div><label>Site address</label><input id="cf-site" value="${v(x.site_address || x.client_address)}" /></div>
+        <div><label>Site address</label><input id="cf-site" data-address value="${v(x.site_address || x.client_address)}" /></div>
       </div>
       <label>What needs to be done at the site</label>
       <textarea id="cf-work" style="min-height:130px;">${v(x.work_required)}</textarea>
@@ -387,16 +387,17 @@ function openCreateFromEmailModal(threadId) {
           return;
         }
         btn.textContent = 'Creating...';
+        const addressCols = await addressColumnsFor(q('#cf-site'));   // the address in parts, from Google (item 103)
         let clientId = useExisting ? existing.id : null;
         if (!clientId) {
-          const { data: nc, error: ce } = await supabaseClient.from('clients').insert({ name: form.client_name, email: form.client_email || null, phone: form.client_phone || null, address: form.address || null }).select('id').single();
+          const { data: nc, error: ce } = await supabaseClient.from('clients').insert({ name: form.client_name, email: form.client_email || null, phone: form.client_phone || null, address: form.address || null, ...addressCols }).select('id').single();
           if (ce) throw ce;
           clientId = nc.id;
         }
-        const clientSiteId = useExisting ? await resolveClientSite(clientId, form.address) : null;
+        const clientSiteId = useExisting ? await resolveClientSite(clientId, form.address, undefined, { columns: addressCols }) : null;
         const { data: project, error } = await supabaseClient.from('projects').insert({
           name: form.name, sow_text: form.work || null, notes, client_id: clientId, client_name: form.client_name,
-          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null, client_site_id: clientSiteId,
+          client_email: form.client_email || null, client_phone: form.client_phone || null, client_address: form.address || null, client_site_id: clientSiteId, ...addressCols,
           proposal_template: 'direct_job', pipeline_stage: 'job_booked', status: 'in_progress',
         }).select('id').single();
         if (error) throw error;

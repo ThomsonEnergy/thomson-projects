@@ -12,6 +12,7 @@
 //   or  { invoiceId, resend: true }
 // Answer: { ok, changed, xero: null | { ok, error } }
 
+const { addressColumns } = require('./_shared/address-parts');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
 const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
@@ -112,6 +113,8 @@ exports.handler = async (event) => {
       if (a.toLowerCase() !== clean(project.client_address).toLowerCase()) {
         projectChange.client_address = a;
         projectChange.client_site_id = await siteIdFor(admin, project.client_id, a);
+        // the new address in parts when the browser's lookup found them, else cleared: they follow the text
+        Object.assign(projectChange, { address_parts: null }, addressColumns(body.siteAddressParts, a));
         said.push(`Job site ${quoted(project.client_address)} to ${quoted(a)}`);
       }
     }

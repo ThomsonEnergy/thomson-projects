@@ -176,7 +176,7 @@ async function openAssetPanel(opts = {}) {
       <p class="subtitle" id="as-client-note" style="margin:4px 0 0; font-size:12px;">${clientInfo ? `Linked to ${escapeHtml(clientInfo.name)}${clientInfo.email ? ' - ' + escapeHtml(clientInfo.email) : ' - <strong>no email on file</strong>, so reminders can\'t be sent'}` : 'Pick an existing client so reminders know where to go, or just type a name.'}</p>
 
       <label>Site address</label>
-      <input id="as-address" value="${v('site_address')}" placeholder="Where it's installed" />`}
+      <input id="as-address" data-address value="${v('site_address')}" placeholder="Where it's installed" />`}
 
       <div class="grid cols-2">
         <div><label>Type</label><select id="as-type">${ASSET_TYPES.map(t => `<option value="${t.key}" ${a.asset_type === t.key ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>

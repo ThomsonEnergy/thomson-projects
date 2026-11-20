@@ -207,6 +207,7 @@
   async function showOverview() {
     main.innerHTML = `<p class="subtitle">Loading your jobs...</p>`;
     const d = await call('portal-read', { action: 'overview' });
+    window.ADDRESS_BOX_KEY = d.company.mapsKey || '';   // the Request work address box offers Google's addresses
     header(d.email);
     const names = d.clients.map((c) => c.name);
     // whole screen (owner's rule): three columns that scroll on their own on a laptop, one on a phone
@@ -226,6 +227,7 @@
       </div><div class="pl-col">
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
+      ${(d.equipment || []).length ? `<h2 class="pl-h">Your equipment</h2>${d.equipment.map(equipmentHtml).join('')}` : ''}
       ${(d.referrals || []).length ? `<h3 class="pl-muted" style="margin:12px 0 4px; font-size:13px;">Jobs you sent us</h3>${d.referrals.map((r) => `<div class="pl-row ${r.open ? '' : 'done'}" style="cursor:default;">${r.ref ? `<div class="ref">${esc(r.ref)}</div>` : ''}<div class="name" style="font-size:15px;">${esc(r.name)}</div><div class="site">${esc(r.when)}</div><div class="status"><span class="pl-status">${esc(r.status)}</span></div></div>`).join('')}` : ''}
       ${(d.rewards || []).length ? `<div class="pl-card" style="margin-top:10px;"><strong>Your rewards</strong>${d.rewards.map((t) => `<div class="pl-muted" style="margin-top:2px;">${esc(t)}</div>`).join('')}</div>` : ''}
       ${d.referLink ? `<p style="margin:10px 0 0;"><a class="secondary pl-btn" href="${esc(d.referLink)}" target="_blank" rel="noopener">Send us a job (your referral link)</a></p><p class="pl-muted" style="margin:4px 0 0;">Save it to your phone's home screen, or pass it to your team.</p>` : ''}
@@ -298,6 +300,7 @@
     if (clientSel) clientSel.addEventListener('change', drawClient);
     box.querySelector('#rq-site').addEventListener('change', (e) => { box.querySelector('#rq-address').style.display = e.target.value ? 'none' : 'block'; });
     drawClient();
+    wireAddressBox(box.querySelector('#rq-address'));
     box.querySelector('#rq-cancel').addEventListener('click', () => showOverview());
     box.querySelector('#rq-send').addEventListener('click', async (e) => {
       const msg = box.querySelector('#rq-msg');
@@ -308,6 +311,7 @@
         const files = await readFiles(box.querySelector('#rq-files'));
         const out = await call('portal-write', {
           action: 'request', clientId: current().id, siteId: box.querySelector('#rq-site').value || null, address: box.querySelector('#rq-address').value,
+          addressParts: box.querySelector('#rq-site').value ? null : await addressBoxParts(box.querySelector('#rq-address')),
           need: box.querySelector('#rq-need').value, kind, dueDate: (box.querySelector('#rq-due') || {}).value || '',
           dates: [...box.querySelectorAll('.rq-day')].map((x) => x.value).filter(Boolean), files,
         });
@@ -315,6 +319,19 @@
         showJob(out.id);
       } catch (err) { msg.innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; e.target.disabled = false; }
     });
+  }
+
+  // ----- Your equipment: what we have installed for them, one line each, opening to the detail -----
+  // (serial numbers are there for a warranty claim; our own notes never come to the portal)
+  function equipmentHtml(a) {
+    const warranty = a.warrantyEnds ? `Warranty ${a.inWarranty ? 'to' : 'ended'} ${esc(a.warrantyEnds)}` : '';
+    const line = [a.installed ? `Installed ${esc(a.installed)}` : '', warranty].filter(Boolean).join(' · ');
+    return `<details class="pl-card" style="margin:0 0 8px;">
+      <summary style="cursor:pointer;"><strong>${a.quantity > 1 ? `${a.quantity} x ` : ''}${esc(a.name)}</strong>${line ? `<br><span class="pl-muted">${line}</span>` : ''}</summary>
+      ${a.site ? `<p class="pl-muted" style="margin:8px 0 0;">At ${esc(a.site)}</p>` : ''}
+      ${a.nextService ? `<p class="pl-muted" style="margin:4px 0 0;">Next service due ${esc(a.nextService)}</p>` : ''}
+      ${a.serials.length ? `<p class="pl-muted" style="margin:4px 0 0;">Serial number${a.serials.length === 1 ? '' : 's'}: ${a.serials.map(esc).join(', ')}</p>` : ''}
+    </details>`;
   }
 
   // ----- the People card: the main email gives others at the company a login (item 74 point 1) -----

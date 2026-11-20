@@ -420,7 +420,7 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
       <label>Job name</label>
       <input id="id-job-name" value="${escapeHtml(project.name || '')}" />
       <label>Site address</label>
-      <input id="id-site" value="${escapeHtml(project.client_address || '')}" />` : ''}
+      <input id="id-site" data-address value="${escapeHtml(project.client_address || '')}" />` : ''}
       <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
         <button type="button" id="id-save">Save${inXero ? ' and update Xero' : ''}</button>
         <button type="button" class="secondary" id="id-cancel">Cancel</button>
@@ -449,7 +449,10 @@ function openInvoiceDetailsPanel(invoice, project, onDone) {
     const btn = q('#id-save'), msg = q('#id-msg');
     const body = { invoiceId: invoice.id, invoiceDate: q('#id-date').value, dueDate: q('#id-due').value, description: q('#id-name').value };
     if (billToId && billToId !== (invoice.bill_to_client_id || ownId)) body.billToClientId = billToId;
-    if (project) { body.jobName = q('#id-job-name').value; body.siteAddress = q('#id-site').value; }
+    if (project) {
+      body.jobName = q('#id-job-name').value; body.siteAddress = q('#id-site').value;
+      body.siteAddressParts = (await addressColumnsFor(q('#id-site'))).address_parts || null;   // the address in parts, from Google (item 103)
+    }
     if (!body.invoiceDate) { msg.innerHTML = '<div class="error-box">Pick the invoice date.</div>'; return; }
     invoiceBusy(btn, inXero ? 'Saving and updating Xero...' : 'Saving...');
     msg.innerHTML = '';
