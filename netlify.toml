@@ -51,6 +51,12 @@
 [functions.push-bills-to-xero-background]
   schedule = "*/15 * * * *"
 
+# Every 15 minutes: lead rewards that are owed become Xero credit notes, come off the referrer's
+# oldest unpaid invoice and are allocated in Xero (item 74b part 2) - see lead-rewards-background.js.
+# Does nothing until the Lead rewards row in Settings > Xero Mapping has an account.
+[functions.lead-rewards-background]
+  schedule = "*/15 * * * *"
+
 # Once a day: refreshes the overhead lines from the Xero Profit and Loss report - see
 # sync-overheads-nightly.js. Does nothing until accounts are mapped on the Overheads page.
 [functions.sync-overheads-nightly]

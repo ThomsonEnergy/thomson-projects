@@ -382,6 +382,15 @@ exports.handler = async (event) => {
 
     await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', actorId: user.id, detail: `${claimLabel || 'Invoice'}: ${claimRows.length} stage${claimRows.length === 1 ? '' : 's'}` });
 
+    // A lead reward credit the client it is billed to has waiting comes off this invoice by itself (item
+    // 74b part 2: lead_reward_apply_to_invoice checks every limit). Never a reason to fail the invoice.
+    try {
+      const { error: rewardErr } = await supabaseAdmin.rpc('lead_reward_apply_to_invoice', { p_invoice: insertedInvoice.id });
+      if (rewardErr) throw rewardErr;
+    } catch (rewardErr) {
+      console.error('create-invoice lead reward credit failed:', rewardErr.message);
+    }
+
     return {
       statusCode: 200,
       body: JSON.stringify({ ok: true, invoiceId: insertedInvoice.id, invoiceNumber: invoiceNumberStr, invoiceToken }),

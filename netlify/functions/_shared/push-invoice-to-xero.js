@@ -6,6 +6,7 @@
 const { xeroRequest } = require('./xero-client');
 const { buildXeroInvoicePayload } = require('./build-xero-invoice-payload');
 const { logInvoiceEvent } = require('./invoice-events');
+const { allocateForInvoice } = require('./lead-rewards');
 
 async function pushInvoiceToXero(supabaseAdmin, invoiceId, { actorId = null, actorLabel = null } = {}) {
   const { invoice, contactId, reference, lineItems, date, dueDate } = await buildXeroInvoicePayload(supabaseAdmin, invoiceId);
@@ -33,6 +34,9 @@ async function pushInvoiceToXero(supabaseAdmin, invoiceId, { actorId = null, act
     .update({ xero_invoice_id: xeroInvoice.InvoiceID, xero_invoice_status: xeroInvoice.Status })
     .eq('id', invoiceId);
   await logInvoiceEvent(supabaseAdmin, { invoiceId, kind: 'pushed_to_xero', actorId, actorLabel, detail: `Approved in Xero as ${invoice.invoice_number}` });
+  // a lead reward credit on this invoice is allocated in Xero now the invoice is there (item 74b part 2);
+  // never throws, the worker tries again if Xero does not take it
+  await allocateForInvoice(supabaseAdmin, invoiceId);
   return { xeroInvoiceId: xeroInvoice.InvoiceID, invoiceNumber: invoice.invoice_number };
 }
 

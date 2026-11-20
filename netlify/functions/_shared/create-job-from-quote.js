@@ -133,6 +133,13 @@ async function raiseDepositInvoice(supabaseAdmin, job, centres, approvedBy) {
     { invoiceId: insertedInvoice.id, kind: 'created', actorId: approvedBy, actorLabel: approvedBy ? null : 'the quote approval', detail: `Deposit invoice (${depositPercent}%) made when the quote was approved` },
     approvedBy ? null : { invoiceId: insertedInvoice.id, kind: 'sent_elsewhere', actorLabel: 'the quote approval', detail: 'Shown to the client on the quote approval page' },
   ]);
+  // a lead reward credit this client has waiting comes off the deposit invoice by itself (item 74b part 2)
+  try {
+    const { error: rewardErr } = await supabaseAdmin.rpc('lead_reward_apply_to_invoice', { p_invoice: insertedInvoice.id });
+    if (rewardErr) throw rewardErr;
+  } catch (rewardErr) {
+    console.error('create-job-from-quote lead reward credit failed:', rewardErr.message);
+  }
   return invoiceToken;
 }
 
