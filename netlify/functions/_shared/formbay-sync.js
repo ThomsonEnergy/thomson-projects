@@ -471,6 +471,10 @@ async function createForm(db, token, { projectId, userId, f }) {
   Object.assign(need, { 'Inverter brand': f.inverter_brand, 'Inverter model': f.inverter_model });
   if (solar) Object.assign(need, { 'Panel brand': f.panel_brand, 'Panel model': f.panel_model, 'Number of panels': Number(f.panel_count) > 0 });
   if (battery) Object.assign(need, { 'Battery brand': f.battery_brand, 'Battery model': f.battery_model });
+  // Formbay's battery STC questions, answered by the person making the form (owner, 20 Nov 2026:
+  // "we didn't answer these questions with the form"). Never answered by the app itself.
+  if (battery) Object.assign(need, { 'Solar is commissioned before or with the battery': f.pv_first });
+  if (what === 'bstc') Object.assign(need, { 'First time, additional or replacement battery': f.battery_install, 'Solar already at this address': f.pv_working, 'Total solar 100 kW or less': f.pv_limit });
   const missing = Object.keys(need).filter(k => !need[k] || !clean(need[k]));
   if (missing.length) return { ok: false, error: `Still needed: ${missing.join(', ')}.` };
 
@@ -513,6 +517,21 @@ async function createForm(db, token, { projectId, userId, f }) {
     commercial: f.commercial ? 1 : 0,
   };
   if (solar) body.installation = Math.min(3, Math.max(0, Math.round(Number(f.installation)) || 0));   // 0 new, 1 replacement, 2 additional, 3 extension
+  if (battery) {
+    if (f.pv_first !== 'yes') return { ok: false, error: 'Battery STCs need the solar commissioned before or with the battery. Formbay will not take the form otherwise.' };
+    body.isPvInstalledBeforeBattery = true;
+  }
+  if (what === 'bstc') {
+    if (f.pv_limit !== 'yes') return { ok: false, error: 'Battery STCs need the total solar at the address to be 100 kW or less. Formbay will not take the form otherwise.' };
+    body.isPvCapacityWithinLimit = true;
+    body.installation = { first: 0, replacement: 1, additional: 2 }[f.battery_install] || 0;
+    // Formbay asks one of these two, depending on whether it already knows of solar at the address;
+    // both are sent and the one it does not want is dropped if it says so (see the retry below).
+    body.isExistingSolarPvWorking = f.pv_working !== 'replacing';
+    if (f.pv_working !== 'replacing') body.existingPvSystem = true;
+  } else if (what === 'pv_bstc' && body.installation > 0 && f.pv_limit === 'yes') {
+    body.isPvCapacityWithinLimit = true;
+  }
   if (what === 'pv_bstc') { body.is_bstc = 1; body.battery_installation = { type: 0, comment: '', additional_wattage: '' }; }
   // NSW: Formbay makes the CCEW with the form, under the company's contractor licence.
   if (body.address.state === 'NSW') {
@@ -523,13 +542,16 @@ async function createForm(db, token, { projectId, userId, f }) {
     if (c) body.ccew = { licence_id: c.licence_id, associated_person_id: Number(c.associated_person_id), special_conditions: { generator: 0, high_voltage: 0, over_100_amps: 0, hazardous_area: 0, unmetered_supply: 0 } };
   }
 
-  // Our job number goes on as Formbay's "Your job reference". If Formbay will not take it this way,
-  // the form is made without it rather than not at all.
+  // Our job number goes on as Formbay's "Your job reference". It, and the two either-or solar
+  // questions, are extras: if Formbay refuses the form naming one of them, the form is made without
+  // that one rather than not at all (the question is then answered in Formbay).
   if (job && job.job_number) body.urref = `J${job.job_number}`;
   let r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
-  if (body.urref && r.status === 400 && /urref/i.test(JSON.stringify(r.json || r.text || ''))) {
-    delete body.urref;
-    r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
+  const dropped = [];
+  if (r.status === 400) {
+    const said = JSON.stringify(r.json || r.text || '');
+    for (const key of ['urref', 'existingPvSystem', 'isExistingSolarPvWorking']) if (key in body && said.includes(key)) { delete body[key]; dropped.push(key); }
+    if (dropped.length) r = await formbayCall(token, 'create_form?version=2', { json: body, timeout: 25000 });
   }
   // Kept so a refusal can be read later (finance roles): what Formbay was sent and what it said.
   await db.from('formbay_webhook_events').insert({ event_type: 'create.attempt', formbay_job_id: `project ${projectId}`, payload: { status: r.status, sent: body, answer: r.json || r.text } });
@@ -554,6 +576,13 @@ async function createForm(db, token, { projectId, userId, f }) {
     }
     warning = warning || `Formbay made form ${formId}. Its details will show here within 15 minutes.`;
   }
+  // What Formbay kept is checked against what was asked for, so a question it did not take is not missed.
+  const kept = read.find((x, i) => x.ok && made[i][0] === 'bstc');
+  const notes = [];
+  if (dropped.includes('urref')) notes.push('the job reference');
+  if (dropped.includes('existingPvSystem') || dropped.includes('isExistingSolarPvWorking')) notes.push('the existing solar question');
+  if (what === 'bstc' && f.battery_install !== 'first' && kept && String(kept.row.form.install_type) === '0') notes.push(`the battery installation type (Formbay shows First time, you picked ${f.battery_install})`);
+  if (notes.length) warning = `${warning ? `${warning} ` : ''}The form is made. Formbay did not take ${notes.join(' or ')} from here: set that in Formbay.`;
   return warning ? { ok: true, warning } : { ok: true };
 }
 

@@ -216,6 +216,12 @@ async function fbDrawCreate(panel, project, changed) {
       ${pick('battery_series', 'Battery series', [], '', 'Pick the brand first')}
       ${pick('battery_model', 'Battery model', [], '', 'Pick the series first', 'style="grid-column:span 2;"')}
       ${box('battery_count', 'Number of batteries', '1', 'type="number" min="1" inputmode="numeric"')}
+      ${pick('pv_first', 'Solar is commissioned before or with the battery', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '', 'Pick one', 'style="grid-column:span 2;"')}
+    </div>
+    <div id="fbc-battery-only" style="${grid} margin-top:10px;">
+      ${pick('battery_install', 'This battery is', [{ value: 'first', label: 'First time installation' }, { value: 'additional', label: 'Additional installation' }, { value: 'replacement', label: 'Replacement installation' }], '')}
+      ${pick('pv_working', 'Solar already at this address', [{ value: 'yes', label: 'Yes, and it is working' }, { value: 'replacing', label: 'Yes, but we are replacing it' }], '', 'Pick one', 'style="grid-column:span 2;"')}
+      ${pick('pv_limit', 'Total solar here is 100 kW or less', [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], '')}
     </div>
     <p class="subtitle" style="margin:8px 0 0;">Only people Formbay has accredited for this kind of job can be picked. ${o.reference ? `Formbay's job reference is set to ${escapeHtml(o.reference)}.` : ''}</p>
     <div style="display:flex; gap:8px; margin-top:12px; align-items:center; flex-wrap:wrap;">
@@ -240,6 +246,7 @@ async function fbDrawCreate(panel, project, changed) {
   const show = () => {
     $('solar').style.display = $('what').value === 'bstc' ? 'none' : 'grid';
     $('battery').style.display = $('what').value === 'pv' ? 'none' : 'grid';
+    $('battery-only').style.display = $('what').value === 'bstc' ? 'grid' : 'none';
     team();
   };
   $('off_grid').addEventListener('change', team);
