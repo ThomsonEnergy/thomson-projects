@@ -337,7 +337,7 @@ function quoteStepDefs(project, page) {
       // typed price is saved less often.
       key: 'stages', label: 'Stages and prices', card: el('qstep-3'), head: el('qstage-head'), foot: 'Stages and prices', typingMs: 1500,
       read: () => page.stages(),
-      hold: () => page.stagesProblem(),
+      waits: () => page.stagesProblem(),
       save: async (p, before) => {
         // Only stages this page has seen are ever removed: one added meanwhile in another tab, or
         // by someone else, is not on this page and is left alone.
@@ -392,7 +392,11 @@ function mountQuoteAutosave({ project, page }) {
   let tabsStale = false;       // the stages changed: the other tabs (Summary, Cost Centres) still show the old ones
   const changed = new Set();   // steps saved since the PDF and ready check were last redone
   const read = (s) => { try { return s.read(); } catch (e) { console.error(`Quote autosave: could not read ${s.key}`, e); return s.saved; } };
-  const dirty = (s) => quoteCanon(read(s)) !== s.savedJson;
+  // Something typed that cannot go into a save yet (a stage with lines and no name is left out of
+  // what is read, so it would not show as a change): the step says why and counts as unsaved.
+  const waiting = (s) => { const why = s.waits ? s.waits() : null; return typeof why === 'string' ? why : null; };
+  const dirty = (s) => waiting(s) !== null || quoteCanon(read(s)) !== s.savedJson;
+  const stuck = (s) => !!s.failed || waiting(s) !== null || (!!s.hold && typeof s.hold(read(s), s.saved) === 'string');
   // The page was redrawn: these steps are off the page, and the boxes with their ids now belong to
   // the new steps (which may still be filling in). Nothing here reads or saves from then on.
   const gone = () => { if (!dead && !document.body.contains(steps[0].card)) api.destroy(); return dead; };
@@ -521,6 +525,8 @@ function mountQuoteAutosave({ project, page }) {
   function run(s, opts = {}) {
     if (gone()) return Promise.resolve();
     if (s.inFlight) { s.again = true; return s.promise; }
+    const waits = waiting(s);
+    if (waits !== null) { s.held = waits; paint(s); return Promise.resolve(); }
     const p = read(s);
     const json = quoteCanon(p);
     if (json === s.savedJson) { s.held = null; s.failed = null; paint(s); return Promise.resolve(); }
@@ -529,8 +535,8 @@ function mountQuoteAutosave({ project, page }) {
     // A save that redraws the whole quote (a new proposal type) would drop what another step has
     // typed and cannot save yet. What can save does so first: the redraw waits for it.
     if (typeof why !== 'string' && s.redraws && s.redraws(p, s.saved)) {
-      const stuck = steps.find(o => o !== s && dirty(o) && (o.failed || (o.hold && typeof o.hold(read(o), o.saved) === 'string')));
-      if (stuck) why = `Not saved yet: ${stuck.label} has to save first, a new proposal type redraws the quote`;
+      const first = steps.find(o => o !== s && dirty(o) && stuck(o));
+      if (first) why = `Not saved yet: ${first.label} has to save first, a new proposal type redraws the quote`;
     }
     if (typeof why === 'string') { s.held = why; paint(s); return Promise.resolve(); }
     s.held = null;
