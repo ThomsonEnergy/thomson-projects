@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 20 Nov 2026
+
+- Planned (waiting on yes), owner 20 Nov 2026 ("create the Formbay form in our app and then get updates for whatever stage the form is at and once the onsite works are completed have the serial numbers and photos come over and create the customer asset with warranties and pics"): **item 101, Formbay both ways.** Found on production: the app has never seen a Formbay form (0 webhook events, no webhook secret saved, no job has a Formbay job number), and cloud sessions cannot reach formbay.com.au, so step 1 is a read of J7009's real form through a server function. Then: create the form from the job (J7081, BSTC), status by itself (webhook plus an hourly check), and at install complete the serials, photos and documents come over and make the customer equipment with warranties. One new table `formbay_forms`, migration 20261216000000. Detail: `docs/IDEAS_BACKLOG.md` item 101.
+
 ## 18 Nov 2026
 
 - Planned (waiting on yes), owner 18 Nov 2026 ("go over the overheads calc and make it clear and easy to understand also make sure it's calculating accurately ... a cost per employee tacked onto their rate rather than any averages"): **item 100, overheads made plain and accurate.** Found on production: the calc spreads overheads over 10,320 assumed hours a year where timesheets show about 5,600 job hours, company running costs are $0 (Xero never linked, no lines), and quotes use a company average. Plan: each person's own direct cost on their rate everywhere, indirect as one figure per job hour from the Xero Profit and Loss plus non-job wage time over real timesheet hours, the % of job profit gone (changes the 14 Oct 2026 choice). Detail: `docs/IDEAS_BACKLOG.md` item 100.
