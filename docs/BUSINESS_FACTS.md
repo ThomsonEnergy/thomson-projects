@@ -1,6 +1,6 @@
 # Business Facts
 
-Last updated 20 Nov 2026
+Last updated 21 Nov 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
 
@@ -10,7 +10,7 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 
 - **WA and remote work (owner, 20 Nov 2026).** We also hold WA electrical contractor licence EC17853 and have a warehouse in Kenwick, Perth. WA work is statewide: promote the commercial side (large commercial, mining and industrial sites, off-grid power for stations and remote properties, mostly remote and off-grid). Never say we don't install homes in Perth (owner: "we will if we can make it work but just don't boast it"). Our electricians do FIFO (fly-in fly-out) work on mining and industrial sites. Remote work is the specialty in all three states: for a big enough job we go anywhere in NSW, QLD or WA. Homes and everyday electrical work stay in the Tweed, Northern Rivers and Gold Coast. The network lists above stay NSW and QLD (WA work is off-grid).
 - **Panels (owner, 20 Nov 2026).** Winaico is the brand we recommend, not the only one: we also install TCL and JA Solar and can get almost any panel a customer prefers.
-- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and home batteries roughly 50 cents a watt-hour (about $500 per kWh) installed after the federal battery (BSTC) rebate. The owner quotes batteries as "X plus the rebate", meaning X is the price before the rebate and the rebate comes off it: 9 kWh from $8,000 and 27 kWh $19,000 before the rebate, so about $5,750 and $13,500 to the customer at the 2026 rebate. Off-grid: weekender from $10,000, full-time home $25,000 to $55,000, large property from $65,000 (owner: "take roughly 15k off all off-grid systems"). The public website shows after-rebate battery prices only (owner's choice), which need redoing when the rebate steps down on 1 January 2027; the older, dearer ranges are retired.
+- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and home batteries roughly 50 cents a watt-hour (about $500 per kWh) installed after the federal battery (BSTC) rebate. "Pretty much all of them go off that 1k per kW and .5k per kWh" (owner, 21 Nov 2026), except that a small job carries a minimum $1,800 labour charge, which is why a 9 kWh battery on its own is dearer per kWh. The owner quotes batteries as "X plus the rebate", meaning X is the price before the rebate and the rebate comes off it: 9 kWh from $8,000 and 27 kWh $19,000 before the rebate, so about $5,750 and $13,500 to the customer at the 2026 rebate. Off-grid: weekender from $10,000, full-time home $25,000 to $55,000, large property from $65,000 (owner: "take roughly 15k off all off-grid systems"). The public website shows after-rebate battery prices only (owner's choice), which need redoing when the rebate steps down on 1 January 2027; the older, dearer ranges are retired.
 
 ## Xero
 
