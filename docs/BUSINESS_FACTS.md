@@ -1,12 +1,16 @@
 # Business Facts
 
-Last updated 12 Nov 2026
+Last updated 20 Nov 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
 
 ## Where we work
 
 - Licensed in **NSW and QLD only**, not the ACT (owner, 23 Oct 2026). Anything that covers areas (retail plan suggestions, networks) is limited to the NSW and QLD networks: Essential Energy, Ausgrid, Endeavour Energy, Energex and Ergon Energy.
+
+- **WA and remote work (owner, 20 Nov 2026).** We also hold WA electrical contractor licence EC17853 and have a warehouse in Kenwick, Perth. WA work is statewide and large scale only: off-grid power for stations and remote properties and large commercial sites, almost all off-grid, no standard home solar. Remote work is the specialty in all three states: for a big enough job we go anywhere in NSW, QLD or WA. Homes and everyday electrical work stay in the Tweed, Northern Rivers and Gold Coast. The network lists above stay NSW and QLD (WA work is off-grid).
+- **Panels (owner, 20 Nov 2026).** Winaico is the brand we recommend, not the only one: we also install TCL and JA Solar and can get almost any panel a customer prefers.
+- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and home batteries roughly 50 cents a watt-hour (about $500 per kWh) installed. The public website quotes these per kW and per kWh.
 
 ## Xero
 
