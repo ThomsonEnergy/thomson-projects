@@ -67,9 +67,9 @@
 [functions.remind-leads]
   schedule = "20 20,21 * * *"
 
-# Every 15 minutes: reads this account's Formbay forms and keeps each answer as it came (item 101
-# step 1, read only) - see formbay-read-background.js. A run with nothing new writes nothing.
-[functions.formbay-read-background]
+# Every 15 minutes: brings each job's Formbay form up to date (stage, NMI, serials, equipment, photos,
+# the CCEW) - see formbay-poll-background.js (item 101). Reads from Formbay only.
+[functions.formbay-poll-background]
   schedule = "*/15 * * * *"
 
 # Polls sales@thomsonenergy.com.au for new mail every 5 minutes - see
