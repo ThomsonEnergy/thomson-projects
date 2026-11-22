@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 22 Nov 2026
+
+- Owner, 22 Nov 2026, on items 106 and 107: "Ignore all from TES only TEA". Anything addressed to Thomson Energy Solutions is left out of the Greentech catch-up and refused by the Formbay advice import. Also for 106: the statements are a floor (owner expected about $500k of STC payments), so a Greentech payment history, the remittance emails and Formbay's job list come first; the accountant's report is the first delivery. Detail in `docs/IDEAS_BACKLOG.md` items 106 and 107.
+
 ## 21 Nov 2026
 
 - Planned 21 Nov 2026, waiting on yes: **items 106 and 107, STCs right in Xero.** 106 is the Greentech catch-up (account 248045, March 2026 on: bills, STC payments and GST credits by BAS quarter, a report for the accountant Adrian, a Xero bills file); 107 is Formbay payments posting themselves to Xero (Part L phase 3). Greentech is no longer used for STCs; Formbay pays direct. Open questions for Adrian: no GST on the STC payments, cash or accrual, backdate the bills or claim in the current BAS, what FY26 needs, tax codes for 107. For the owner: how the old customer invoices show the STC in Xero, who paid Formbay's fee under Greentech, bills by file and payments by one checked push or by hand. Detail in `docs/IDEAS_BACKLOG.md` items 106 and 107.
