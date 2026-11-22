@@ -997,6 +997,14 @@ Plan:
 5. Out: the report for Adrian by quarter, the Xero bills file (drafts), a payments list (each STC payment against its bills), and the exceptions list. The figures stay out of git.
 6. Cut-over: the catch-up owns every 248045 bill dated up to the cut-over date; TEops sends the later ones, so nothing is in Xero twice. The 3 bills TEops holds are matched by bill number.
 
+Scope and sources, owner 21 and 22 Nov 2026:
+- Thomson Energy Australia only. Anything addressed to Thomson Energy Solutions (statements, bills, Formbay Payment Advices) is left out and listed as left out, never counted.
+- The owner expected about $500k of STC payments against the $305,760.42 on the statements, so the statements are a floor. Order of trust: a full payment history from Greentech if the owner can get one, then Greentech's remittance emails, then the statements as the cross check.
+- Formbay's job list (the login TEops already has) gives each form's STC count: count times $38 (to about May 2026) or $37.95 is what Greentech should have applied, which finds missing payments and ties each one to a customer job.
+- Old account 197006 was in use in late 2025 and closed in September 2026: checked for STC payments before it is left out.
+- No GST on an STC payment (the customer assigns to Greentech, never to us), fixed in config. The tool flags any Formbay form whose assignee is Thomson Energy.
+- The report for the accountant comes first (meeting Monday 23 Nov 2026); the Xero files follow his answers.
+
 Open questions: see `docs/DECISIONS.md` 21 Nov 2026.
 
 Touches: `scripts/greentech-recon/` (new), `package.json` (one script line), `docs/`. No page, function or migration.
@@ -1005,7 +1013,7 @@ Touches: `scripts/greentech-recon/` (new), `package.json` (one script line), `do
 
 Why: a customer invoice already takes the STC credit to 2003 STC Receivable, but nothing clears it when Formbay pays. Today the bank line has to be coded by hand, which is where GST gets overpaid (the whole deposit coded as a sale) and where 2003 stops matching. On 21 Nov 2026 production had 3 invoices carrying $45,271 of STC and battery STC credits and no Payment Advice imported.
 
-Plan (method from `docs/archive/HANDOFF_formbay_stc.md`, accountant to confirm): saving an imported Payment Advice with its FEE invoice makes one Receive Money in Xero for the cash that lands: 2003 at the booked price per job, 2003-1 the gain or loss, 2003-2 the fee with GST on expenses, GST on units only where the advice shows it. Never a sales invoice to Formbay (owner, 14 Oct 2026). The STCs page shows 2003 per job (credited, paid, still owed) so a job Formbay never paid stands out.
+Plan (method from `docs/archive/HANDOFF_formbay_stc.md`, accountant to confirm): saving an imported Payment Advice with its FEE invoice makes one Receive Money in Xero for the cash that lands: 2003 at the booked price per job, 2003-1 the gain or loss, 2003-2 the fee with GST on expenses, GST on units only where the advice shows it. Never a sales invoice to Formbay (owner, 14 Oct 2026). An advice not addressed to Thomson Energy Australia is refused at import (owner, 22 Nov 2026: Thomson Energy Australia only). The STCs page shows 2003 per job (credited, paid, still owed) so a job Formbay never paid stands out.
 
 To check with the build: the `stc_trading_variance` mapping is GST on Income today; on a home job Formbay pays no GST, so that code would hand over 1/11 of every gain.
 
