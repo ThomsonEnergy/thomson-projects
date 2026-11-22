@@ -6,6 +6,10 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 - Owner, 22 Nov 2026, on items 106 and 107: "Ignore all from TES only TEA". Anything addressed to Thomson Energy Solutions is left out of the Greentech catch-up and refused by the Formbay advice import. Also for 106: the statements are a floor (owner expected about $500k of STC payments), so a Greentech payment history, the remittance emails and Formbay's job list come first; the accountant's report is the first delivery. Detail in `docs/IDEAS_BACKLOG.md` items 106 and 107.
 
+## 22 Nov 2026
+
+- Item 105 and the website SEO work, owner 22 Nov 2026 ("2 chats are doing some overlapping ... I'll get you to build it"): one chat owns both from here, branch `claude/friendly-fermat-c0wd24` in both repos; the `claude/affectionate-davinci-1wsvms` chat is stopped. Item 105 status: part 1 (the website's one price list) is live; parts 2 and 3 are draft PR 560 into `staging`, holding two migrations only, **not run anywhere and not to be merged until the owner's "yes to the SQL"**. Detail in `docs/IDEAS_BACKLOG.md` item 105; the website side is in the website repo's `.claude/CLAUDE.md`, "SEO and site work log".
+
 ## 21 Nov 2026
 
 - Planned 21 Nov 2026, waiting on yes: **items 106 and 107, STCs right in Xero.** 106 is the Greentech catch-up (account 248045, March 2026 on: bills, STC payments and GST credits by BAS quarter, a report for the accountant Adrian, a Xero bills file); 107 is Formbay payments posting themselves to Xero (Part L phase 3). Greentech is no longer used for STCs; Formbay pays direct. Open questions for Adrian: no GST on the STC payments, cash or accrual, backdate the bills or claim in the current BAS, what FY26 needs, tax codes for 107. For the owner: how the old customer invoices show the STC in Xero, who paid Formbay's fee under Greentech, bills by file and payments by one checked push or by hand. Detail in `docs/IDEAS_BACKLOG.md` items 106 and 107.
