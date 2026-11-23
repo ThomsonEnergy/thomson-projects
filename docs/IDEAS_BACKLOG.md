@@ -1043,6 +1043,8 @@ Touches: `netlify/functions/push-timesheets-to-xero.js`, one migration (a table 
 
 Building in: `claude/solar-disconnect-reconnect-job-bldydk`.
 
+Built 23 Nov 2026, waiting on the owner's yes to the SQL before it merges into `staging`. As built: tables `service_price_items`, `job_service_lines`, `job_sheet_answers`; `projects.service_price_job`, `service_booking`, `service_booking_token`, `service_state`; `cost_centres.bill_group`; pages `job-sheet.html`, `booking-questions.html`, `service-prices.html`; functions `service-job.js`, `service-booking.js`, `service-prices.js`, shared `_shared/service-jobs.js`. Two things differ from the plan below: the upgrade quote is made as a draft with a staff note of the refit share to take off (the quote has no stages until Sales builds it, so the figure cannot be taken off by itself yet), and a job switched to this type cannot be switched back.
+
 Owner, 23 Nov 2026: a new kind of job for roofing contractors, first Ocean Blue Metal Roofing. The deal (all ex GST): $800 for up to 10 panels removed and refitted, $80 a panel after that; $30 a panel for new rail and clamps or $15 a panel for clamps only; $15 a panel more when the roof type changes. No quote each time: they get the price list once, a job is just booked in, the crew picks what applied on site, and it is billed like do and charge but from the price list, not from time.
 
 The plan:
