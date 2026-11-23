@@ -250,9 +250,9 @@
               </div>
             </div>
             <p class="subtitle" style="margin:2px 0 0;">Public holidays are paid as base + penalty. <strong>Base</strong> = the person's ordinary rate, link it to an overhead account: paid for hours worked on a public holiday and, for full-time staff, 8 hours on a weekday public holiday they didn't work. <strong>Penalty</strong> = their public holiday rate minus their ordinary rate, only for hours worked, so only the extra is a job cost.</p>
-            <label>LAHA (living away from home) earnings rate ID</label>
-            <input id="xero-laha-earnings-rate-id" placeholder="Required before pushing anyone with a flagged overnight stay" />
-            <p class="subtitle" style="margin:2px 0 0;">Paid per night flagged at clock-out on a LAHA-approved job (Settings on the job/quote itself). No fallback for this one - if it's not set, that person's whole timesheet is skipped (not pushed at the wrong rate) until it is.</p>
+            <label>LAHA (living away from home) pay item ID</label>
+            <input id="xero-laha-earnings-rate-id" placeholder="Not used by the timesheet push" />
+            <p class="subtitle" style="margin:2px 0 0;">Not sent with timesheets: Xero does not take an allowance on a timesheet. The push lists each person's LAHA nights (flagged at clock-out on a LAHA approved job) and you add them to the payslip in the pay run. The ID is kept here for when the app adds them itself.</p>
             <p class="subtitle" style="margin:12px 0 6px;">Leave types: approved leave requests go to Xero as leave applications with the timesheet push. Blank = matched by name from Xero's own leave types the first time one is needed (Annual, Personal/Carer's, Leave without pay) and saved here, so a wrong match can be fixed below.</p>
             <div class="grid cols-3">
               <div>

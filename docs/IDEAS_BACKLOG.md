@@ -1025,3 +1025,9 @@ Plan (method from `docs/archive/HANDOFF_formbay_stc.md`, accountant to confirm):
 To check with the build: the `stc_trading_variance` mapping is GST on Income today; on a home job Formbay pays no GST, so that code would hand over 1/11 of every gain.
 
 Touches: `stcs.html`, `supabase-client.js`, `netlify/functions/` (new push function, `_shared/`), one migration (Xero ids on `formbay_payment_advices`, a `stc_trading_fees` mapping row).
+
+## 108. LAHA nights added to the draft payslips by the app (idea 23 Nov 2026, waiting on the owner's yes)
+
+Xero refuses an allowance on a timesheet, so since 23 Nov 2026 the timesheet push lists each person's LAHA nights and the owner adds them to the payslip by hand. The idea: once the draft pay run for the period exists in Xero, the push sets the LAHA line (the pay item saved in Settings > Xero Mapping, nights as units) on each person's draft payslip itself, set and never added to, so a second push changes nothing. If there is no draft pay run yet it says so and keeps listing the nights. To prove first on the Xero Demo Company: that updating a payslip's earnings lines keeps the lines already on it.
+
+Touches: `netlify/functions/push-timesheets-to-xero.js`, `public/settings.html` (wording under the LAHA box), `docs/PROJECT_SPEC.md`, `docs/DECISIONS.md`. Overlaps: none on 23 Nov 2026. Kind: feature into `staging`; migration no; payroll yes (writes to draft payslips). Size: medium. Test on staging: needs the Xero Demo Company connected to the staging site. Simpler: nobody adds LAHA to a payslip by hand.
