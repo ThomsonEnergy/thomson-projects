@@ -129,7 +129,7 @@
     <div id="content"><p class="subtitle">Loading your invoice...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=147"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script>
     const token = new URLSearchParams(window.location.search).get('token');
     const isPrint = new URLSearchParams(window.location.search).get('print') === '1';
@@ -152,7 +152,20 @@
       const project = data.project || {};
       const s = data.company || {};
       s.logo_url = await smallLogoUrl(s.logo_url);
-      const claims = data.claims || [];
+      // Cost centres that bill as one block (bill_group, item 109: a disconnect and its reconnect) show as
+      // one claim named by the group. A line split across them (same words, same quantity) is one line
+      // again, at the two prices added together.
+      const claims = [];
+      (data.claims || []).forEach((c) => {
+        const into = c.bill_group ? claims.find((x) => x.bill_group === c.bill_group) : null;
+        if (!into) { claims.push({ ...c, cost_centre_name: c.bill_group || c.cost_centre_name, invoice_items: (c.invoice_items || []).map((it) => ({ ...it })) }); return; }
+        ['labour_amount', 'material_amount', 'quoted_amount', 'claimed_before'].forEach((k) => { into[k] = (Number(into[k]) || 0) + (Number(c[k]) || 0); });
+        (c.invoice_items || []).forEach((it) => {
+          const same = into.invoice_items.find((x) => x.description === it.description && Number(x.quantity) === Number(it.quantity) && Number(x.unit_price) >= 0 && Number(it.unit_price) >= 0);
+          if (!same) { into.invoice_items.push({ ...it }); return; }
+          ['unit_price', 'labour_amount', 'material_amount'].forEach((k) => { same[k] = Math.round(((Number(same[k]) || 0) + (Number(it[k]) || 0)) * 100) / 100; });
+        });
+      });
       const previousInvoices = data.previous_invoices || [];
       const isStandalone = !!data.is_standalone;
 

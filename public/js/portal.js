@@ -295,8 +295,23 @@
       box.querySelector('#rq-address').style.display = site.value ? 'none' : 'block';
       box.querySelector('#rq-kinds').innerHTML = `
         <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;"><input type="radio" name="rq-kind" value="quote" checked style="width:auto; margin-top:3px;" /> <span><strong>Quote it</strong><br><span class="pl-muted">Needed by</span> <input type="date" id="rq-due" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>
-        ${c.bookIn ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="book" style="width:auto; margin-top:3px;" /> <span><strong>Book it in</strong> (charged at your rates)<br><span class="pl-muted">Days that suit you</span><br><input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>` : ''}`;
+        ${c.bookIn ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="book" style="width:auto; margin-top:3px;" /> <span><strong>Book it in</strong> (charged at your rates)<br><span class="pl-muted">Days that suit you</span><br><input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>` : ''}
+        ${opts.service ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="service" style="width:auto; margin-top:3px;" /> <span><strong>Disconnect and reconnect</strong><br><span class="pl-muted">Solar panels or air conditioning off for roof work and back on after, at our <a href="${esc(opts.service.pricesUrl)}" target="_blank" rel="noopener">price list</a>. No quote needed.</span></span></label>
+        <div id="rq-service" style="display:none; margin:6px 0 0 26px;">${opts.service.questions.map(serviceQuestion).join('')}</div>` : ''}`;
+      // the booking questions show only for a disconnect and reconnect, where they replace "What do you need?"
+      box.querySelectorAll('input[name="rq-kind"]').forEach((r) => r.addEventListener('change', () => {
+        const svc = box.querySelector('#rq-service');
+        if (svc) svc.style.display = r.value === 'service' && r.checked ? 'block' : 'none';
+      }));
     };
+    // one booking question (company_settings.service_booking_questions, item 109) as a form field
+    function serviceQuestion(q) {
+      const at = `data-q="${esc(q.key)}" style="width:100%; font-size:16px;"`;
+      const field = q.type === 'choice' ? `<select ${at}><option value=""></option>${(q.options || []).map((o) => `<option>${esc(o)}</option>`).join('')}</select>`
+        : q.type === 'longtext' ? `<textarea ${at} rows="2" maxlength="2000"></textarea>`
+        : `<input ${at} type="${q.type === 'number' ? 'number' : q.type === 'date' ? 'date' : 'text'}" ${q.type === 'number' ? 'min="0" inputmode="numeric"' : ''} ${q.type === 'date' ? `min="${esc(tomorrow)}"` : ''} />`;
+      return `<label class="pl-muted" style="display:block; margin-top:6px;">${esc(q.label)}</label>${field}`;
+    }
     if (clientSel) clientSel.addEventListener('change', drawClient);
     box.querySelector('#rq-site').addEventListener('change', (e) => { box.querySelector('#rq-address').style.display = e.target.value ? 'none' : 'block'; });
     drawClient();
@@ -314,6 +329,7 @@
           addressParts: box.querySelector('#rq-site').value ? null : await addressBoxParts(box.querySelector('#rq-address')),
           need: box.querySelector('#rq-need').value, kind, dueDate: (box.querySelector('#rq-due') || {}).value || '',
           dates: [...box.querySelectorAll('.rq-day')].map((x) => x.value).filter(Boolean), files,
+          booking: Object.fromEntries([...box.querySelectorAll('[data-q]')].map((x) => [x.dataset.q, x.value])),
         });
         window.history.pushState({}, '', `/portal.html?job=${encodeURIComponent(out.id)}`);
         showJob(out.id);
@@ -515,7 +531,7 @@
     const inv = (x) => x.invoiced ? `<span class="pl-muted">${esc(x.invoiceNumber || 'Invoiced')}</span>` : 'Not yet';
     el.innerHTML = `
       <div class="pl-big">${esc(money(work.notInvoiced))}</div>
-      <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
+      <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}${work.priceListOpen ? `, price list ${esc(money(work.priceListOpen))}` : ''}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
       ${work.note ? `<p class="pl-muted">${esc(work.note)}</p>` : ''}
       <h3>Labour</h3>
       ${work.labour.length ? `${table(['Day', 'Who', 'Hours', '$Amount', 'Invoiced'], work.labour.map((l) => `

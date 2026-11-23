@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=147"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -46,7 +46,7 @@
     .roi-preview .roi-paper:empty { display:none; }
     .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin-bottom:4px; }
   </style>
-  <script src="/js/prebuild-form.js?v=4"></script>
+  <script src="/js/prebuild-form.js?v=5"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
   <script src="/js/email-compose.js?v=14"></script>
@@ -4812,7 +4812,7 @@
 
       renderJobRateCard(project, 'summary-rate-card').catch(err => console.error('charge rate chip:', err.message));
       loadJsOnce('/js/job-merge.js?v=2', () => typeof renderJobMerge === 'function').then(() => renderJobMerge(project, 'job-merge-area')).catch(err => console.error('merge jobs:', err.message));
-      loadJsOnce('/js/job-type.js?v=1', () => typeof renderJobType === 'function').then(() => renderJobType(project, 'job-type-area')).catch(err => console.error('job type:', err.message));
+      loadJsOnce('/js/job-type.js?v=2', () => typeof renderJobType === 'function').then(() => renderJobType(project, 'job-type-area')).catch(err => console.error('job type:', err.message));
       loadJsOnce('/js/job-stage.js?v=1', () => typeof initJobStagePicker === 'function').then(() => initJobStagePicker(project)).catch(err => console.error('job stage:', err.message));
       const createWarrantyJobBtn = document.getElementById('create-warranty-job-btn');
       if (createWarrantyJobBtn) createWarrantyJobBtn.addEventListener('click', () => {

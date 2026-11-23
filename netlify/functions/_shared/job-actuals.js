@@ -18,8 +18,11 @@
 //         centres: [{ costCentreId, name, markupPercent, actualHours, actualLabourSell, materialCost,
 //           materialSell, invoicedAmount, labourLines, materialLines }], rateTiers, rateCard, rules,
 //         invoice, openInvoices }
+//   A price list job (projects.service_price_job, item 109): its two cost centres are billed from the
+//   price list, not from time, so they come back with no labour or material lines and with
+//   serviceItems instead (_shared/service-jobs.js); hours and costs still count for the job's costing.
 //
-// priceActuals(data) -> { labour, materials, labourOpen, materialsOpen, notInvoiced, agreementOff, lumpInvoiced, leftToInvoice }
+// priceActuals(data) -> { labour, materials, service, labourOpen, materialsOpen, serviceOpen, notInvoiced, agreementOff, lumpInvoiced, leftToInvoice }
 //   The same lines at the price a do and charge invoice carries by default (the panel's
 //   "As per Schedule of Rates"), so "work not yet invoiced" is one figure everywhere: the
 //   portal's Work so far (portal-data.js) and Left to invoice on the Jobs list and the job page
@@ -28,6 +31,7 @@
 const { entryHours, entryCentreIds } = require('./compute-labour-cost');
 const { shiftBands, RULES } = require('./labour-bands');
 const { rateCardFor, rateAt } = require('./rate-cards');
+const { serviceActuals } = require('./service-jobs');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -61,7 +65,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
 
   const centresRead = await supabaseAdmin
     .from('cost_centres')
-    .select('id, name, markup_percent, invoiced_amount, sort_order')
+    .select('id, name, markup_percent, invoiced_amount, sort_order, bill_group')
     .eq('project_id', projectId)
     .order('sort_order');
   failOnReadError([centresRead]);
@@ -75,7 +79,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     // every material costed to this job: PO lines received to it (whichever PO they are on, less any moved
     // off) and Stock draws. Lines received to the Warehouse or moved to another job are not here.
     supabaseAdmin.from('job_material_usage').select('id, cost_centre_id, quantity, unit_cost, source, billable, material_id, created_at, materials(name), purchase_order_line_items(description, purchase_orders(po_number))').eq('project_id', projectId).order('created_at'),
-    supabaseAdmin.from('invoice_line_items').select('invoice_id, cost_centre_id, kind, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id, invoice_number)').eq('invoices.project_id', projectId),
+    supabaseAdmin.from('invoice_line_items').select('invoice_id, cost_centre_id, kind, prebuild_id, quantity, labour_amount, material_amount, job_material_usage_id, time_entry_ids, invoices!inner(project_id, invoice_number)').eq('invoices.project_id', projectId),
     // do-and-charge invoices on this job that can still be added to (item 64)
     supabaseAdmin.from('invoices').select('id, invoice_number, sent_at, invoice_line_items(id)').eq('project_id', projectId).is('xero_invoice_id', null).is('paid_at', null).order('sent_at', { ascending: false }),
     shared || loadActualsShared(supabaseAdmin),
@@ -171,9 +175,13 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
     byCentre[centreOf(i.cost_centre_id)].itemInvoiced += (Number(i.labour_amount) || 0) + (Number(i.material_amount) || 0);
   });
 
+  // A price list job: the two cost centres bill the sheet's lines at the price list price, never time.
+  const service = centres.some(c => c.bill_group) ? await serviceActuals(supabaseAdmin, projectId, centres, invItems) : null;
   const defaultMarkup = Number(settings?.default_markup_percent) || 45;
   const centreRows = centres.map(c => {
     const b = byCentre[c.id];
+    const priceList = !!(service && service.ids.has(c.id));
+    if (priceList) { b.labourLines = []; b.materialLines = []; b.materialCost = 0; }
     const markupPercent = c.markup_percent != null ? Number(c.markup_percent) : defaultMarkup;
     return {
       costCentreId: c.id,
@@ -187,6 +195,7 @@ async function jobActuals(supabaseAdmin, projectId, { invoiceId = null, includeB
       invoicedAmount: r2(Math.max(0, (Number(c.invoiced_amount) || 0) - b.itemInvoiced)),
       labourLines: b.labourLines,
       materialLines: b.materialLines.map(m => ({ ...m, unitPrice: r2(m.unitCost * (1 + markupPercent / 100)) })),
+      serviceItems: priceList ? (service.byCentre[c.id] || []).filter(s => includeBilled || !s.invoiced) : [],
     };
   });
   const sum = (k) => r2(centreRows.reduce((s, c) => s + c[k], 0));
@@ -254,6 +263,12 @@ function priceActuals(d) {
     if (!m.billable && !m.invoiced) return;
     materials.push({ line: m, centreId: c.costCentreId, amount: r2(m.quantity * m.unitPrice) });
   }));
+  // price list lines (item 109): each at its fixed price, the open ones count as work not yet invoiced
+  const service = [];
+  d.centres.forEach((c) => (c.serviceItems || []).forEach((s) => {
+    service.push({ line: s, centreId: c.costCentreId, amount: r2((s.invoiced ? s.fullQuantity : s.quantity) * s.unitPrice) });
+  }));
+  const serviceOpen = r2(service.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const labourOpen = r2(labour.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const materialsOpen = r2(materials.filter((x) => !x.line.invoiced).reduce((s, x) => s + x.amount, 0));
   const percentOff = d.rateCard && d.rateCard.percentOff > 0 ? d.rateCard.percentOff : 0;
@@ -265,11 +280,11 @@ function priceActuals(d) {
     const lump = r2(c.invoicedAmount);
     agreementOff += off;
     lumpInvoiced += lump;
-    leftToInvoice += Math.max(0, stageLabour - off + openIn(materials, c.costCentreId) - lump);
+    leftToInvoice += Math.max(0, stageLabour - off + openIn(materials, c.costCentreId) + openIn(service, c.costCentreId) - lump);
   });
   return {
-    labour, materials, labourOpen, materialsOpen,
-    notInvoiced: r2(labourOpen + materialsOpen),
+    labour, materials, service, labourOpen, materialsOpen, serviceOpen,
+    notInvoiced: r2(labourOpen + materialsOpen + serviceOpen),
     agreementOff: r2(agreementOff), lumpInvoiced: r2(lumpInvoiced), leftToInvoice: r2(leftToInvoice),
   };
 }

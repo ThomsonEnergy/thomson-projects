@@ -24,6 +24,8 @@
 //   Bill tick  every clocked shift and costed material has a Bill tick. Unticked, it is left
 //            off this invoice and marked not billable on the job when the invoice is created,
 //            so it stays off the next one (it shows greyed at the bottom: tick it to bill it).
+//   Price list  a disconnect and reconnect job (item 109) bills its sheet's lines at the price list
+//            price: they arrive as added items with the price locked, and no labour or material rows.
 //   Notes    "Work completed" (item 59, invoices.notes), written from the site notes by
 //            generate-invoice-notes.js (js/invoice-notes.js) and edited, printed above the terms.
 // Tick the cost centres to invoice, then raise ONE invoice covering all of them (one Xero
@@ -139,6 +141,9 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
       // kind material: a line with a usage row shows in materialRows above; one without (never made today) is a one-off
       if (l.kind === 'material' && !l.job_material_usage_id) items.push({ kind: 'custom', lineId: l.id, name: l.description, quantity: Number(l.quantity) || 0, unitPrice: Number(l.unit_price) || 0, unitCost: Number(l.unit_cost) || 0 });
     });
+    // A price list job's lines not yet on an invoice (item 109, disconnect and reconnect): each at its
+    // price list price, which create-invoice.js sets again itself, so the price box is locked.
+    (c.serviceItems || []).filter(s => !s.invoiced && s.quantity > 0).forEach(s => items.push({ kind: 'prebuild', prebuildId: s.prebuildId, name: s.name, quantity: s.quantity, unitPrice: s.unitPrice, fixed: true }));
     let bulkOnly = false;
     if (edit) {
       // materials billed as one amount on this invoice (made in Bulk mode): what the stage's claim holds
@@ -150,7 +155,7 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
       bulkOnly = material > 0.004;
     }
     const rows = bulkOnly ? materialRows.filter(m => m.onInvoice) : materialRows;
-    const include = edit ? mine.length > 0 || material > 0.004 : (unbilledHours > 0 || material > 0.004 || materialRows.some(m => m.billable));
+    const include = edit ? mine.length > 0 || material > 0.004 : (unbilledHours > 0 || material > 0.004 || materialRows.some(m => m.billable) || items.length > 0);
     return { ...c, unbilledHours, material, bulkOnly, materialRows: rows, items, labourRows: invoiceRows, less, include };
   });
   // Nothing accrued anywhere yet (e.g. invoicing straight from a prebuild): start with every cost centre ticked.
@@ -369,7 +374,7 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
         <td class="num ia-mat-total" style="white-space:nowrap;">${off ? '' : money(r2(m.quantity * m.unitPrice))}</td>
       </tr>`;
   }
-  const itemKindLabel = (it) => (it.kind === 'prebuild' ? 'Prebuild' : it.kind === 'custom' ? 'One-off' : 'Stock');
+  const itemKindLabel = (it) => (it.fixed ? 'Price list' : it.kind === 'prebuild' ? 'Prebuild' : it.kind === 'custom' ? 'One-off' : 'Stock');
 
   function renderCentres() {
     const schedule = rateMode === 'schedule';
@@ -432,7 +437,7 @@ async function openInvoiceActualCostsPanel(project, { invoice: editTarget = null
                   <tr data-ii="${j}">
                     <td>${escapeHtml(it.name)} <span class="subtitle" style="font-size:11px;">${itemKindLabel(it)}</span>${it.lineId ? onTag : ''}</td>
                     <td class="num"><input type="number" step="0.01" min="0.01" class="ia-item-qty" value="${it.quantity}" style="padding:4px 6px;" /></td>
-                    <td class="num"><input type="number" step="0.01" min="0" class="ia-item-price" value="${it.unitPrice}" style="padding:4px 6px;" /></td>
+                    <td class="num"><input type="number" step="0.01" min="0" class="ia-item-price" value="${it.unitPrice}" ${it.fixed ? 'disabled title="Set on the price list"' : ''} style="padding:4px 6px;" /></td>
                     <td class="num ia-item-total">${money(it.quantity * it.unitPrice)}</td>
                     <td>${removeBtn('ia-item-remove')}</td>
                   </tr>`).join('')}

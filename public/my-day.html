@@ -119,7 +119,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=147"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script src="/js/template-questions.js?v=8"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -219,7 +219,7 @@
       if (!projectId) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
 
       const [{ data: project }, { data: tasks }] = await Promise.all([
-        supabaseClient.from('projects').select('id, name, job_number, quote_number, sow_text, installer_summary, notes, proposal_template, template_answers').eq('id', projectId).maybeSingle(),
+        supabaseClient.from('projects').select('id, name, job_number, quote_number, sow_text, installer_summary, notes, proposal_template, template_answers, service_price_job, service_state').eq('id', projectId).maybeSingle(),
         supabaseClient.from('job_tasks').select('id, description, task_type').eq('project_id', projectId).eq('completed', false).order('created_at'),
       ]);
       if (!project) { cardEl.style.display = 'none'; cardEl.innerHTML = ''; return; }
@@ -254,7 +254,8 @@
             ${prejobTasks.map(t => `<p class="subtitle" style="margin:0 0 4px; font-size:13px;">- ${escapeHtml(t.description)}</p>`).join('')}
           ` : ''}
           ${!onsiteTasks.length && !prejobTasks.length ? `<p class="subtitle" style="margin:0;">No outstanding tasks on this job.</p>` : ''}
-        </a>`;
+        </a>
+        ${project.service_price_job ? `<a class="btn" href="/job-sheet.html?project=${project.id}" style="display:block; text-align:center; margin-top:10px;">${(project.service_state?.disconnect || {}).finished_at ? 'Reconnect sheet' : 'Disconnect sheet'}: count it and take the photos</a>` : ''}`;
     }
 
     // "Report an incident or near miss" from site. Job prefilled from the
