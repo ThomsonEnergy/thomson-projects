@@ -1,12 +1,16 @@
 # Business Facts
 
-Last updated 20 Nov 2026
+Last updated 21 Nov 2026
 
 Facts the owner has confirmed, which the code and spec depend on. Update here when they change.
 
 ## Where we work
 
 - Licensed in **NSW and QLD only**, not the ACT (owner, 23 Oct 2026). Anything that covers areas (retail plan suggestions, networks) is limited to the NSW and QLD networks: Essential Energy, Ausgrid, Endeavour Energy, Energex and Ergon Energy.
+
+- **WA and remote work (owner, 20 Nov 2026).** We also hold WA electrical contractor licence EC17853 and have a warehouse in Kenwick, Perth. WA work is statewide: promote the commercial side (large commercial, mining and industrial sites, off-grid power for stations and remote properties, mostly remote and off-grid). Never say we don't install homes in Perth (owner: "we will if we can make it work but just don't boast it"). Our electricians do FIFO (fly-in fly-out) work on mining and industrial sites. Remote work is the specialty in all three states: for a big enough job we go anywhere in NSW, QLD or WA. Homes and everyday electrical work stay in the Tweed, Northern Rivers and Gold Coast. The network lists above stay NSW and QLD (WA work is off-grid).
+- **Panels (owner, 20 Nov 2026).** Winaico is the brand we recommend, not the only one: we also install TCL and JA Solar and can get almost any panel a customer prefers.
+- **Price guide (owner, 20 Nov 2026).** Home solar is roughly $1 a watt (about $1,000 per kW) installed and home batteries roughly 50 cents a watt-hour (about $500 per kWh) installed after the federal battery (BSTC) rebate. "Pretty much all of them go off that 1k per kW and .5k per kWh" (owner, 21 Nov 2026), except that a small job carries a minimum $1,800 labour charge, which is why a 9 kWh battery on its own is dearer per kWh. The owner quotes batteries as "X plus the rebate", meaning X is the price before the rebate and the rebate comes off it: 9 kWh from $8,000 and 27 kWh $19,000 before the rebate, so about $5,750 and $13,500 to the customer at the 2026 rebate. Off-grid: weekender from $15,000 (owner, 21 Nov 2026: "probably 15k minimum"), full-time home $25,000 to $55,000, large property from $65,000. The public website shows after-rebate battery prices only (owner's choice), which need redoing when the rebate steps down on 1 January 2027; the older, dearer ranges are retired.
 
 ## Xero
 
@@ -22,7 +26,6 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
   | 2003-2 | STC Trading Fees |
 
 - The owner is the bookkeeper. Tax, super and STP classification is their (or their accountant's) call: explain the options, don't decide.
-- **Lead rewards are credits only** (owner, 20 Nov 2026): a referrer, builder or home owner, gets a credit off our work, never a payout. Each reward is one Xero sales credit note to the account on the Lead rewards row in Settings > Xero Mapping (the owner picks the account; tax type seeded GST Free Expenses, theirs or the accountant's call).
 
 ## Suppliers
 
