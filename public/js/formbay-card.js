@@ -174,6 +174,9 @@ async function fbDrawFind(panel, project, changed) {
 async function fbDrawCreate(panel, project, changed) {
   document.getElementById('formbay-card').style.flex = '1 1 100%';   // the form spreads across the page, not down it
   panel.innerHTML = `<p class="subtitle">Getting the job's details and Formbay's lists...</p>`;
+  // A job whose address was saved before addresses were kept in parts: looked up once and kept, so
+  // the boxes below fill from Google's answer and not from splitting the text (item 103).
+  await loadAddressBox().then(() => addressKeepJob(project)).catch(() => null);
   let o;
   try { o = await fbCall('formbay-create-form', { action: 'options', projectId: project.id }); }
   catch (err) { panel.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`; return; }

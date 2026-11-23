@@ -19,6 +19,7 @@
 const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { creditNoteTotalIncGst } = require('./_shared/build-xero-credit-note-payload');
 const { logInvoiceEvent, moneyText } = require('./_shared/invoice-events');
+const { stepOff } = require('./_shared/lead-rewards');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -122,6 +123,11 @@ exports.handler = async (event) => {
     if (creditTotal < 0) {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'This credit note would be negative: the STC or BSTC credit taken back is more than the work credited. Taking back an STC credit is a new invoice, not a credit note.' }) };
     }
+
+    // A lead reward credit on this invoice (item 74b part 2) steps off, back to owed with its Xero
+    // allocation removed, when the invoice could no longer carry it after this credit note: the balance
+    // never goes below zero, and the reward takes the client's next invoice instead.
+    await stepOff(supabaseAdmin, invoiceId, 'a credit note', { less: creditTotal });
 
     const { data: insertedCreditNote, error: cnErr } = await supabaseAdmin
       .from('credit_notes')

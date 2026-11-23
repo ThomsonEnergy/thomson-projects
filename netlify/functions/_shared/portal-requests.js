@@ -6,7 +6,9 @@
 //                                            sites and whether Book it in is offered
 //   createRequest(admin, scope, input)       Quote it (a draft quote with the date they need it by) or
 //                                            Book it in (a do and charge job with suggested days);
-//                                            files go in a "From client" folder they can see
+//                                            files go in a "From client" folder they can see;
+//                                            or Disconnect and reconnect (item 109): a price list
+//                                            job with the booking questions answered, any client
 //   addToRequest(admin, scope, p, input)     more words and files on a draft quote they asked for
 //   saveClientFiles(admin, projectId, files, email)
 //   postClientMessage(admin, scope, p, body) a message from the client on a job's thread
@@ -14,6 +16,7 @@
 // Writes projects, cost_centres, client_sites, project_documents (and storage), job_client_messages,
 // client_contacts, activity_log, notifications.
 
+const { addressColumns } = require('./address-parts');
 const crypto = require('crypto');
 const { sydneyToday, addDays, fmtDay, jobRef } = require('./schedule-emails');
 const { sendPortalInvite } = require('./portal-invite');
@@ -60,7 +63,11 @@ async function requestOptions(admin, scope) {
     const { data: sites } = await admin.from('client_sites').select('id, label, address').eq('client_id', c.id).order('created_at');
     clients.push({ id: c.id, name: c.name, sites: (sites || []).map((s) => ({ id: s.id, label: s.label || '', address: s.address })), bookIn: await canBookIn(admin, c.id) });
   }
-  return { clients };
+  // Disconnect and reconnect (item 109) is offered to every client: its booking questions and the price list link
+  const { data: s } = await admin.from('company_settings').select('service_booking_questions, service_prices_token').eq('id', 1).maybeSingle();
+  const anyShown = await admin.from('service_price_items').select('prebuild_id', { count: 'exact', head: true }).eq('shown', true);
+  const service = s && (anyShown.count || 0) > 0 ? { questions: s.service_booking_questions || [], pricesUrl: `/service-prices.html?token=${s.service_prices_token}` } : null;
+  return { clients, service };
 }
 
 // files: [{ name, type, data (base64, no prefix) }]. Saved under the project, visible to the client.
@@ -100,16 +107,16 @@ async function saveClientFiles(admin, projectId, checked, email) {
 async function createRequest(admin, scope, input) {
   const client = scope.clients.find((c) => c.id === input.clientId) || (scope.clients.length === 1 ? scope.clients[0] : null);
   if (!client) throw new Refused('Pick which company this is for.');
-  const need = clean(input.need, 4000);
+  const kind = input.kind === 'book' ? 'book' : input.kind === 'service' ? 'service' : 'quote';
+  const need = clean(input.need, 4000) || (kind === 'service' ? 'Disconnect and reconnect' : '');
   if (need.length < 5) throw new Refused('Tell us what you need.');
-  const kind = input.kind === 'book' ? 'book' : 'quote';
   const today = sydneyToday();
   const checked = checkFiles(input.files);
 
   // the site: one of theirs, or a new address saved as a site
   let site = null;
   if (input.siteId) {
-    const { data } = await admin.from('client_sites').select('id, address').eq('id', input.siteId).eq('client_id', client.id).maybeSingle();
+    const { data } = await admin.from('client_sites').select('id, address, address_parts, lat, lng').eq('id', input.siteId).eq('client_id', client.id).maybeSingle();
     if (!data) throw new Refused('Pick one of your sites, or type the address.');
     site = data;
   } else {
@@ -117,11 +124,12 @@ async function createRequest(admin, scope, input) {
     if (address.length < 6) throw new Refused('Type the site address.');
     // the same match as the unique index (lower case, trimmed)
     const norm = (a) => String(a || '').trim().toLowerCase();
-    const { data: sites } = await admin.from('client_sites').select('id, address').eq('client_id', client.id);
+    const { data: sites } = await admin.from('client_sites').select('id, address, address_parts, lat, lng').eq('client_id', client.id);
     const same = (sites || []).find((x) => norm(x.address) === norm(address));
     if (same) site = same;
     else {
-      const { data: made, error } = await admin.from('client_sites').insert({ client_id: client.id, address, created_by: null }).select('id, address').single();
+      // the address in parts from Google's lookup on the portal's address box (item 103), when it came
+      const { data: made, error } = await admin.from('client_sites').insert({ client_id: client.id, address, created_by: null, ...addressColumns(input.addressParts, address) }).select('id, address, address_parts, lat, lng').single();
       if (error) throw error;
       site = made;
     }
@@ -129,11 +137,11 @@ async function createRequest(admin, scope, input) {
 
   const { data: cl } = await admin.from('clients').select('id, name, email, phone').eq('id', client.id).single();
   const { data: settings } = await admin.from('company_settings').select('default_terms, default_markup_percent').eq('id', 1).maybeSingle();
-  const name = need.split(/\n/)[0].slice(0, 80);
+  const name = (kind === 'service' ? `Disconnect and reconnect: ${site.address}` : need.split(/\n/)[0]).slice(0, 80);
   const base = {
     // the client's own email; a portal login's when the client has none (never a label like "their referral link")
     name, client_id: cl.id, client_name: cl.name, client_email: cl.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(scope.email) ? scope.email : null), client_phone: cl.phone || null,
-    client_address: site.address, client_site_id: site.id, portal_requested_at: new Date().toISOString(), portal_requested_by: scope.email,
+    client_address: site.address, client_site_id: site.id, ...(site.address_parts ? { address_parts: site.address_parts, lat: site.lat, lng: site.lng } : {}), portal_requested_at: new Date().toISOString(), portal_requested_by: scope.email,
   };
 
   let project;
@@ -148,6 +156,25 @@ async function createRequest(admin, scope, input) {
     }).select('id, name, quote_number, job_number').single();
     if (error) throw error;
     project = data;
+  } else if (kind === 'service') {
+    // Disconnect and reconnect at the price list (item 109): a do and charge job set up as a price list
+    // job, with their answers to the booking questions. The day the panels come off is the day they ask for.
+    const service = require('./service-jobs');
+    const off = String((input.booking || {}).roof_off_date || '');
+    if (!DATE.test(off) || off <= today) throw new Refused('Pick the day the panels need to come off, from tomorrow on.');
+    const { data, error } = await admin.from('projects').insert({
+      ...base, sow_text: need, proposal_template: 'direct_job', pipeline_stage: 'ready_to_book', status: 'in_progress', client_suggested_dates: [off],
+    }).select('id, name, quote_number, job_number').single();
+    if (error) throw error;
+    project = data;
+    try {
+      await service.setupServiceJob(admin, project.id, null);
+      await service.saveBooking(admin, project.id, input.booking, `${scope.email} in the client portal`);
+    } catch (err) {
+      await admin.from('projects').delete().eq('id', project.id); // a refused answer leaves no half made job behind
+      if (err.statusCode === 400) throw new Refused(err.message);
+      throw err;
+    }
   } else {
     if (!(await canBookIn(admin, cl.id))) throw new Refused('Book it in is for clients with a commercial agreement. Ask for a quote instead.');
     const dates = [...new Set((Array.isArray(input.dates) ? input.dates : []).filter((d) => DATE.test(d) && d > today))].sort().slice(0, 3);
@@ -164,7 +191,7 @@ async function createRequest(admin, scope, input) {
   const files = await saveClientFiles(admin, project.id, checked, scope.email);
   const ref = jobRef(project);
   const { data: madeRow } = await admin.from('projects').select('client_suggested_dates').eq('id', project.id).single();
-  const what = kind === 'quote' ? `a quote, needed by ${fmtDay(input.dueDate)}` : `work booked in on ${((madeRow && madeRow.client_suggested_dates) || []).map(fmtDay).join(' or ')}`;
+  const what = kind === 'quote' ? `a quote, needed by ${fmtDay(input.dueDate)}` : `${kind === 'service' ? 'a disconnect and reconnect' : 'work'} booked in on ${((madeRow && madeRow.client_suggested_dates) || []).map(fmtDay).join(' or ')}`;
   await admin.from('activity_log').insert({ entity_type: 'project', entity_id: project.id, action: 'portal_request', description: `${scope.email} asked for ${what} in the client portal${files.length ? `, with ${files.length} file${files.length === 1 ? '' : 's'}` : ''}` });
   await tellOffice(admin, await officeIds(admin), {
     title: `New from the client portal: ${ref} ${project.name}`,

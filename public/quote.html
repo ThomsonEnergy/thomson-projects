@@ -78,6 +78,9 @@
   .cover-meta .lbl { font-size: 14px; opacity: 0.9; }
   .cover-meta b { display: block; font-family: 'Archivo', sans-serif; font-weight: 700; font-size: 20px; text-transform: uppercase; margin: 2px 0 6px; }
   .cover-meta .co { opacity: 0.95; }
+  .cover-meta .netcc { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-weight: 700; }
+  .cover-meta .netcc .logo-pill img { max-height: 46px; max-width: 150px; }
+  .band-panel p a { color: inherit; }
   .logo-light { display: block; width: auto; }
   .logo-light.logo-cover, .logo-pill.logo-cover img { height: 150px; max-height: none; max-width: none; }
   .logo-light.logo-invest, .logo-pill.logo-invest img { height: 84px; max-height: none; max-width: none; }
@@ -274,7 +277,7 @@
   </div>
   <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=144"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script>
@@ -699,6 +702,12 @@
       // investment summary header: legal name, ABN, address and licence numbers.
       const companyLines = [LEGAL_NAME, s.abn ? `ABN ${s.abn}` : '', s.address, licenseParts].filter(Boolean);
       const preparedBy = data.prepared_by ? String(data.prepared_by).trim() : '';
+      // New Energy Tech Approved Seller (since 2 Nov 2026): said on every solar and battery proposal,
+      // on the cover and in the About panel. The logo is the one uploaded in Settings > Company
+      // Details > Proposal pictures (proposal_cover_photos.netcc_logo); without it, the words alone.
+      const netccSeller = template === 'solar' || template === 'battery';
+      const netccLogo = (s.proposal_cover_photos || {}).netcc_logo;
+      const NETCC_URL = 'https://www.newenergytech.org.au';
 
       // 1. Cover
       const coverHtml = `
@@ -715,6 +724,7 @@
             <div class="lbl">Prepared by:</div>
             ${preparedBy ? `<b>${esc(preparedBy)}</b>` : ''}
             <div class="co">${companyLines.map(esc).join('<br>')}</div>
+            ${netccSeller ? `<div class="netcc">${netccLogo ? `<span class="logo-pill"><img src="${esc(supaImageVariant(netccLogo, 400, 85))}" alt="" /></span>` : ''}<span>New Energy Tech Approved Seller</span></div>` : ''}
           </div>
         </section>`;
 
@@ -743,6 +753,7 @@
             <div class="txt">
               <h3>About ${esc(s.company_name || 'us')}</h3>
               ${(s.about_text ? String(s.about_text).split(/\n\s*\n/) : ABOUT_TEXT).map(t => `<p>${esc(t)}</p>`).join('')}
+              ${netccSeller ? `<p>${esc(s.company_name || 'Thomson Energy')} is a New Energy Tech Approved Seller: a signatory to the <a href="${NETCC_URL}" target="_blank" rel="noopener">New Energy Tech Consumer Code</a> (NETCC), the consumer protection code for solar and batteries authorised by the ACCC.</p>` : ''}
             </div>
           </div>
         </section>`;

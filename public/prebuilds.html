@@ -42,6 +42,7 @@
         <div class="card" id="pb-form-root"></div>
       </div>
       <div class="page-col pb-lib-col">
+        <div class="card" id="pb-service-prices"></div>
         <div class="card">
           <h2>Library</h2>
           <input id="pb-search" placeholder="Search by name or category..." style="margin-bottom:12px; max-width:320px;" autocomplete="off" />
@@ -51,8 +52,9 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=144"></script>
-  <script src="/js/prebuild-form.js?v=4"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
+  <script src="/js/prebuild-form.js?v=5"></script>
+  <script src="/js/service-prices.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // The form itself is shared with the quote pages: js/prebuild-form.js.
@@ -137,7 +139,9 @@
 
       const formRoot = document.getElementById('pb-form-root');
       formRoot.innerHTML = prebuildFormHtml();
-      prebuildForm = mountPrebuildForm(formRoot, { onSaved: loadPrebuilds });
+      // the disconnect and reconnect price list (item 109) follows the library: a new prebuild in its category shows up as a row
+      const servicePrices = mountServicePrices(document.getElementById('pb-service-prices'));
+      prebuildForm = mountPrebuildForm(formRoot, { onSaved: () => { loadPrebuilds(); servicePrices.refresh(); } });
       await loadPrebuilds();
     })();
   </script>

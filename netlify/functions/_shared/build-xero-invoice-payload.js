@@ -31,7 +31,7 @@ async function getOrCreateContact({ name, email, address }, storeOn) {
 async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
   const { data: invoice, error: invErr } = await supabaseAdmin
     .from('invoices')
-    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id, address))), clients:client_id(name, email, address, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order)), bill_to:bill_to_client_id(id, name, email, address, client_type, xero_contact_id)')
+    .select('*, cost_centres(*, projects(*, clients(client_type, xero_contact_id, address))), clients:client_id(name, email, address, client_type, xero_contact_id), invoice_claims(*, cost_centres(name, sort_order, bill_group)), bill_to:bill_to_client_id(id, name, email, address, client_type, xero_contact_id)')
     .eq('id', invoiceId)
     .single();
   if (invErr || !invoice) throw new Error('Invoice not found');
@@ -121,7 +121,16 @@ async function buildXeroInvoicePayload(supabaseAdmin, invoiceId) {
 
   let reference, lineItems;
   if (isMultiStage) {
-    const claims = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
+    const sorted = (invoice.invoice_claims || []).slice().sort((a, b) => (a.cost_centres?.sort_order || 0) - (b.cost_centres?.sort_order || 0));
+    // Cost centres that bill as one block (cost_centres.bill_group, item 109: a disconnect and its
+    // reconnect) are one set of lines here too, named by the group, the same as the client's invoice.
+    const claims = [];
+    sorted.forEach((c) => {
+      const group = c.cost_centres?.bill_group || null;
+      const into = group ? claims.find(x => x.cost_centres?.bill_group === group) : null;
+      if (!into) { claims.push({ ...c, cost_centres: { ...c.cost_centres, name: group || c.cost_centres?.name } }); return; }
+      ['labour_amount', 'material_amount', 'stc_amount', 'bstc_amount'].forEach((k) => { into[k] = Math.round(((Number(into[k]) || 0) + (Number(c[k]) || 0)) * 100) / 100; });
+    });
     reference = `Job ${jobNumber} - ${invoice.description || 'Sales Invoice'}`;
     lineItems = [];
     claims.forEach(c => {

@@ -83,6 +83,9 @@ async function syncForm(db, token, { formId, ftype = null, projectId = null, use
     if (!sameAddress(form, job.client_address)) return { ok: false, confirm: true, error: `Formbay form ${id} is at ${formAddress(form)}, which is not this job's address.` };
   }
 
+  // The accredited installer's name is kept with the form: the booking panel shows it (formbay_installers).
+  const installer = (await staffList(token)).find(x => x.id === String(form.iid || ''));
+  if (installer) form.installer_name = installer.name;
   const docsRes = await formbayCall(token, kind.docsList, { form: { formid: id, group_id: form.group_id || '' } });
   const patch = { job_status: form.sold_date ? 'sold' : form.status, form, synced_at: new Date().toISOString(), sync_error: null };
   if (Array.isArray(docsRes.json)) patch.docs = docsRes.json;
@@ -387,13 +390,6 @@ function parseAddress(text, streetTypes = {}) {
     const last = words[words.length - 1].replace(/\./g, '');
     const code = Object.keys(streetTypes).find(k => k === last || String(streetTypes[k]).toUpperCase() === last);
     if (code && words.length > 1) { out.street_type = code; words.pop(); }
-    // Some saved addresses have lost the break after the street ("328 Back Creek RoadPumpenbil"): a
-    // last word that starts with a street type is split into the type and the suburb.
-    if (!code && words.length > 1) {
-      const glued = Object.keys(streetTypes).map(k => [k, String(streetTypes[k]).toUpperCase()])
-        .filter(([, name]) => name.length >= 4 && last.startsWith(name) && last.length > name.length + 2).sort((x, y) => y[1].length - x[1].length)[0];
-      if (glued) { out.street_type = glued[0]; words.pop(); if (!out.city) out.city = last.slice(glued[1].length); }
-    }
     out.street_name = words.join(' ');
   }
   return out;
@@ -428,6 +424,12 @@ function people(json) {
     battery: /battery/i.test(String(i.endorsement || '')),
   }));
 }
+// Formbay's list of the company's people, read once per run.
+let staffRead = null;
+function staffList(token) {
+  if (!staffRead) staffRead = formbayCall(token, 'pv_installers').then(r => people(r.json));
+  return staffRead;
+}
 // role: 'installer' or 'designer'. The same rule the panel uses to offer people.
 function mayDo(person, role, { offGrid, battery }) {
   if (offGrid) return role === 'designer' ? person.offGridDesign : person.offGrid;
@@ -438,9 +440,21 @@ function mayDo(person, role, { offGrid, battery }) {
 // What the Create panel opens with: who can be the installer, Formbay's brand lists, and the job's
 // own details. `what` is the kind of form the job looks like: 'pv' (solar), 'pv_bstc' (solar and
 // battery) or 'bstc' (battery), from the quote's STC and battery STC counts and its template.
+// The job's address as Google gave it (projects.address_parts, item 103) in Formbay's boxes. Google
+// spells the street type out ("ROAD"); Formbay wants its code ("RD"). Null when the job has no parts.
+function partsForFormbay(parts, streetTypes = {}) {
+  if (!parts || !parts.street_number || !parts.street_name) return null;
+  const word = String(parts.street_type || '').toUpperCase();
+  const code = Object.keys(streetTypes).find(k => k === word || String(streetTypes[k]).toUpperCase() === word) || '';
+  return {
+    unit_number: parts.unit || '', street_number: parts.street_number, street_name: code || !word ? parts.street_name : `${parts.street_name} ${word}`,
+    street_type: code, city: parts.suburb || '', state: parts.state || '', postcode: parts.postcode || '',
+  };
+}
+
 async function createOptions(db, token, projectId) {
   const { data: project, error } = await db.from('projects')
-    .select('id, job_number, client_address, nmi, proposal_template, stc_quantity, bstc_quantity, clients(name, email, phone, client_type)').eq('id', projectId).single();
+    .select('id, job_number, client_address, address_parts, nmi, proposal_template, stc_quantity, bstc_quantity, clients(name, email, phone, client_type)').eq('id', projectId).single();
   if (error) return { ok: false, error: error.message };
   const [installers, batteryBrands, panelBrands, inverterBrands, streetTypes, lines2, last] = await Promise.all([
     formbayCall(token, 'pv_installers'), formbayCall(token, 'pv_inverter_battery_brands?bstc=1'), formbayCall(token, 'pv_panel_brands'),
@@ -469,7 +483,7 @@ async function createOptions(db, token, projectId) {
     prefill: {
       what: solar && battery ? 'pv_bstc' : solar ? 'pv' : 'bstc', has: Array.from(got),
       fname: person[0] || '', sname: person.slice(1).join(' '), email: client.email || '', phone: String(client.phone || '').replace(/\s+/g, ''),
-      ...parseAddress(project.client_address, types), nmi: project.nmi || '',
+      ...(partsForFormbay(project.address_parts, types) || parseAddress(project.client_address, types)), nmi: project.nmi || '',
       battery_brand: guess(lists.battery), panel_brand: guess(lists.panel), inverter_brand: guess(lists.inverter),
       installer: lastForm ? String(lastForm.iid || '') : '', commercial: client.client_type === 'company',
     },

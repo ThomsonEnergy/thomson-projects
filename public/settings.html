@@ -115,7 +115,7 @@
             <div class="grid cols-3">
               <div>
                 <label>Address</label>
-                <input id="address" placeholder="7319 Tweed Valley Way, Fernvale NSW 2484" />
+                <input id="address" data-address placeholder="7319 Tweed Valley Way, Fernvale NSW 2484" />
               </div>
               <div>
                 <label>Website</label>
@@ -813,7 +813,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=144"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script src="/js/settings-rate-cards.js?v=2"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -864,9 +864,9 @@
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
-      loadJsOnce('/js/settings-proposal-pictures.js?v=1', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-proposal-pictures.js?v=2', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
-      loadJsOnce('/js/settings-rewards.js?v=1', () => typeof loadRewardsCard === 'function').then(() => loadRewardsCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-rewards.js?v=2', () => typeof loadRewardsCard === 'function').then(() => loadRewardsCard(data)).catch(() => {});
       loadJsOnce('/js/settings-product-pictures.js?v=1', () => typeof loadProductPicturesCard === 'function').then(() => loadProductPicturesCard()).catch(() => {});
       renderCategorizedThumbs();
       document.getElementById('terms-text').value = data.default_terms || '';
@@ -883,6 +883,7 @@
       document.getElementById('abn').value = data.abn || '';
       document.getElementById('phone').value = data.phone || '';
       document.getElementById('address').value = data.address || '';
+      document.getElementById('address').dataset.was = data.address || '';   // an unchanged address keeps the parts it has
       document.getElementById('website').value = data.website || '';
       document.getElementById('licenses').value = data.licenses || '';
       document.getElementById('social-facebook').value = data.social_facebook || '';
@@ -984,6 +985,7 @@
           abn: document.getElementById('abn').value.trim(),
           phone: document.getElementById('phone').value.trim(),
           address: document.getElementById('address').value.trim(),
+          ...(c => ('address_parts' in c ? { address_parts: c.address_parts } : {}))(await addressColumnsFor(document.getElementById('address'), document.getElementById('address').dataset.was)),
           website: document.getElementById('website').value.trim(),
           licenses: document.getElementById('licenses').value.trim(),
           social_facebook: document.getElementById('social-facebook').value.trim() || null,

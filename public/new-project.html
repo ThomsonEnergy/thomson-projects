@@ -84,7 +84,7 @@
             <div style="grid-column: span 2;">
               <label>Site address</label>
               <select id="p-site-pick" style="display:none; margin-bottom:6px;"></select>
-              <input id="p-address" placeholder="Where the work is done" />
+              <input id="p-address" data-address placeholder="Where the work is done" />
               <p class="subtitle" style="margin:4px 0 0; font-size:11px;">A new address is saved as a site for this client. The client's office address stays as it is (Clients page).</p>
             </div>
             <div>
@@ -113,9 +113,9 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=144"></script>
+  <script src="/js/supabase-client.js?v=148"></script>
   <script src="/js/template-questions.js?v=8"></script>
-  <script src="/js/email-compose.js?v=13"></script>
+  <script src="/js/email-compose.js?v=14"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     // Editing a saved quote now happens on the quote's own page, in steps (backlog item 27).
@@ -207,32 +207,6 @@
     });
 
 
-    // ---------- address autocomplete ----------
-
-    function loadAddressAutocomplete(apiKey) {
-      if (!apiKey) return; // no key set in Settings yet - plain text input still works fine
-      if (window.google && window.google.maps) { initAddressAutocomplete(); return; }
-      window._initAddressAutocomplete = initAddressAutocomplete;
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&callback=_initAddressAutocomplete`;
-      script.async = true;
-      script.onerror = () => console.error('Google Maps script failed to load - check the API key in Settings > API Keys.');
-      document.head.appendChild(script);
-    }
-
-    function initAddressAutocomplete() {
-      const input = document.getElementById('p-address');
-      const autocomplete = new google.maps.places.Autocomplete(input, {
-        componentRestrictions: { country: 'au' },
-        fields: ['formatted_address'],
-        types: ['address'],
-      });
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place && place.formatted_address) input.value = place.formatted_address;
-      });
-    }
-
     // ---------- create ----------
 
     // A lead's files live in the lead-uploads store; the AI scope of works reads project-documents, so
@@ -269,6 +243,7 @@
         const client_email = document.getElementById('p-email').value.trim();
         const client_phone = document.getElementById('p-phone').value.trim();
         const client_address = document.getElementById('p-address').value.trim();
+        const addressCols = await addressColumnsFor(document.getElementById('p-address'));   // the address in parts, from Google
         const payment_terms = document.getElementById('p-payment-terms').value;
 
         if (!name || !client_name) {
@@ -285,11 +260,11 @@
         let clientId = selectedClientId;
         if (!clientId) {
           const clientFields = { name: client_name, email: client_email || null, phone: client_phone || null, payment_terms };
-          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null }).select().single();
+          const { data: newClient, error: clientErr } = await supabaseClient.from('clients').insert({ ...clientFields, address: client_address || null, ...addressCols }).select().single();
           if (clientErr) { msg.innerHTML = `<div class="error-box">Could not save client: ${escapeHtml(clientErr.message)}</div>`; return; }
           clientId = newClient.id;
         }
-        const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address);
+        const client_site_id = await resolveClientSite(clientId, client_address, selectedClientId ? (sitePicker.client() || {}).address : client_address, { columns: addressCols });
 
         const { data: settings } = await supabaseClient.from('company_settings').select('portfolio_photos').eq('id', 1).single();
         const allPhotos = (settings && settings.portfolio_photos) || [];
@@ -304,7 +279,7 @@
         const payDefaults = TEMPLATE_PAYMENT_DEFAULTS[currentTemplate] || { deposit: 10, milestones: [] };
         const projectFields = {
           name, quote_number: quoteNum,
-          client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id,
+          client_id: clientId, client_name, client_email, client_phone, client_address, client_site_id, ...addressCols,
           notes: document.getElementById('p-notes').value.trim() || null,
           sow_brief: prefillBrief || '',
           sow_text: '', proposal_subtitle: '',
@@ -382,11 +357,10 @@
 
       const { data: settingsRow } = await supabaseClient
         .from('company_settings')
-        .select('default_terms, default_estimate_disclaimer, google_maps_api_key')
+        .select('default_terms, default_estimate_disclaimer')
         .eq('id', 1)
         .single();
       companySettings = settingsRow || {};
-      loadAddressAutocomplete(companySettings.google_maps_api_key);
 
       const params = new URLSearchParams(window.location.search);
       const aiPf = aiPrefillRead('new_quote');

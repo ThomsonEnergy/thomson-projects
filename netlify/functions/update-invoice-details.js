@@ -12,10 +12,12 @@
 //   or  { invoiceId, resend: true }
 // Answer: { ok, changed, xero: null | { ok, error } }
 
+const { addressColumns } = require('./_shared/address-parts');
 const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
 const { regenerateInvoicePdf } = require('./_shared/regenerate-invoice-pdf');
 const { updateInvoiceInXero, readXeroInvoice, xeroInvoiceBlocker } = require('./_shared/update-invoice-in-xero');
+const { stepOff } = require('./_shared/lead-rewards');
 
 const reply = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
@@ -111,6 +113,8 @@ exports.handler = async (event) => {
       if (a.toLowerCase() !== clean(project.client_address).toLowerCase()) {
         projectChange.client_address = a;
         projectChange.client_site_id = await siteIdFor(admin, project.client_id, a);
+        // the new address in parts when the browser's lookup found them, else cleared: they follow the text
+        Object.assign(projectChange, { address_parts: null, lat: null, lng: null }, addressColumns(body.siteAddressParts, a));
         said.push(`Job site ${quoted(project.client_address)} to ${quoted(a)}`);
       }
     }
@@ -125,6 +129,10 @@ exports.handler = async (event) => {
         if (blocker) return reply(400, { ok: false, error: `Nothing was changed: ${blocker}` });
       } catch (err) { xeroReachError = err.message; }
     }
+
+    // Billed to someone else: a lead reward credit on it is the old client's, so it steps off first (back
+    // to owed, its Xero allocation removed) and takes that client's next invoice (item 74b part 2).
+    if ('bill_to_client_id' in invoiceChange) await stepOff(admin, inv.id, 'the invoice is now billed to another client');
 
     if (Object.keys(invoiceChange).length) {
       const { error: upErr } = await admin.from('invoices').update(invoiceChange).eq('id', inv.id).is('paid_at', null);

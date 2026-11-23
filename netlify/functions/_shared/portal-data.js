@@ -3,7 +3,7 @@
 // (_shared/portal-session.js) and returns only whitelisted fields; nothing here reads a table
 // without the scope in the query. Called by portal-read.js. Reads only.
 //
-//   portalOverview(admin, scope) -> { clients, needsYou, jobs, quotes, company }
+//   portalOverview(admin, scope) -> { clients, needsYou, jobs, quotes, company, equipment }
 //   scopedProject(admin, scope, projectId) -> the project row (money true or false), or null when
 //     it is not theirs: the one check before a job is read or an open is logged against it
 //   portalProject(admin, p) -> the job page for a scoped project row (with `work` on a do and
@@ -41,7 +41,7 @@ const thumbUrl = (url) => renderedImageUrl(url, { width: 480, height: 480 });
 const staffFirst = (fullName) => (fullName ? firstName(fullName) : '');
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
 const timeText = (iso) => TIME.format(new Date(iso)).replace(/\s/g, '').toLowerCase();
-const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at, client_due_date, client_due_note, client_suggested_dates, portal_requested_at';
+const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at, client_due_date, client_due_note, client_suggested_dates, portal_requested_at, service_state';
 const OPEN_STAGES_DONE = new Set(['complete', 'archived']);
 const INVOICE_LABELS = { paid: 'Paid', overdue: 'Overdue', awaiting: 'Awaiting payment' };
 // open rows first, newest number first
@@ -209,25 +209,45 @@ async function referralsFor(admin, scope) {
   ]);
   const on = (cl || []).find((c) => c.lead_reward_kind && c.lead_reward_kind !== 'off' && c.referral_token);
   // the Rewards line (item 74b): what is owed, waiting on a deposit, and settled, in plain words
-  const { data: rw } = await admin.from('lead_rewards').select('amount, kind, status, settled_how').in('referrer_client_id', ids).neq('status', 'cancelled');
+  // a reward is only ever a credit off our work (owner, 20 Nov 2026); one refunded by hand in Xero is not shown as credit
+  const { data: rw } = await admin.from('lead_rewards').select('amount, status, settled_how, applied_invoice_id').in('referrer_client_id', ids).neq('status', 'cancelled');
   const sum = (f) => (rw || []).filter(f).reduce((s, r) => s + Number(r.amount || 0), 0);
   const dollars = (n) => `$${Math.round(n).toLocaleString('en-AU')}`;
-  const owedCredit = sum((r) => r.status === 'due' && r.kind === 'credit');
-  const owedPay = sum((r) => r.status === 'due' && r.kind === 'pay');
+  const owedCredit = sum((r) => r.status === 'due');
   const waiting = sum((r) => r.status === 'earned');
-  const settled = sum((r) => r.status === 'settled');
+  const settled = sum((r) => r.status === 'settled' && r.settled_how === 'credited');
   const rewards = [
-    owedCredit ? `${dollars(owedCredit)} credit due, taken off your next invoice` : '',
-    owedPay ? `${dollars(owedPay)} due to you, being paid` : '',
+    owedCredit ? `${dollars(owedCredit)} credit waiting: it comes off your next invoice by itself` : '',
     waiting ? `${dollars(waiting)} won, due once the job's deposit is paid` : '',
-    settled ? `${dollars(settled)} paid or credited so far` : '',
+    settled ? `${dollars(settled)} credited on your invoices so far` : '',
   ].filter(Boolean);
   return { referrals, referLink: on ? `/refer.html?r=${on.referral_token}` : null, rewards };
 }
 
+// mapsKey: Google's browser key, so the Request work address box offers addresses (item 103). It is
+// a browser key (limited in Google to our sites) and goes only to someone logged in to the portal.
 async function company(admin) {
-  const { data } = await admin.from('company_settings').select('company_name, phone, logo_url').eq('id', 1).maybeSingle();
-  return { name: data?.company_name || 'Thomson Energy', phone: data?.phone || '', logoUrl: data?.logo_url || '' };
+  const { data } = await admin.from('company_settings').select('company_name, phone, logo_url, google_maps_api_key').eq('id', 1).maybeSingle();
+  return { name: data?.company_name || 'Thomson Energy', phone: data?.phone || '', logoUrl: data?.logo_url || '', mapsKey: data?.google_maps_api_key || '' };
+}
+
+// What we have installed for the client (Customer equipment), for their own logins only: what it is,
+// where, its serial numbers (they need them for a warranty claim), when it went in, the warranty's
+// end and the next service. Never our notes. Equipment taken out of service is left off.
+async function equipmentFor(admin, scope) {
+  const ids = scope.clients.map((c) => c.id);
+  if (!ids.length) return [];
+  const { data } = await admin.from('customer_assets')
+    .select('id, asset_type, name, make, model, serial_numbers, quantity, site_address, installed_at, warranty_expires, next_service_due')
+    .in('client_id', ids).eq('status', 'active').order('installed_at', { ascending: false, nullsFirst: false }).limit(200);
+  const today = sydneyToday();
+  const day = (d) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+  return (data || []).map((a) => ({
+    id: a.id, name: a.name || [a.make, a.model].filter(Boolean).join(' '), kind: a.asset_type, quantity: Number(a.quantity) || 1,
+    site: a.site_address || '', serials: String(a.serial_numbers || '').split(/[\n,]+/).map((x) => x.trim()).filter(Boolean),
+    installed: day(a.installed_at), warrantyEnds: day(a.warranty_expires), inWarranty: a.warranty_expires ? a.warranty_expires >= today : null,
+    nextService: day(a.next_service_due),
+  }));
 }
 
 async function portalOverview(admin, scope) {
@@ -262,6 +282,7 @@ async function portalOverview(admin, scope) {
     // the request form and the People card (item 74 PR 2): only for an email on a client record
     request: scope.clients.length ? await requestOptions(admin, scope) : null,
     people: scope.clients.some((c) => c.main) ? await peopleFor(admin, scope) : [],
+    equipment: await equipmentFor(admin, scope),
     // the referral link and what it has sent us (item 74b): a client's own logins only
     ...(await referralsFor(admin, scope)),
     plan: jobs.filter((j) => plan[j.id] && !plan[j.id].pending).map((j) => ({ id: j.id, ref: j.ref, name: j.name, ...plan[j.id] })),
@@ -356,6 +377,20 @@ async function portalWork(admin, p) {
   const materials = priced.materials.map(({ line: m, amount }) => (
     { description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount, invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' }
   ));
+  // A price list job (item 109): the sheet's lines at the price list price, shown once the panels are off
+  // (the disconnect sheet is finished). The two cost centres' halves of a line are one line here.
+  const sheetDone = !!(p.service_state && p.service_state.disconnect && p.service_state.disconnect.finished_at);
+  const byItem = new Map();
+  (sheetDone ? priced.service : []).forEach(({ line: s, amount }) => {
+    const row = byItem.get(s.prebuildId) || { description: s.name, from: 'Price list', quantity: s.fullQuantity, unitPrice: 0, amount: 0, invoiced: true, invoiceNumber: null, when: '' };
+    row.unitPrice = r2(row.unitPrice + s.unitPrice);
+    row.amount = r2(row.amount + r2(s.fullQuantity * s.unitPrice));
+    row.invoiced = row.invoiced && s.invoiced;
+    row.invoiceNumber = row.invoiceNumber || s.invoiceNumber;
+    byItem.set(s.prebuildId, row);
+  });
+  materials.push(...byItem.values());
+  const priceListOpen = sheetDone ? priced.serviceOpen : 0;
   const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0]).markupPercent;
   const purchaseOrders = (pos || []).map((po) => {
     const m = 1 + markupOf(po.cost_centre_id) / 100;
@@ -370,7 +405,8 @@ async function portalWork(admin, p) {
   });
   return {
     labour, materials, purchaseOrders,
-    labourOpen: priced.labourOpen, materialsOpen: priced.materialsOpen, notInvoiced: priced.notInvoiced,
+    labourOpen: priced.labourOpen, materialsOpen: priced.materialsOpen, priceListOpen,
+    notInvoiced: r2(priced.labourOpen + priced.materialsOpen + priceListOpen),
     rules: WORK_RULES,
     agreement: d.rateCard.percentOff > 0 ? { name: d.rateCard.name, percentOff: d.rateCard.percentOff } : null,
   };

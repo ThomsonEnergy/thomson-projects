@@ -2229,7 +2229,8 @@ async function loadClientSites(clientId) {
 // Which saved site a job address is. The office address is not a site (null). A new address
 // is saved as a site for the client (unless save is false) and its id returned. Pass the
 // client's office address when it is to hand; otherwise it is looked up.
-async function resolveClientSite(clientId, address, officeAddress, { save = true } = {}) {
+// columns: the address in parts and its map point (addressBoxColumns), kept on a site made here.
+async function resolveClientSite(clientId, address, officeAddress, { save = true, columns = null } = {}) {
   address = String(address || '').trim();
   if (!clientId || !address) return null;
   if (officeAddress === undefined) {
@@ -2241,7 +2242,7 @@ async function resolveClientSite(clientId, address, officeAddress, { save = true
   const found = sites.find(s => sameAddress(s.address, address));
   if (found) return found.id;
   if (!save) return null;
-  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address }).select('id').single();
+  const { data, error } = await supabaseClient.from('client_sites').insert({ client_id: clientId, address, ...(columns || {}) }).select('id').single();
   if (error) {
     // Two people saving the same new site at once: the unique index keeps one row, use it.
     const again = (await loadClientSites(clientId)).find(s => sameAddress(s.address, address));
@@ -4482,7 +4483,10 @@ function openQuickJobPanel(onCreated) {
       <h2>New job - no quote</h2>
       <p class="subtitle" style="margin-bottom:12px;">Creates a job number straight away so you can clock in and log materials.</p>
 
-      <label style="margin-top:0">Job name *</label>
+      <label style="margin-top:0">Kind of work</label>
+      <select id="qj-kind"><option value="">Electrical service work (do and charge)</option><option value="service">Disconnect and reconnect (price list)</option></select>
+
+      <label>Job name *</label>
       <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
 
       <label>What's this job about</label>
@@ -4506,7 +4510,7 @@ function openQuickJobPanel(onCreated) {
       <input id="qj-client-phone" type="tel" inputmode="tel" autocomplete="tel" />
 
       <label>Site address</label>
-      <input id="qj-address" placeholder="Job site address" />
+      <input id="qj-address" data-address placeholder="Job site address" />
 
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px; font-weight:400;">
         <input type="checkbox" id="qj-laha-approved" style="width:auto;" /> LAHA approved (more than 100km from base)
@@ -4528,6 +4532,7 @@ function openQuickJobPanel(onCreated) {
     if (isPricingRole(role)) return;
     overlay.querySelector('#qj-client-search-label').textContent = 'Client';
     overlay.querySelector('#qj-client-search').style.display = 'none';
+    overlay.querySelector('#qj-kind').disabled = true; // the office books price list jobs
   });
 
   let searchTimeout;
@@ -4580,20 +4585,22 @@ function openQuickJobPanel(onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
+      const addressCols = await addressColumnsFor(overlay.querySelector('#qj-address'));
       let clientId = selectedClientId;
       // Only a pricing role may add the clients row; for anyone else the job keeps the typed name (bug F7).
       if (!clientId && isPricingRole(await getMyRole())) {
         const { data: newClient, error: clientErr } = await supabaseClient
           .from('clients')
-          .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress })
+          .insert({ name: clientName, email: clientEmail, phone: clientPhone, address: clientAddress, ...addressCols })
           .select('id')
           .single();
         if (clientErr) throw clientErr;
         clientId = newClient.id;
       }
-      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress) : null;
+      const clientSiteId = selectedClientId ? await resolveClientSite(clientId, clientAddress, undefined, { columns: addressCols }) : null;
 
       const { data: project, error } = await supabaseClient.from('projects').insert({
+        ...addressCols,
         name,
         sow_text: brief || null,
         client_id: clientId,
@@ -4616,6 +4623,14 @@ function openQuickJobPanel(onCreated) {
         project_id: project.id, name: 'Labour & Materials', sort_order: 0, markup_percent: 45,
       });
       if (ccErr) throw ccErr;
+      // Disconnect and reconnect (item 109): service-job.js sets the job up and emails the client the booking questions.
+      if (overlay.querySelector('#qj-kind').value) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/service-job', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action: 'setup', projectId: project.id, emailQuestions: true }) });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok || !out.ok) showToast(`${projectRef(project)} was made as do and charge: ${out.error || 'it could not be set up as a disconnect and reconnect'}`, { error: true });
+        else showToast(out.questions === 'sent' ? 'Booking questions emailed to the client' : (out.questions || 'Job set up'), { error: !!out.questions && out.questions !== 'sent' });
+      }
 
       overlay.remove();
       if (onCreated) onCreated(project);
@@ -4890,7 +4905,7 @@ function openWarrantyJobPanel(originalProject, onCreated) {
       <input id="wj-client-phone" type="tel" autocomplete="tel" value="${escapeHtml(originalProject.client_phone || '')}" />
 
       <label>Site address</label>
-      <input id="wj-address" value="${escapeHtml(originalProject.client_address || '')}" />
+      <input id="wj-address" data-address value="${escapeHtml(originalProject.client_address || '')}" />
 
       <div style="margin-top:14px;">
         <button id="wj-confirm-btn">Create warranty job</button>
@@ -4917,8 +4932,10 @@ function openWarrantyJobPanel(originalProject, onCreated) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Creating...';
     try {
-      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress);
+      const addressCols = await addressColumnsFor(overlay.querySelector('#wj-address'));
+      const clientSiteId = await resolveClientSite(originalProject.client_id, clientAddress, undefined, { columns: addressCols });
       const { data: project, error } = await supabaseClient.from('projects').insert({
+        ...addressCols,
         name,
         sow_text: brief || null,
         client_id: originalProject.client_id || null,
@@ -7020,19 +7037,39 @@ function loadJsOnce(src, isLoaded) {
     document.head.appendChild(s);
   });
 }
+// Address boxes (item 103): any <input data-address> gets Google's address suggestions the first
+// time it is focused, on every page, and addressColumnsFor(input) gives the parts to save beside
+// its text ({ address_parts, lat, lng }). The how is in /js/address-box.js.
+const loadAddressBox = () => loadJsOnce('/js/address-box.js?v=3', () => typeof wireAddressBox === 'function');
+document.addEventListener('focusin', (e) => {
+  if (e.target && e.target.matches && e.target.matches('input[data-address]')) loadAddressBox().then(() => wireAddressBox(e.target)).catch(() => {});
+});
+// `was`: the address text already saved, when editing. An address left as it was and not known to
+// Google keeps whatever parts it has (returns {}); a changed one always follows its new text.
+// `has`: true when that saved address already has its parts, so an unchanged one is not looked up again.
+async function addressColumnsFor(input, was, has = false) {
+  try {
+    const same = was !== undefined && String(was || '').trim() === String(input.value || '').trim();
+    if (same && has && !input.addressParts) return {};
+    await loadAddressBox();
+    const cols = await addressBoxColumns(input);
+    return !cols.address_parts && same ? {} : cols;
+  } catch (err) { return {}; }   // no lookup: the text still saves
+}
+const loadFormbayNote = () => loadJsOnce('/js/formbay-note.js?v=1', () => typeof formbayInstallerNote === 'function');
 const loadUsedStock = () => loadJsOnce('/js/used-stock.js?v=2', () => typeof openUsedStockPanel === 'function');
 const loadStockScan = () => loadJsOnce('/js/stock-scan.js?v=2', () => typeof openStockScanPanel === 'function');
 const loadStockKinds = () => loadJsOnce('/js/stock-kinds.js?v=1', () => typeof stockKindGuess === 'function');
 const loadStockPanels = () => loadJsOnce('/js/stock-panels.js?v=1', () => typeof openStocktakePanel === 'function');
 // The invoice panel and its helpers (item 61): the Invoices page, the job's Invoices tab and the Invoice
 // actual costs panel. The three files do not depend on each other at load, so they come down together.
-const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=10', () => typeof openInvoiceActualCostsPanel === 'function');
+const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=11', () => typeof openInvoiceActualCostsPanel === 'function');
 // The Stock / prebuild picker (js/stock-picker.js): variations on the job page and items added to an invoice.
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([
-  loadJsOnce('/js/email-compose.js?v=13', () => typeof openEmailComposer === 'function'),
+  loadJsOnce('/js/email-compose.js?v=14', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
-  loadJsOnce('/js/invoice-actions.js?v=6', () => typeof openInvoicePanel === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=8', () => typeof openInvoicePanel === 'function'),
 ]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.

@@ -32,6 +32,8 @@ const { computeDueDate } = require('./_shared/compute-due-date');
 const { priceInvoiceItems, commercialAgreementRow, adjustWarehouseStockAdmin, r2 } = require('./_shared/invoice-items');
 const { rateCardFor } = require('./_shared/rate-cards');
 const { logInvoiceEvent } = require('./_shared/invoice-events');
+const { creditNewInvoice } = require('./_shared/lead-rewards');
+const { forceServicePrices } = require('./_shared/service-jobs');
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
@@ -52,7 +54,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'projectId and at least one claim are required' }) };
     }
 
-    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, name, sort_order, quoted_amount, invoiced_amount, markup_percent').eq('project_id', projectId);
+    const { data: allCentres } = await supabaseAdmin.from('cost_centres').select('id, name, sort_order, quoted_amount, invoiced_amount, markup_percent, bill_group').eq('project_id', projectId);
     if (claims.some(c => c.costCentreId && !(allCentres || []).some(cc => cc.id === c.costCentreId))) {
       return { statusCode: 400, body: JSON.stringify({ error: 'A cost centre on this invoice does not belong to this job.' }) };
     }
@@ -61,6 +63,8 @@ exports.handler = async (event) => {
     // and added on top of whatever labour / materials the claim carries.
     // Labour tiers at the job's surcharge level (item 46); a commercial agreement (item 48) is not in
     // the $/hr: it is one minus line per claim on the labour lines, worked out here, never sent by the panel.
+    // A price list job (item 109): its sheet's lines go on at the price list price, whatever was sent.
+    await forceServicePrices(supabaseAdmin, projectId, claims);
     const rateCard = await rateCardFor(supabaseAdmin, projectId);
     let agreementTotal = 0;
     const pricedClaims = await Promise.all(claims.map(async (c) => {
@@ -235,7 +239,9 @@ exports.handler = async (event) => {
       claimLabel = claimRows
         .map(c => (allCentres || []).find(cc => cc.id === c.cost_centre_id))
         .sort((a, b) => (a?.sort_order || 0) - (b?.sort_order || 0))
-        .map(cc => cc?.name || 'Work')
+        // cost centres that bill as one block (cost_centres.bill_group, item 109) are named once
+        .map(cc => cc?.bill_group || cc?.name || 'Work')
+        .filter((name, i, all) => all.indexOf(name) === i)
         .join(' + ')
         .slice(0, 200);
     } else if (isFinalClaim) {
@@ -381,6 +387,10 @@ exports.handler = async (event) => {
     // bank transfer and never clicks the button at all.
 
     await logInvoiceEvent(supabaseAdmin, { invoiceId: insertedInvoice.id, kind: 'created', actorId: user.id, detail: `${claimLabel || 'Invoice'}: ${claimRows.length} stage${claimRows.length === 1 ? '' : 's'}` });
+
+    // A lead reward credit the client it is billed to has waiting comes off this invoice by itself (item
+    // 74b part 2). Never throws, and does nothing for a client with no credit waiting.
+    await creditNewInvoice(supabaseAdmin, insertedInvoice.id);
 
     return {
       statusCode: 200,

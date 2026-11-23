@@ -32,6 +32,7 @@ const AGENTS = {
   'remind-leads': { label: 'Leads and call requests still waiting (7am reminder)', every: 1440 },
   'read-knowledge-sweep': { label: 'Knowledge Base reader (every 2 minutes)', every: 2 },
   'sync-energy-plans': { label: 'Retail plan list from Energy Made Easy (refreshed daily)', every: 15 },
+  'lead-rewards': { label: 'Lead rewards (Xero credit notes and invoice credits)', every: 15 },
 };
 
 // dedupe_key prefix of the "worker is not working" task (ops-digest.js leaves these out of its lists)

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<script>document.documentElement.setAttribute('data-theme', 'navy');</script>
+<title>Price list - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/client-page.css?v=1" />
+<style>
+  body { padding-top: 0; }
+  .sp-head { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 16px; border-bottom:1px solid var(--border); }
+  .sp-head img { height:34px; }
+  .wrap { max-width: 820px; }
+  .sp-table { width:100%; border-collapse:collapse; font-size:14px; }
+  .sp-table th, .sp-table td { padding:8px 6px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .sp-table .n { text-align:right; white-space:nowrap; }
+  .sp-group td { font-weight:600; padding-top:16px; border-bottom:2px solid var(--border); }
+  .sp-desc { color: var(--muted); font-size:12.5px; }
+  @media print { .sp-head button { display:none; } }
+</style>
+</head>
+<body class="client-page">
+  <!-- The disconnect and reconnect price list (backlog item 109), for a roofer or any client holding
+       the link. Reads service-prices.js; nothing here can be changed. -->
+  <div class="sp-head">
+    <img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" />
+    <button class="secondary" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+  <div class="wrap">
+    <div id="sp-root"><p class="subtitle">Loading...</p></div>
+  </div>
+  <script>
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const money = (n) => `$${(Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const root = document.getElementById('sp-root');
+    (async () => {
+      const token = new URLSearchParams(location.search).get('token') || '';
+      try {
+        const res = await fetch(`/.netlify/functions/service-prices?token=${encodeURIComponent(token)}`);
+        const d = await res.json();
+        if (!res.ok || !d.ok) throw new Error(d.error || 'This link is not valid.');
+        const groups = [...new Set(d.items.map((i) => i.group || ''))];
+        root.innerHTML = `
+          <h1 style="margin-bottom:4px;">Disconnect and reconnect price list</h1>
+          <p class="subtitle">${esc(d.company.name)}${d.company.abn ? `, ABN ${esc(d.company.abn)}` : ''}${d.company.phone ? `, ${esc(d.company.phone)}` : ''}. Prices are before GST.</p>
+          <p style="font-size:14px;">Solar panels or air conditioning that have to come off for roof work, and go back on after. No quote needed: book the job, we count what was done on site, and one invoice follows at these prices once everything is back on. Anything outside this list is done at our Schedule of Rates and shown separately.</p>
+          <table class="sp-table">
+            <thead><tr><th>Item</th><th class="n">Price each</th><th class="n">Minimum</th></tr></thead>
+            <tbody>${groups.map((g) => `
+              ${g ? `<tr class="sp-group"><td colspan="3">${esc(g)}</td></tr>` : ''}
+              ${d.items.filter((i) => (i.group || '') === g).map((i) => `
+                <tr><td>${esc(i.name)}${i.description ? `<div class="sp-desc">${esc(i.description)}</div>` : ''}</td>
+                <td class="n">${esc(money(i.unitPrice))} per ${esc(i.unitLabel)}</td>
+                <td class="n">${i.minQuantity ? `${esc(i.minQuantity)} (${esc(money(i.minQuantity * i.unitPrice))})` : ''}</td></tr>`).join('')}`).join('')}
+            </tbody>
+          </table>
+          ${d.items.length ? '' : '<p class="subtitle">The price list is being updated. Please call us.</p>'}`;
+      } catch (err) {
+        root.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

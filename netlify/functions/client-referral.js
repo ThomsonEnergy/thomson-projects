@@ -1,6 +1,7 @@
 // POST /.netlify/functions/client-referral   (Admin, Finance and Sales; backlog item 74b, step 3a)
 // The lead reward and referral link on the Clients page:
-//   { action: 'set_kind', clientId, kind: 'off' | 'pay' | 'credit' }  turning it on from off emails
+//   { action: 'set_kind', clientId, kind: 'off' | 'credit' }  a credit off our work, never a payout
+//        (owner, 20 Nov 2026); turning it on from off emails
 //        the client their link by itself (so nobody has to remember to send it)
 //   { action: 'send', clientId }        email the link again
 //   { action: 'regenerate', clientId }  a new link; the old one stops working at once
@@ -13,8 +14,8 @@ const { publicBaseUrl } = require('./_shared/site-url');
 
 const json = (statusCode, body) => ({ statusCode, body: JSON.stringify(body) });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KINDS = ['off', 'pay', 'credit'];
-const HOW = { pay: 'a payment to your account', credit: 'a credit off your next invoice', off: 'our thanks' };
+const KINDS = ['off', 'credit'];
+const HOW = { credit: 'a credit off your next invoice with us', off: 'our thanks' };
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -35,10 +36,10 @@ exports.handler = async (event) => {
     };
 
     if (body.action === 'set_kind') {
-      if (!KINDS.includes(body.kind)) return json(400, { ok: false, error: 'Off, Pay or Credit.' });
+      if (!KINDS.includes(body.kind)) return json(400, { ok: false, error: 'Off or On.' });
       const { error } = await admin.from('clients').update({ lead_reward_kind: body.kind }).eq('id', client.id);
       if (error) throw error;
-      await log('lead_reward_kind', `Lead reward set to ${body.kind}`);
+      await log('lead_reward_kind', `Lead reward turned ${body.kind === 'off' ? 'off' : 'on (a credit off their next invoice)'}`);
       let warning = null;
       if (client.lead_reward_kind === 'off' && body.kind !== 'off') warning = await email({ ...client, lead_reward_kind: body.kind });
       return json(200, { ok: true, emailed: !warning && client.lead_reward_kind === 'off' && body.kind !== 'off', warning });

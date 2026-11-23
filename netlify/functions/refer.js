@@ -20,7 +20,10 @@ exports.handler = async (event) => {
     const client = await F.clientForToken(admin, body.r);
     if (!client) return json(404, { ok: false, error: 'This link is not working any more. Please ask us for a new one.' });
     if (body.action === 'info') {
-      return json(200, { ok: true, client: client.name, rewards: await F.rewardTerms(admin, client), types: F.TYPES });
+      // mapsKey: Google's browser key, so the address box offers addresses (item 103); it goes only to
+      // someone holding a working referral link
+      const { data: settings } = await admin.from('company_settings').select('google_maps_api_key').eq('id', 1).maybeSingle();
+      return json(200, { ok: true, client: client.name, rewards: await F.rewardTerms(admin, client), types: F.TYPES, mapsKey: (settings && settings.google_maps_api_key) || '' });
     }
     if (body.action === 'submit') {
       const out = await F.submitReferral(admin, client, body);

@@ -207,6 +207,7 @@
   async function showOverview() {
     main.innerHTML = `<p class="subtitle">Loading your jobs...</p>`;
     const d = await call('portal-read', { action: 'overview' });
+    window.ADDRESS_BOX_KEY = d.company.mapsKey || '';   // the Request work address box offers Google's addresses
     header(d.email);
     const names = d.clients.map((c) => c.name);
     // whole screen (owner's rule): three columns that scroll on their own on a laptop, one on a phone
@@ -226,6 +227,7 @@
       </div><div class="pl-col">
       <h2 class="pl-h">Quotes</h2>
       ${listHtml(d.quotes, { empty: 'No quotes on the go.' })}
+      ${(d.equipment || []).length ? `<h2 class="pl-h">Your equipment</h2>${d.equipment.map(equipmentHtml).join('')}` : ''}
       ${(d.referrals || []).length ? `<h3 class="pl-muted" style="margin:12px 0 4px; font-size:13px;">Jobs you sent us</h3>${d.referrals.map((r) => `<div class="pl-row ${r.open ? '' : 'done'}" style="cursor:default;">${r.ref ? `<div class="ref">${esc(r.ref)}</div>` : ''}<div class="name" style="font-size:15px;">${esc(r.name)}</div><div class="site">${esc(r.when)}</div><div class="status"><span class="pl-status">${esc(r.status)}</span></div></div>`).join('')}` : ''}
       ${(d.rewards || []).length ? `<div class="pl-card" style="margin-top:10px;"><strong>Your rewards</strong>${d.rewards.map((t) => `<div class="pl-muted" style="margin-top:2px;">${esc(t)}</div>`).join('')}</div>` : ''}
       ${d.referLink ? `<p style="margin:10px 0 0;"><a class="secondary pl-btn" href="${esc(d.referLink)}" target="_blank" rel="noopener">Send us a job (your referral link)</a></p><p class="pl-muted" style="margin:4px 0 0;">Save it to your phone's home screen, or pass it to your team.</p>` : ''}
@@ -293,11 +295,27 @@
       box.querySelector('#rq-address').style.display = site.value ? 'none' : 'block';
       box.querySelector('#rq-kinds').innerHTML = `
         <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;"><input type="radio" name="rq-kind" value="quote" checked style="width:auto; margin-top:3px;" /> <span><strong>Quote it</strong><br><span class="pl-muted">Needed by</span> <input type="date" id="rq-due" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>
-        ${c.bookIn ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="book" style="width:auto; margin-top:3px;" /> <span><strong>Book it in</strong> (charged at your rates)<br><span class="pl-muted">Days that suit you</span><br><input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>` : ''}`;
+        ${c.bookIn ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="book" style="width:auto; margin-top:3px;" /> <span><strong>Book it in</strong> (charged at your rates)<br><span class="pl-muted">Days that suit you</span><br><input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /> <input type="date" class="rq-day" min="${esc(tomorrow)}" style="font-size:16px;" /></span></label>` : ''}
+        ${opts.service ? `<label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:8px;"><input type="radio" name="rq-kind" value="service" style="width:auto; margin-top:3px;" /> <span><strong>Disconnect and reconnect</strong><br><span class="pl-muted">Solar panels or air conditioning off for roof work and back on after, at our <a href="${esc(opts.service.pricesUrl)}" target="_blank" rel="noopener">price list</a>. No quote needed.</span></span></label>
+        <div id="rq-service" style="display:none; margin:6px 0 0 26px;">${opts.service.questions.map(serviceQuestion).join('')}</div>` : ''}`;
+      // the booking questions show only for a disconnect and reconnect, where they replace "What do you need?"
+      box.querySelectorAll('input[name="rq-kind"]').forEach((r) => r.addEventListener('change', () => {
+        const svc = box.querySelector('#rq-service');
+        if (svc) svc.style.display = r.value === 'service' && r.checked ? 'block' : 'none';
+      }));
     };
+    // one booking question (company_settings.service_booking_questions, item 109) as a form field
+    function serviceQuestion(q) {
+      const at = `data-q="${esc(q.key)}" style="width:100%; font-size:16px;"`;
+      const field = q.type === 'choice' ? `<select ${at}><option value=""></option>${(q.options || []).map((o) => `<option>${esc(o)}</option>`).join('')}</select>`
+        : q.type === 'longtext' ? `<textarea ${at} rows="2" maxlength="2000"></textarea>`
+        : `<input ${at} type="${q.type === 'number' ? 'number' : q.type === 'date' ? 'date' : 'text'}" ${q.type === 'number' ? 'min="0" inputmode="numeric"' : ''} ${q.type === 'date' ? `min="${esc(tomorrow)}"` : ''} />`;
+      return `<label class="pl-muted" style="display:block; margin-top:6px;">${esc(q.label)}</label>${field}`;
+    }
     if (clientSel) clientSel.addEventListener('change', drawClient);
     box.querySelector('#rq-site').addEventListener('change', (e) => { box.querySelector('#rq-address').style.display = e.target.value ? 'none' : 'block'; });
     drawClient();
+    wireAddressBox(box.querySelector('#rq-address'));
     box.querySelector('#rq-cancel').addEventListener('click', () => showOverview());
     box.querySelector('#rq-send').addEventListener('click', async (e) => {
       const msg = box.querySelector('#rq-msg');
@@ -308,13 +326,28 @@
         const files = await readFiles(box.querySelector('#rq-files'));
         const out = await call('portal-write', {
           action: 'request', clientId: current().id, siteId: box.querySelector('#rq-site').value || null, address: box.querySelector('#rq-address').value,
+          addressParts: box.querySelector('#rq-site').value ? null : await addressBoxParts(box.querySelector('#rq-address')),
           need: box.querySelector('#rq-need').value, kind, dueDate: (box.querySelector('#rq-due') || {}).value || '',
           dates: [...box.querySelectorAll('.rq-day')].map((x) => x.value).filter(Boolean), files,
+          booking: Object.fromEntries([...box.querySelectorAll('[data-q]')].map((x) => [x.dataset.q, x.value])),
         });
         window.history.pushState({}, '', `/portal.html?job=${encodeURIComponent(out.id)}`);
         showJob(out.id);
       } catch (err) { msg.innerHTML = `<p class="pl-muted" style="color:#c0272d;">${esc(err.message)}</p>`; e.target.disabled = false; }
     });
+  }
+
+  // ----- Your equipment: what we have installed for them, one line each, opening to the detail -----
+  // (serial numbers are there for a warranty claim; our own notes never come to the portal)
+  function equipmentHtml(a) {
+    const warranty = a.warrantyEnds ? `Warranty ${a.inWarranty ? 'to' : 'ended'} ${esc(a.warrantyEnds)}` : '';
+    const line = [a.installed ? `Installed ${esc(a.installed)}` : '', warranty].filter(Boolean).join(' · ');
+    return `<details class="pl-card" style="margin:0 0 8px;">
+      <summary style="cursor:pointer;"><strong>${a.quantity > 1 ? `${a.quantity} x ` : ''}${esc(a.name)}</strong>${line ? `<br><span class="pl-muted">${line}</span>` : ''}</summary>
+      ${a.site ? `<p class="pl-muted" style="margin:8px 0 0;">At ${esc(a.site)}</p>` : ''}
+      ${a.nextService ? `<p class="pl-muted" style="margin:4px 0 0;">Next service due ${esc(a.nextService)}</p>` : ''}
+      ${a.serials.length ? `<p class="pl-muted" style="margin:4px 0 0;">Serial number${a.serials.length === 1 ? '' : 's'}: ${a.serials.map(esc).join(', ')}</p>` : ''}
+    </details>`;
   }
 
   // ----- the People card: the main email gives others at the company a login (item 74 point 1) -----
@@ -498,7 +531,7 @@
     const inv = (x) => x.invoiced ? `<span class="pl-muted">${esc(x.invoiceNumber || 'Invoiced')}</span>` : 'Not yet';
     el.innerHTML = `
       <div class="pl-big">${esc(money(work.notInvoiced))}</div>
-      <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
+      <div class="pl-muted">About this much not yet invoiced (labour ${esc(money(work.labourOpen))}, materials ${esc(money(work.materialsOpen))}${work.priceListOpen ? `, price list ${esc(money(work.priceListOpen))}` : ''}, ex GST).${work.agreement ? ` Your commercial agreement (${esc(work.agreement.percentOff)}% off labour) comes off on the invoice.` : ''}</div>
       ${work.note ? `<p class="pl-muted">${esc(work.note)}</p>` : ''}
       <h3>Labour</h3>
       ${work.labour.length ? `${table(['Day', 'Who', 'Hours', '$Amount', 'Invoiced'], work.labour.map((l) => `

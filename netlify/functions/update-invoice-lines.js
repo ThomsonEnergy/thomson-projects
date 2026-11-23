@@ -19,6 +19,7 @@ const { requirePricingRole } = require('./_shared/require-pricing-role');
 const { priceInvoiceItems, commercialAgreementRow, r2 } = require('./_shared/invoice-items');
 const { rateCardFor } = require('./_shared/rate-cards');
 const { moneyText } = require('./_shared/invoice-events');
+const { forceServicePrices } = require('./_shared/service-jobs');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bad = (error) => ({ statusCode: 400, body: JSON.stringify({ ok: false, error }) });
@@ -72,6 +73,8 @@ exports.handler = async (event) => {
     if (droppedWithCredit) return bad(`${centreById[droppedWithCredit.cost_centre_id]?.name || 'A stage'} carries an STC credit on this invoice: keep at least one line on it.`);
 
     // priced exactly as on create
+    // A price list job (item 109): its sheet's lines stay at the price list price, whatever was sent.
+    await forceServicePrices(supabaseAdmin, projectId, claims);
     const rateCard = await rateCardFor(supabaseAdmin, projectId);
     let agreementTotal = 0;
     const pricedClaims = await Promise.all(wanted.map(async (c) => {
