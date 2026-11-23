@@ -54,7 +54,14 @@ const money = (n) => `$${Number(n || 0).toLocaleString('en-AU', { maximumFractio
 
 async function clientForToken(admin, token) {
   if (!TOKEN.test(String(token || ''))) return null;
-  const { data } = await admin.from('clients').select('id, name, email, phone, address, lead_reward_kind, portal_off_at').eq('referral_token', token).maybeSingle();
+  const cols = 'id, name, email, phone, address, lead_reward_kind, portal_off_at';
+  let { data } = await admin.from('clients').select(cols).eq('referral_token', token).maybeSingle();
+  if (!data) {
+    // a client merged into another (item 110): their old link sends work under the client they are now
+    const { data: merged } = await admin.from('client_merges').select('from_client_id').eq('from_referral_token', token).maybeSingle();
+    const { data: nowId } = merged ? await admin.rpc('client_now', { p_client_id: merged.from_client_id }) : { data: null };
+    if (nowId) ({ data } = await admin.from('clients').select(cols).eq('id', nowId).maybeSingle());
+  }
   return data && !data.portal_off_at ? data : null;
 }
 

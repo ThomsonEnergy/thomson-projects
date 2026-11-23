@@ -1,0 +1,21 @@
+{
+  "note": "Made-up pairs in the shapes the live client list holds. want is the verdict a careful office manager would give; keep is which record (A or B) when it matters.",
+  "cases": [
+    { "id": "same business, one short name, same email", "why": "same email, one name inside the other",
+      "a": { "name": "Bluewater Roofing", "client_type": "individual", "email": "jobs@bluewater.test", "phone": "0400 000 111", "facts": { "jobs": 0, "quotes": 1, "invoices": 0, "sites": 0, "contacts": 0, "lastUsed": "2026-03-02" } },
+      "b": { "name": "Bluewater Roofing Pty Ltd", "client_type": "company", "email": "jobs@bluewater.test", "abn": "11222333444", "facts": { "jobs": 6, "quotes": 2, "invoices": 5, "sites": 4, "contacts": 2, "lastUsed": "2026-11-10" } },
+      "want": "same", "keep": "B" },
+    { "id": "builder's email on a homeowner", "why": "same email",
+      "a": { "name": "Ridgeline Builders", "client_type": "company", "email": "office@ridgeline.test", "abn": "55666777888", "facts": { "jobs": 12, "quotes": 3, "invoices": 11, "sites": 9, "contacts": 3, "lastUsed": "2026-11-01" } },
+      "b": { "name": "Margaret Olsen", "client_type": "individual", "email": "office@ridgeline.test", "address": "4 Fig Tree Lane", "facts": { "jobs": 1, "quotes": 0, "invoices": 1, "sites": 1, "contacts": 0, "lastUsed": "2026-06-14" } },
+      "want": "apart" },
+    { "id": "two businesses, different ABNs, same name", "why": "same name",
+      "a": { "name": "Coastal Electrical", "client_type": "company", "abn": "12345678901", "email": "a@coastal-one.test", "facts": { "jobs": 2, "quotes": 0, "invoices": 2, "sites": 1, "contacts": 0, "lastUsed": "2026-05-01" } },
+      "b": { "name": "Coastal Electrical", "client_type": "company", "abn": "98765432109", "email": "b@coastal-two.test", "facts": { "jobs": 3, "quotes": 1, "invoices": 3, "sites": 2, "contacts": 1, "lastUsed": "2026-09-01" } },
+      "want": "apart" },
+    { "id": "same person typed twice", "why": "same phone, same name",
+      "a": { "name": "Daniel Ferro", "client_type": "individual", "phone": "0411 222 333", "facts": { "jobs": 1, "quotes": 0, "invoices": 1, "sites": 1, "contacts": 0, "lastUsed": "2026-02-10" } },
+      "b": { "name": "Daniel Ferro", "client_type": "individual", "phone": "0411222333", "email": "dan@ferro.test", "facts": { "jobs": 0, "quotes": 1, "invoices": 0, "sites": 0, "contacts": 0, "lastUsed": "2026-10-20" } },
+      "want": "same", "keep": "A" }
+  ]
+}
