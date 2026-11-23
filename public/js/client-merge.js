@@ -64,8 +64,8 @@ function openClientMergePanel(keep, { getClients, reload, oldId = null }) {
     const { data: p, error } = await supabaseClient.rpc('client_merge_preview', { p_into: keep.id, p_from: fromId });
     if (error) { previewEl.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`; return; }
     const c = p.old.counts;
-    const moves = [['jobs', 'jobs'], ['quotes', 'quotes'], ['invoices', 'invoices'], ['sites', 'sites'], ['contacts', 'contacts'], ['equipment', 'equipment'], ['emails', 'email threads'], ['leads_referred', 'leads referred'], ['lead_rewards', 'lead rewards']]
-      .filter(([k]) => Number(c[k]) > 0).map(([k, label]) => `${c[k]} ${label}`);
+    const moves = [['jobs', 'job', 'jobs'], ['quotes', 'quote', 'quotes'], ['invoices', 'invoice', 'invoices'], ['sites', 'site', 'sites'], ['contacts', 'contact', 'contacts'], ['equipment', 'piece of equipment', 'pieces of equipment'], ['emails', 'email thread', 'email threads'], ['leads_referred', 'lead referred', 'leads referred'], ['lead_rewards', 'lead reward', 'lead rewards']]
+      .filter(([k]) => Number(c[k]) > 0).map(([k, one, many]) => `${c[k]} ${Number(c[k]) === 1 ? one : many}`);
     const differs = [['Payment terms', 'payment_terms'], ['Rate card', 'rate_card'], ['Commercial agreement', 'agreement'], ['Lead reward', 'lead_reward_kind'], ['ABN', 'abn'], ['Type', 'client_type']]
       .filter(([, k]) => String(p.keep[k] ?? '') !== String(p.old[k] ?? '') && (p.old[k] || p.keep[k]));
     const show = (v) => (v === true ? 'Yes' : v === false || v == null || v === '' ? 'none' : String(v).replace('_', ' '));
@@ -112,7 +112,7 @@ async function openAbnReview({ reload, refresh }) {
   const body = overlay.querySelector('#ar-body');
   let rows;
   try { ({ rows } = await clientCleanupApi('client-cleanup', { action: 'abns' })); } catch (err) { body.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`; return; }
-  const option = (r) => `${r.name} - ABN ${r.abn}${r.status ? ` (${r.status})` : ''}${r.entityName ? `: ${r.entityType || 'Entity'} ${r.entityName}${r.gstRegistered ? ', GST' : ', no GST'}` : ''}${r.postcode ? `, ${[r.state, r.postcode].filter(Boolean).join(' ')}` : ''}`;
+  const option = (r) => `ABN ${r.abn}${r.status ? ` (${r.status})` : ''}: ${r.name}${r.entityName && r.entityName !== r.name ? `, ${r.entityName}` : ''}`;
   const draw = () => {
     body.innerHTML = `
       <p class="subtitle" style="margin-top:0;">From the ABN register, for business clients with no ABN. Green is one active ABN whose name matches exactly: it is ticked, but nothing is saved until you press Apply selected.</p>
@@ -123,6 +123,7 @@ async function openAbnReview({ reload, refresh }) {
           <div style="flex:1; min-width:0;">
             <strong>${escapeHtml(row.name)}</strong> ${row.exact ? '<span class="badge accepted" style="font-size:10px;">Exact match</span>' : '<span class="badge draft" style="font-size:10px;">Check this one</span>'}
             <select class="ar-pick" style="margin-top:4px;">${row.results.map((r, ri) => `<option value="${ri}" ${ri === (row.chosen || 0) ? 'selected' : ''}>${escapeHtml(option(r))}</option>`).join('')}</select>
+            ${chosen.entityName ? `<div style="font-size:12px;">${escapeHtml(chosen.entityType || 'Entity')}: ${escapeHtml(chosen.entityName)} · ${chosen.gstRegistered ? 'GST registered' : 'Not registered for GST'}${chosen.postcode ? ` · ${escapeHtml([chosen.state, chosen.postcode].filter(Boolean).join(' '))}` : ''}</div>` : ''}
             ${chosen.becomesCompany ? `<div class="subtitle" style="font-size:12px;">${row.typeHeld ? 'Stays Individual for now: it has an unpaid invoice with an STC credit, and changing the type would change that invoice. Change it by hand once the invoice is paid.' : 'Labelled Individual: will change to Company with this ABN.'}</div>` : ''}
           </div>
           <button type="button" class="secondary ar-none" style="font-size:12px; padding:4px 8px;">None of these</button>
