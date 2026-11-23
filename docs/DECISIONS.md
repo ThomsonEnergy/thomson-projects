@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 23 Nov 2026
+
+- Found 23 Nov 2026 (owner: "Tried to push timesheets and this happened"): **the 13 to 19 Nov timesheet push skipped Sean Carney, Guy Snowden and Dempsey Van Egdom.** Xero said "Earnings Rate 142f851f... does not exist or is not valid for timesheets". That ID is the LAHA pay item in Settings > Xero Mapping, and this is the first week LAHA nights were ever sent (3 nights each on J7021, 17 to 19 Nov; no job was LAHA approved before the 18 Nov fix). Everyone without LAHA nights went through. Most likely cause (not confirmed, cloud sessions cannot read Xero): the LAHA pay item in Xero is a Fixed Amount item, and Xero only takes Rate per Unit items on a timesheet. Owner step: make the LAHA item Rate per Unit (per night) in Xero, pick it in Xero Mapping, push again. Planned, waiting on yes: a small fix so the push names the pay item in plain words and Look up IDs shows which items can go on a timesheet (`netlify/functions/push-timesheets-to-xero.js`, `netlify/functions/lookup-xero-ids.js`, `public/settings.html`). Nothing built.
+
 ## 22 Nov 2026
 
 - Owner, 22 Nov 2026, on items 106 and 107: "Ignore all from TES only TEA". Anything addressed to Thomson Energy Solutions is left out of the Greentech catch-up and refused by the Formbay advice import. Also for 106: the statements are a floor (owner expected about $500k of STC payments), so a Greentech payment history, the remittance emails and Formbay's job list come first; the accountant's report is the first delivery. Detail in `docs/IDEAS_BACKLOG.md` items 106 and 107.
