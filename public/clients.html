@@ -196,9 +196,10 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=148"></script>
+  <script src="/js/supabase-client.js?v=149"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=4"></script>
+  <script src="/js/abn-search.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let allClients = [];
@@ -361,7 +362,7 @@
         if (!overlay.isConnected) return;
         const c = targets[i];
         progressEl.innerHTML = `<p class="subtitle">Searching ${i + 1} of ${targets.length}: ${escapeHtml(c.name)}...</p>`;
-        const results = await searchAbnByName(c.name);
+        const results = await searchAbnByName(c.name, { details: false });
         const confidentMatch = results.find(r => normalizeBizName(r.name) === normalizeBizName(c.name));
         rows.push({ client: c, results, confident: !!confidentMatch, chosenIndex: results.indexOf(confidentMatch || results[0]) });
       }
