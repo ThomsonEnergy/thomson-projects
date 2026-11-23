@@ -1,4 +1,4 @@
-// GET /.netlify/functions/abn-lookup?name=...[&details=0]   OR   ?abn=...
+// GET /.netlify/functions/abn-lookup?name=...   OR   ?abn=...
 // Any active logged-in user. Proxies the free ABN Lookup web service
 // (abr.business.gov.au) so the registered GUID stays server-side.
 //
@@ -7,8 +7,7 @@
 // a single ABN and returns the registered entity name behind it - used
 // to confirm an SMSF ABN someone already knows is actually correct.
 // A name search also says who is behind each of the first five ABNs (the legal entity, its type,
-// GST, active since), so two businesses with the same business name can be told apart;
-// &details=0 leaves that out (a bulk run that only needs the names).
+// GST, active since), so two businesses with the same business name can be told apart.
 //
 // The calls themselves live in _shared/abr.js, shared with the supplier bill reader.
 
@@ -26,7 +25,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { name, abn, details } = event.queryStringParameters || {};
+    const { name, abn } = event.queryStringParameters || {};
 
     if (abn) {
       const d = await abnDetails(abn);
@@ -35,7 +34,7 @@ exports.handler = async (event) => {
     }
 
     if (name && name.trim().length >= 3) {
-      const { results, message } = await searchNames(name, 10, { details: details === '0' ? 0 : 5 });
+      const { results, message } = await searchNames(name, 10, { details: 5 });
       return { statusCode: 200, body: JSON.stringify({ ok: true, results, message: results.length ? null : (message || 'No matches.') }) };
     }
 
