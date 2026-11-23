@@ -7051,7 +7051,7 @@ const loadStockKinds = () => loadJsOnce('/js/stock-kinds.js?v=1', () => typeof s
 const loadStockPanels = () => loadJsOnce('/js/stock-panels.js?v=1', () => typeof openStocktakePanel === 'function');
 // The invoice panel and its helpers (item 61): the Invoices page, the job's Invoices tab and the Invoice
 // actual costs panel. The three files do not depend on each other at load, so they come down together.
-const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=10', () => typeof openInvoiceActualCostsPanel === 'function');
+const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=11', () => typeof openInvoiceActualCostsPanel === 'function');
 // The Stock / prebuild picker (js/stock-picker.js): variations on the job page and items added to an invoice.
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([

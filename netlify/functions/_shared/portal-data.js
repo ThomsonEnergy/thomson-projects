@@ -41,7 +41,7 @@ const thumbUrl = (url) => renderedImageUrl(url, { width: 480, height: 480 });
 const staffFirst = (fullName) => (fullName ? firstName(fullName) : '');
 const TIME = new Intl.DateTimeFormat('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Australia/Sydney' });
 const timeText = (iso) => TIME.format(new Date(iso)).replace(/\s/g, '').toLowerCase();
-const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at, client_due_date, client_due_note, client_suggested_dates, portal_requested_at';
+const PROJECT_COLS = 'id, name, client_id, client_address, status, pipeline_stage, proposal_template, quote_number, job_number, sent_at, quote_token, expired, declined_at, approved_at, completed_at, valid_until, source_quote_id, quote_pdf_path, created_at, client_due_date, client_due_note, client_suggested_dates, portal_requested_at, service_state';
 const OPEN_STAGES_DONE = new Set(['complete', 'archived']);
 const INVOICE_LABELS = { paid: 'Paid', overdue: 'Overdue', awaiting: 'Awaiting payment' };
 // open rows first, newest number first
@@ -377,6 +377,20 @@ async function portalWork(admin, p) {
   const materials = priced.materials.map(({ line: m, amount }) => (
     { description: m.description, from: m.from, quantity: m.quantity, unitPrice: m.unitPrice, amount, invoiced: m.invoiced, invoiceNumber: m.invoiceNumber, when: m.createdAt ? fmtDay(localDateKey(m.createdAt)) : '' }
   ));
+  // A price list job (item 109): the sheet's lines at the price list price, shown once the panels are off
+  // (the disconnect sheet is finished). The two cost centres' halves of a line are one line here.
+  const sheetDone = !!(p.service_state && p.service_state.disconnect && p.service_state.disconnect.finished_at);
+  const byItem = new Map();
+  (sheetDone ? priced.service : []).forEach(({ line: s, amount }) => {
+    const row = byItem.get(s.prebuildId) || { description: s.name, from: 'Price list', quantity: s.fullQuantity, unitPrice: 0, amount: 0, invoiced: true, invoiceNumber: null, when: '' };
+    row.unitPrice = r2(row.unitPrice + s.unitPrice);
+    row.amount = r2(row.amount + r2(s.fullQuantity * s.unitPrice));
+    row.invoiced = row.invoiced && s.invoiced;
+    row.invoiceNumber = row.invoiceNumber || s.invoiceNumber;
+    byItem.set(s.prebuildId, row);
+  });
+  materials.push(...byItem.values());
+  const priceListOpen = sheetDone ? priced.serviceOpen : 0;
   const markupOf = (centreId) => (d.centres.find((c) => c.costCentreId === centreId) || d.centres[0]).markupPercent;
   const purchaseOrders = (pos || []).map((po) => {
     const m = 1 + markupOf(po.cost_centre_id) / 100;
@@ -391,7 +405,8 @@ async function portalWork(admin, p) {
   });
   return {
     labour, materials, purchaseOrders,
-    labourOpen: priced.labourOpen, materialsOpen: priced.materialsOpen, notInvoiced: priced.notInvoiced,
+    labourOpen: priced.labourOpen, materialsOpen: priced.materialsOpen, priceListOpen,
+    notInvoiced: r2(priced.labourOpen + priced.materialsOpen + priceListOpen),
     rules: WORK_RULES,
     agreement: d.rateCard.percentOff > 0 ? { name: d.rateCard.name, percentOff: d.rateCard.percentOff } : null,
   };

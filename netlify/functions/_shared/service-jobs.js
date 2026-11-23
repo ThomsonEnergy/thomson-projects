@@ -13,6 +13,7 @@
 //   serviceActuals(admin, projectId, centres, invItems)             per cost centre, for the invoice panel
 //   forceServicePrices(admin, projectId, claims)                    an invoice never carries another price
 //   bookingByToken / saveBooking                                    the roofer's answers
+//   priceListByToken(admin, token)                                  the price list page
 //   priceEmailDraft / sendPriceEmail / sendQuestionsEmail
 // Writes projects (service_* columns), cost_centres, job_service_lines, job_sheet_answers, job_tasks,
 // job_contacts, project_photos, clients, activity_log, notifications.
@@ -387,6 +388,21 @@ async function saveBooking(admin, projectId, input, who) {
   return { ok: true };
 }
 
+// The price list page: the shown items at their prices, for whoever holds the link's token.
+async function priceListByToken(admin, token) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(token || ''))) return null;
+  const s = must(await admin.from('company_settings').select('service_prices_token, company_name, abn, phone, website, logo_url').eq('id', 1).maybeSingle());
+  if (!s || s.service_prices_token !== token) return null;
+  const rows = must(await admin.from('service_price_items').select('unit_price, unit_label, min_quantity, sort_order, prebuilds(name, client_description, subcategory)').eq('shown', true).order('sort_order'));
+  return {
+    company: { name: s.company_name || 'Thomson Energy', abn: s.abn || '', phone: s.phone || '', website: s.website || '', logo: s.logo_url || '' },
+    items: (rows || []).map((r) => ({
+      name: (r.prebuilds && r.prebuilds.name) || '', description: (r.prebuilds && r.prebuilds.client_description) || '', group: (r.prebuilds && r.prebuilds.subcategory) || '',
+      unitPrice: r2(r.unit_price), unitLabel: r.unit_label, minQuantity: Number(r.min_quantity) || null,
+    })),
+  };
+}
+
 // ---------------------------------------------------------------- emails
 
 async function sendQuestionsEmail(admin, projectId, userId) {
@@ -488,5 +504,5 @@ module.exports = {
   GROUP, DISCONNECT, RECONNECT, UPGRADE_NOTE, Refused,
   pricedLines, serviceCentres, serviceActuals, forceServicePrices,
   setupServiceJob, sheetData, saveSheet, saveAnswer,
-  bookingByToken, saveBooking, sendQuestionsEmail, priceEmailDraft, sendPriceEmail, bookingUrl,
+  bookingByToken, saveBooking, priceListByToken, sendQuestionsEmail, priceEmailDraft, sendPriceEmail, bookingUrl,
 };

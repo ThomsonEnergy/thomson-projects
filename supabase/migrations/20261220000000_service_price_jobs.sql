@@ -14,9 +14,9 @@
 --    roofer's answers), service_booking_token (their link to the questions), service_state (which
 --    sheets are finished, whether the price was sent).
 --  * cost_centres.bill_group: cost centres with the same group print as one block on the bill.
---  * company_settings: the booking questions, the price list link's token, and whether the price
---    email goes by itself (off: the office checks it first).
---  * get_service_prices(token): the price list page (no login, the link's token is the check).
+--  * company_settings: the booking questions, the price list link's token (the price list page reads
+--    through a server function that checks it), and whether the price email goes by itself (off: the
+--    office checks it first).
 --  * get_invoice_by_token_v3: each claim also carries its bill_group. Otherwise unchanged from
 --    20261217000000.
 --  * Seeded so it works on day one: the four solar prebuilds with the agreed prices, and the sheet's
@@ -135,31 +135,6 @@ begin
   end if;
   execute 'alter table public.inspection_checklist_templates add constraint inspection_checklist_templates_checklist_type_check check (checklist_type in (''site_inspection'', ''quote_compliance'', ''job_sheet''))';
 end $$;
-
--- ---------------------------------------------------------------- the price list page
-create or replace function public.get_service_prices(p_token uuid)
-returns jsonb
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select case when cs.service_prices_token = p_token then jsonb_build_object(
-    'company', jsonb_build_object('company_name', cs.company_name, 'abn', cs.abn, 'address', cs.address, 'phone', cs.phone,
-      'website', cs.website, 'licenses', cs.licenses, 'logo_url', cs.logo_url),
-    'items', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'name', p.name, 'description', p.client_description, 'subcategory', p.subcategory,
-        'unit_price', s.unit_price, 'unit_label', s.unit_label, 'min_quantity', s.min_quantity
-      ) order by s.sort_order, p.name)
-      from service_price_items s join prebuilds p on p.id = s.prebuild_id
-      where s.shown
-    ), '[]'::jsonb)
-  ) end
-  from company_settings cs where cs.id = 1;
-$$;
-revoke execute on function public.get_service_prices(uuid) from public;
-grant execute on function public.get_service_prices(uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------- seeds (only when there are none)
 do $$

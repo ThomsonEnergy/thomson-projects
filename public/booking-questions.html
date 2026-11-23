@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="robots" content="noindex, nofollow" />
+<script>document.documentElement.setAttribute('data-theme', 'navy');</script>
+<title>Booking questions - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<link rel="stylesheet" href="/css/client-page.css?v=1" />
+<style>
+  body { padding-top: 0; }
+  .bq-head { display:flex; align-items:center; gap:14px; padding:14px 16px; border-bottom:1px solid var(--border); }
+  .bq-head img { height:34px; }
+  .wrap { max-width: 560px; }
+  .bq-q { display:block; margin:12px 0 4px; font-size:14px; }
+  .bq-f { width:100%; font-size:16px; }
+</style>
+</head>
+<body class="client-page">
+  <!-- The booking questions on a disconnect and reconnect job (backlog item 109), opened from the link
+       we email the roofer. No login: the token in the link is the check (service-booking.js). -->
+  <div class="bq-head"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></div>
+  <div class="wrap"><div id="bq-root"><p class="subtitle">Loading...</p></div></div>
+  <script>
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const root = document.getElementById('bq-root');
+    const token = new URLSearchParams(location.search).get('token') || '';
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+
+    function field(q, value) {
+      const at = `data-q="${esc(q.key)}" class="bq-f"`;
+      const v = value == null ? '' : value;
+      if (q.type === 'choice') return `<select ${at}><option value=""></option>${(q.options || []).map((o) => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      if (q.type === 'longtext') return `<textarea ${at} rows="3" maxlength="2000">${esc(v)}</textarea>`;
+      const type = q.type === 'number' ? 'number' : q.type === 'date' ? 'date' : 'text';
+      return `<input ${at} type="${type}" value="${esc(v)}" ${q.type === 'number' ? 'min="0" inputmode="numeric"' : ''} ${q.type === 'date' ? `min="${today}"` : ''} />`;
+    }
+
+    function show(d, saved) {
+      root.innerHTML = `
+        <h1 style="margin-bottom:4px;">Booking questions</h1>
+        <p class="subtitle">${esc(d.ref)}: ${esc(d.address || d.name || '')}</p>
+        ${saved ? '<div class="success-box">Thanks, we have your answers. You can change them here until the day the panels come off.</div>' : ''}
+        ${d.closed ? '<div class="success-box">The panels are already off, so these answers can no longer change. Call us if something is different.</div>' : ''}
+        ${d.questions.map((q) => `<label class="bq-q">${esc(q.label)}</label>${field(q, d.answers[q.key])}`).join('')}
+        <div id="bq-msg"></div>
+        ${d.closed ? '' : '<button type="button" id="bq-send" style="margin-top:14px; width:100%;">Send answers</button>'}
+        <p class="subtitle" style="margin-top:14px;">${esc(d.company.name)}${d.company.phone ? `, ${esc(d.company.phone)}` : ''}</p>`;
+      if (d.closed) root.querySelectorAll('[data-q]').forEach((el) => { el.disabled = true; });
+      const btn = document.getElementById('bq-send');
+      if (btn) btn.addEventListener('click', async () => {
+        const msg = document.getElementById('bq-msg');
+        const answers = Object.fromEntries([...root.querySelectorAll('[data-q]')].map((el) => [el.dataset.q, el.value]));
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        try {
+          const res = await fetch('/.netlify/functions/service-booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, answers }) });
+          const out = await res.json();
+          if (!res.ok || !out.ok) throw new Error(out.error || 'Not saved. Please try again.');
+          await load(true);
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send answers';
+        }
+      });
+    }
+
+    async function load(saved) {
+      try {
+        const res = await fetch(`/.netlify/functions/service-booking?token=${encodeURIComponent(token)}`);
+        const d = await res.json();
+        if (!res.ok || !d.ok) throw new Error(d.error || 'This link is not valid.');
+        show(d, saved);
+      } catch (err) {
+        root.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+      }
+    }
+    load(false);
+  </script>
+</body>
+</html>

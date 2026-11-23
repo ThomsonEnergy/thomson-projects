@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('te-theme') || (matchMedia('(pointer: coarse)').matches ? 'dark' : 'navy'));</script>
+<title>Job sheet - Thomson Energy</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#12161c" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="/css/style.css?v=25" />
+<script src="/js/vendor/supabase-2.js?v=1"></script>
+<style>
+  .js-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--border); }
+  .js-row:first-of-type { border-top:none; }
+  .js-qty { display:flex; align-items:center; gap:6px; }
+  .js-qty button { width:44px; height:44px; font-size:20px; padding:0; }
+  .js-qty input { width:72px; height:44px; text-align:center; font-size:18px; }
+  .js-photo { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border); }
+  .js-photo:first-of-type { border-top:none; }
+  .js-photo img { width:56px; height:56px; object-fit:cover; border-radius:6px; cursor:pointer; }
+  .js-photo .lbl { flex:1; min-width:0; }
+  .js-needed { font-size:11px; padding:2px 8px; border-radius:10px; background:#d08a00; color:#fff; white-space:nowrap; }
+  .js-photo.done .js-needed { background:var(--green); }
+  .js-yn button { min-width:88px; height:44px; }
+  .js-yn button.selected { background:var(--accent); color:#fff; border-color:var(--accent); }
+</style>
+</head>
+<body>
+  <!-- The crew's sheet on a disconnect and reconnect job (backlog item 109): what came off or went
+       back on, the photos, and whether the old system is worth replacing. Quantities only: prices
+       never come to this page. Reads and writes through service-job.js. -->
+  <div class="topbar">
+    <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="document.getElementById('mobile-menu-dropdown').classList.toggle('open')">&#9776;</button>
+    <div class="mobile-menu-dropdown" id="mobile-menu-dropdown"></div>
+    <nav class="topbar-tabs" id="topbar-tabs"></nav>
+    <div class="topbar-right">
+      <a href="/settings.html" class="topbar-icon-link" title="Settings">&#9881;</a>
+      <a href="#" id="logout-link" class="topbar-icon-link" title="Log out">&#9099;</a>
+      <a href="/home.html" class="topbar-logo"><img src="/icons/logo-wordmark-full.png" alt="Thomson Energy" /></a>
+    </div>
+  </div>
+
+  <div class="wrap fill" id="content"><p class="subtitle">Loading...</p></div>
+
+  <script src="/js/supabase-client.js?v=147"></script>
+  <script src="/js/theme.js?v=2"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('project');
+    let kind = params.get('kind') === 'reconnect' ? 'reconnect' : params.get('kind') === 'disconnect' ? 'disconnect' : null;
+    let sheet = null;
+    let worthReplacing = null;
+    const busy = {}; // item id -> 'uploading' or an error message
+
+    async function api(action, body) {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/.netlify/functions/service-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action, projectId, ...body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'That did not work. Try again.');
+      return data;
+    }
+
+    const quantities = () => Object.fromEntries([...document.querySelectorAll('.js-qty input')].map((el) => [el.dataset.id, Math.max(0, parseFloat(el.value) || 0)]));
+
+    function render() {
+      const done = (sheet.state[kind] || {}).finished_at;
+      const groups = [...new Set(sheet.items.map((i) => i.group || ''))];
+      const missing = sheet.checklist.filter((c) => c.needed && !(c.type === 'photo' ? c.photo : c.answer !== null && c.answer !== undefined));
+      const other = kind === 'disconnect' ? 'reconnect' : 'disconnect';
+      document.getElementById('content').innerHTML = `
+        <div class="page-head">
+          <div>
+            <a class="link-quiet" href="/project.html?id=${escapeHtml(projectId)}" style="font-size:13px;">&larr; ${escapeHtml(sheet.project.ref)}</a>
+            <h1 style="margin:2px 0 0;">${kind === 'disconnect' ? 'Disconnect' : 'Reconnect'} sheet ${done ? '<span class="badge accepted">Finished</span>' : ''}</h1>
+            <p class="subtitle" style="margin:2px 0 0;">${escapeHtml(sheet.project.clientName || '')}${sheet.project.address ? ` - ${escapeHtml(sheet.project.address)}` : ''}</p>
+          </div>
+          <a class="btn secondary" href="/job-sheet.html?project=${escapeHtml(projectId)}&kind=${other}">${other === 'disconnect' ? 'Disconnect' : 'Reconnect'} sheet</a>
+        </div>
+        <div class="page-cols">
+          <div class="page-col">
+            <div class="card">
+              <h2 style="margin-top:0;">${kind === 'disconnect' ? 'What came off' : 'What went back on'}</h2>
+              ${sheet.items.length ? '' : '<p class="subtitle">Nothing is on the price list yet. Tell the office.</p>'}
+              ${groups.map((g) => `
+                ${g ? `<p class="subtitle" style="margin:10px 0 0; font-weight:600;">${escapeHtml(g)}</p>` : ''}
+                ${sheet.items.filter((i) => (i.group || '') === g).map((i) => `
+                  <div class="js-row">
+                    <div><strong>${escapeHtml(i.name)}</strong><br><span class="subtitle">per ${escapeHtml(i.unitLabel)}${i.fromBooking ? ', from the booking' : ''}</span></div>
+                    <div class="js-qty"><button type="button" class="secondary" data-step="-1">&minus;</button><input type="number" min="0" step="1" inputmode="numeric" data-id="${escapeHtml(i.prebuildId)}" value="${Number(i.quantity) || 0}" /><button type="button" class="secondary" data-step="1">+</button></div>
+                  </div>`).join('')}`).join('')}
+            </div>
+            ${sheet.booking.length ? `<div class="card"><h2 style="margin-top:0;">From the booking</h2>${sheet.booking.map((b) => `<div style="font-size:14px; padding:3px 0;"><span class="subtitle">${escapeHtml(b.label)}</span> ${escapeHtml(b.value)}</div>`).join('')}</div>` : ''}
+          </div>
+          <div class="page-col">
+            ${kind === 'disconnect' ? `
+            <div class="card">
+              <h2 style="margin-top:0;">Photos</h2>
+              ${sheet.checklist.map((c) => `
+                <div class="js-photo ${c.photo || (c.answer !== null && c.answer !== undefined) ? 'done' : ''}" data-item="${escapeHtml(c.id)}">
+                  ${c.photo ? `<img src="${escapeHtml(c.photo)}" alt="" />` : ''}
+                  <div class="lbl"><strong>${escapeHtml(c.label)}</strong> ${c.needed ? `<span class="js-needed">${c.photo ? 'Done' : 'Needed'}</span>` : ''}
+                    ${c.description ? `<br><span class="subtitle">${escapeHtml(c.description)}</span>` : ''}
+                    ${busy[c.id] && busy[c.id] !== 'uploading' ? `<div class="error-box">${escapeHtml(busy[c.id])}</div>` : ''}</div>
+                  ${c.type === 'photo'
+                    ? `<label class="btn ${c.photo ? 'secondary' : ''} ${busy[c.id] === 'uploading' ? 'is-loading' : ''}">&#128247;<input type="file" accept="image/*" capture="environment" style="display:none;" ${busy[c.id] === 'uploading' ? 'disabled' : ''} /></label>`
+                    : `<span class="js-yn"><button type="button" class="secondary ${c.answer === true ? 'selected' : ''}" data-yn="1">Yes</button> <button type="button" class="secondary ${c.answer === false ? 'selected' : ''}" data-yn="0">No</button></span>`}
+                </div>`).join('')}
+            </div>
+            <div class="card">
+              <h2 style="margin-top:0;">Is this system worth replacing?</h2>
+              <p class="subtitle" style="margin-top:0;">Old, damaged or undersized. Yes makes a quote for a new system for the office to send.</p>
+              <span class="js-yn"><button type="button" class="secondary ${worthReplacing === true ? 'selected' : ''}" data-worth="1">Yes</button> <button type="button" class="secondary ${worthReplacing === false ? 'selected' : ''}" data-worth="0">No</button></span>
+            </div>` : ''}
+            <div class="card">
+              ${kind === 'disconnect' && missing.length ? `<div class="error-box" style="margin-bottom:10px;">Needed photos not taken yet: ${missing.map((c) => escapeHtml(c.label)).join(', ')}. You can still finish; the office will see which are missing.</div>` : ''}
+              <div id="js-msg"></div>
+              <button type="button" id="js-finish" style="width:100%; height:48px;">${done ? 'Save changes' : 'Finish sheet'}</button>
+              <button type="button" class="secondary" id="js-save" style="width:100%; height:44px; margin-top:8px;">Save and come back later</button>
+            </div>
+          </div>
+        </div>`;
+      wire();
+    }
+
+    function wire() {
+      document.querySelectorAll('.js-qty').forEach((box) => {
+        const input = box.querySelector('input');
+        box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+          input.value = Math.max(0, (parseFloat(input.value) || 0) + Number(b.dataset.step));
+          sheet.items.find((i) => i.prebuildId === input.dataset.id).quantity = Number(input.value);
+        }));
+        input.addEventListener('input', () => { sheet.items.find((i) => i.prebuildId === input.dataset.id).quantity = Math.max(0, parseFloat(input.value) || 0); });
+      });
+      document.querySelectorAll('.js-photo').forEach((row) => {
+        const item = sheet.checklist.find((c) => c.id === row.dataset.item);
+        const img = row.querySelector('img');
+        if (img) img.addEventListener('click', () => openPhotoLightbox([img.src], 0));
+        const file = row.querySelector('input[type=file]');
+        if (file) file.addEventListener('change', async () => {
+          if (!file.files.length) return;
+          busy[item.id] = 'uploading';
+          render();
+          try {
+            const [url] = await uploadPhotos(file.files, `${projectId}/sheet`, 'site-photos');
+            await api('save-answer', { itemId: item.id, photoPath: url });
+            item.photo = url;
+            delete busy[item.id];
+          } catch (err) { busy[item.id] = 'Photo not saved. ' + friendlyError(err); }
+          render();
+        });
+        row.querySelectorAll('[data-yn]').forEach((b) => b.addEventListener('click', async () => {
+          const value = b.dataset.yn === '1';
+          try { await api('save-answer', { itemId: item.id, answerYesNo: value }); item.answer = value; delete busy[item.id]; }
+          catch (err) { busy[item.id] = 'Not saved. ' + friendlyError(err); }
+          render();
+        }));
+      });
+      document.querySelectorAll('[data-worth]').forEach((b) => b.addEventListener('click', () => { worthReplacing = b.dataset.worth === '1'; render(); }));
+      const save = async (finish, btn) => {
+        const msg = document.getElementById('js-msg');
+        btn.disabled = true;
+        try {
+          const out = await api('save-sheet', { kind, quantities: quantities(), worthReplacing: worthReplacing === true, finish });
+          if (finish) {
+            showToast(`${kind === 'disconnect' ? 'Disconnect' : 'Reconnect'} sheet finished${out.upgrade ? '. A quote for a new system was started for the office.' : ''}`);
+            window.location.href = '/my-day.html';
+          } else {
+            msg.innerHTML = '<div class="success-box">Saved. Finish the sheet before you leave site.</div>';
+            btn.disabled = false;
+          }
+        } catch (err) {
+          msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+          btn.disabled = false;
+        }
+      };
+      document.getElementById('js-finish').addEventListener('click', (e) => save(true, e.target));
+      document.getElementById('js-save').addEventListener('click', (e) => save(false, e.target));
+    }
+
+    (async function () {
+      const session = await requireLogin();
+      if (!session) return;
+      syncThemeFromProfile();
+      renderMainNav(null);
+      document.getElementById('logout-link').addEventListener('click', async (e) => {
+        e.preventDefault();
+        await supabaseClient.auth.signOut();
+        window.location.href = '/login.html';
+      });
+      if (!projectId) { document.getElementById('content').innerHTML = '<div class="error-box">No job specified.</div>'; return; }
+      try {
+        sheet = await api('sheet', {});
+        // the disconnect sheet first; once it is finished the link opens the reconnect sheet
+        if (!kind) kind = (sheet.state.disconnect || {}).finished_at ? 'reconnect' : 'disconnect';
+        const was = (sheet.state.disconnect || {}).worth_replacing;
+        worthReplacing = was === undefined ? null : !!was;
+        render();
+      } catch (err) {
+        document.getElementById('content').innerHTML = `<div class="error-box">${escapeHtml(friendlyError(err))}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>
