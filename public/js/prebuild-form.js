@@ -15,6 +15,9 @@ const PREBUILD_SUBCATEGORIES = {
   // PREBUILD_OWN_STAGE_CATEGORIES in supabase-client.js.
   'Access equipment': ['Scissor lift', 'Boom lift / EWP', 'Scaffold', 'Generator / plant'],
   Mobilisation: ['Travel', 'Accommodation', 'Site setup'],
+  // The price list group (item 109): tick which of these are shown, and their prices, on the Prebuilds
+  // page (js/service-prices.js).
+  'Disconnect and reconnect': ['Solar', 'Air conditioning'],
 };
 
 function prebuildFormHtml({ heading = 'Add a prebuild', inPopup = false } = {}) {

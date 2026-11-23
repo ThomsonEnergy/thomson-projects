@@ -4483,7 +4483,10 @@ function openQuickJobPanel(onCreated) {
       <h2>New job - no quote</h2>
       <p class="subtitle" style="margin-bottom:12px;">Creates a job number straight away so you can clock in and log materials.</p>
 
-      <label style="margin-top:0">Job name *</label>
+      <label style="margin-top:0">Kind of work</label>
+      <select id="qj-kind"><option value="">Electrical service work (do and charge)</option><option value="service">Disconnect and reconnect (price list)</option></select>
+
+      <label>Job name *</label>
       <input id="qj-name" placeholder="e.g. 14 Miller St - Switchboard Repair" />
 
       <label>What's this job about</label>
@@ -4529,6 +4532,7 @@ function openQuickJobPanel(onCreated) {
     if (isPricingRole(role)) return;
     overlay.querySelector('#qj-client-search-label').textContent = 'Client';
     overlay.querySelector('#qj-client-search').style.display = 'none';
+    overlay.querySelector('#qj-kind').disabled = true; // the office books price list jobs
   });
 
   let searchTimeout;
@@ -4619,6 +4623,14 @@ function openQuickJobPanel(onCreated) {
         project_id: project.id, name: 'Labour & Materials', sort_order: 0, markup_percent: 45,
       });
       if (ccErr) throw ccErr;
+      // Disconnect and reconnect (item 109): service-job.js sets the job up and emails the client the booking questions.
+      if (overlay.querySelector('#qj-kind').value) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch('/.netlify/functions/service-job', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify({ action: 'setup', projectId: project.id, emailQuestions: true }) });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok || !out.ok) showToast(`${projectRef(project)} was made as do and charge: ${out.error || 'it could not be set up as a disconnect and reconnect'}`, { error: true });
+        else showToast(out.questions === 'sent' ? 'Booking questions emailed to the client' : (out.questions || 'Job set up'), { error: !!out.questions && out.questions !== 'sent' });
+      }
 
       overlay.remove();
       if (onCreated) onCreated(project);

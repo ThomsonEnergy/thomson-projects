@@ -501,8 +501,7 @@ async function createUpgradeQuote(admin, p, userId, data) {
 }
 
 module.exports = {
-  GROUP, DISCONNECT, RECONNECT, UPGRADE_NOTE, Refused,
-  pricedLines, serviceCentres, serviceActuals, forceServicePrices,
+  Refused, serviceActuals, forceServicePrices,
   setupServiceJob, sheetData, saveSheet, saveAnswer,
   bookingByToken, saveBooking, priceListByToken, sendQuestionsEmail, priceEmailDraft, sendPriceEmail, bookingUrl,
 };

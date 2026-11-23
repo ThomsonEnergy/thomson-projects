@@ -113,6 +113,7 @@ alter table public.projects add column if not exists service_state jsonb not nul
 create unique index if not exists projects_service_booking_token on public.projects (service_booking_token) where service_booking_token is not null;
 
 alter table public.cost_centres add column if not exists bill_group text;
+grant select (bill_group) on public.cost_centres to authenticated;
 
 alter table public.company_settings add column if not exists service_prices_token uuid not null default gen_random_uuid();
 alter table public.company_settings add column if not exists service_price_email_auto boolean not null default false;
