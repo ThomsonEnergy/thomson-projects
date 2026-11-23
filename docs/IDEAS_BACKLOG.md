@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 24 Nov 2026 (item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 24 Nov 2026 (item 110, leave ServiceM8 for good, planned and waiting on yes; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -31,6 +31,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 105 | Website prices built like a quote in TEops: each website package is made from Stock items, prebuilds and labour with the STC and battery STC credits worked out, the public website rebuilds itself, and prices move by themselves when an item's cost, the STC price or the battery STC factor changes | Part 1 live; parts 2 and 3 paused in draft PR 560, waiting on the owner's yes to the SQL; picked up by `claude/friendly-fermat-c0wd24` (22 Nov 2026) | N | Owner: build the packages once on the new page; a Netlify build hook on the website project if it cannot be made from a chat. Builds the battery STC factor part of item 58 |
 | 106 | Greentech STC catch-up for Xero: read every MMEM statement and tax invoice for account 248045 from March 2026, work out the bills, the STC payments and the GST credits by BAS quarter, give the accountant a report and Xero a bills file | Planned 21 Nov 2026, waiting on yes | N | Accountant (Adrian) confirms the GST treatment; owner says how the old customer invoices show the STC |
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
+| 110 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, waiting on yes and five answers | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first; calls still made through ServiceM8 (item 7) |
 
 ## Owner to-dos left over from shipped items
 
@@ -1038,3 +1039,39 @@ The plan: Push timesheets sends them to Xero as APPROVED, creates the draft pay 
 To prove first on the Xero Demo Company: that writing a payslip's earnings lines keeps the lines already on it (salary lines from the pay template, and the timesheet hours) and that a second write does not double; that a pay run created after the approved timesheets pulls them in.
 
 Touches: `netlify/functions/push-timesheets-to-xero.js`, one migration (a table of LAHA nights sent, by person, night and payslip), `public/timesheets.html` (the card's wording and result), `public/settings.html` (wording under the LAHA box), `docs/PROJECT_SPEC.md`, `docs/DECISIONS.md`. Overlaps: none on 23 Nov 2026. Kind: feature into `staging`; migration yes; payroll yes (approved timesheets, a pay run and payslip lines written to Xero). Size: medium to large. Test on staging: needs the Xero Demo Company connected to the staging site (Settings > API Keys there, the owner's step). Simpler: nobody approves timesheets in Xero, opens the pay run or adds LAHA by hand; the one step left is checking and posting the pay run.
+
+## 110. Leave ServiceM8 for good (planned 24 Nov 2026, waiting on yes)
+
+Owner, 24 Nov 2026: "I want to stop paying for sm8. We will change all the jobs we don't want to move over to unsuccessful so don't bring them but quotes and jobs come over as quotes and jobs and completed jobs should come over as archived jobs so we can still see all the photos and docs and labour ect that is on them for reporting or going back to later if the customer asked."
+
+**Today (spec A27):** Settings > ServiceM8 Import brings open Work Order jobs and open quotes from the last 6 months, ticked one at a time on a review screen, then copies photos, documents, check-ins (as time already paid) and checklists in a background run. Completed jobs are not brought at all, and older quotes are left behind.
+
+**The plan:**
+
+1. **One run, no ticking.** A "Bring everything across" button on the same screen. The rule is ServiceM8's own status: Unsuccessful and deleted jobs stay behind; Quote comes as a quote (every one, the 6 month limit goes); Work Order comes as a job (as now); Completed comes as an Archived job. Already imported jobs are skipped, so it can be run again any time up to the day ServiceM8 is cancelled.
+2. **Completed jobs land Archived under their old number.** TEops J numbers start at 7000 and ServiceM8's are below that, so a Completed ServiceM8 job #4809 becomes J4809 (the Archived stage gives out no new J number, so the importer sets it). Search "4809" finds it. Lettered claim jobs (4515A) fold into the main job as now. Each one carries its line items, notes, client and site, STCs, completed date, photos, documents, ServiceM8 invoice PDFs (Invoices tab, "From ServiceM8") and check-ins as time already paid.
+3. **Archived means finished, nothing fires.** Invoiced in full as an imported claim (Left to invoice $0, nothing can be invoiced twice), no invoice rows, no Xero push, no payroll, no notifications, no review request, no lead reward, no payment reminder, no client email. Each of those is checked in the code before the first run, not assumed. Imported time stays out of Timesheets and KPIs as now but counts in job costs for reporting.
+4. **Clients match themselves.** Same ServiceM8 company id, or the same name with the same email or phone, is the same client; no match makes a new client. Only the unsure ones are listed for one pick each.
+5. **Runs by itself to the end.** The job import and the file copy work through the list in the background and carry on from where they stopped (ServiceM8 limits calls per minute and per day, so a few thousand photos take a night or a weekend). A progress line on the screen: jobs done, files done, files failed with the reason.
+6. **A raw copy of everything.** Every job's full ServiceM8 record (job, lines, notes, payments, contacts, check-ins) is also saved as a file in storage, so a field we did not map is not lost when the account closes.
+7. **A check report before cancelling.** ServiceM8 counts against TEops counts: jobs by status, files per job, hours per job, clients; anything missing listed by number. Completed jobs still owing money in ServiceM8 are listed (their invoices are already in Xero, which is where they get chased after the cancel). ServiceM8 is only cancelled when this report reads zero missing.
+8. **The dry run comes first.** Before anything is written it shows how many jobs of each status, how many files and roughly how big, so the storage cost and the run time are known up front.
+
+**Outside the import, before cancelling (owner steps, listed in the cutover checklist the build writes into `docs/`):** disconnect ServiceM8 from Xero; ServiceM8 Pay deposits still unallocated in Xero (`docs/BUSINESS_FACTS.md`); anything still pointing at ServiceM8 (website or email booking links, recurring jobs, forms); download ServiceM8's own data export as a second copy; cancel on the billing date.
+
+**Open questions for the owner:**
+1. Calls: `docs/EXTERNAL_ACCOUNTS.md` says keep ServiceM8 calling until the 0455 415 464 port finishes (item 7). Is anyone still calling or texting through ServiceM8? If yes, that has to move first or go back to the phone.
+2. Clients with no job at all in ServiceM8: bring them all, or only clients on a job or quote that comes across? (Recommended: only those on a job or quote.)
+3. Old quotes: every quote not marked Unsuccessful, however old? (Recommended: yes, since the owner is marking the unwanted ones.) Old ones that were never sent land in Draft quote, sent ones in Quote sent, which will fill those two folders.
+4. J number: J4809 for ServiceM8 #4809 (recommended), or a new 7000s number with the old number shown beside it?
+5. Should a client see their archived ServiceM8 jobs in the client portal? (Recommended: yes, photos and documents marked shared only, as for any job.)
+
+**Done means:**
+- The dry run shows a count for Quote, Work Order and Completed, and zero Unsuccessful.
+- After the run, the Archived folder on Jobs holds every Completed ServiceM8 job, and searching an old ServiceM8 number opens it.
+- An archived job shows its photos, documents, ServiceM8 invoices, Time tab hours and notes, shows $0 left to invoice, and has no Invoice button that can bill it again.
+- No email, text or notification went to any client or staff member from the run, and nothing new appeared in Xero.
+- The check report reads zero missing jobs and zero failed files.
+- Running it a second time adds nothing.
+
+Touches: `public/sm8-import.html`, `netlify/functions/_shared/sm8-import.js`, `netlify/functions/sm8-import-jobs.js`, `netlify/functions/sm8-import-preview.js`, `netlify/functions/sm8-import-lines.js`, `netlify/functions/sm8-copy-attachments-background.js`, `netlify/functions/_shared/sm8-labour.js`, a new background function for the whole run and a new check report function, one migration (run progress table, completed date and raw copy path on `projects`, additions only), `public/projects.html` and `public/js/global-search.js` only if the old number does not already search, `docs/PROJECT_SPEC.md` A27. Not `project.html` or `settings.html`.
