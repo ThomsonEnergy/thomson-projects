@@ -15,7 +15,7 @@ The short version
 * Every employee has a personal referral link in TEops (Home > My link). It opens a short form on any phone with no login.
 * Give it to people you know or meet who are not already dealing with Thomson Energy and who ask about solar, a battery, a switchboard, a fault or any electrical work: family, a mate, a neighbour, someone at footy or the pub, or a passer-by who stops at a job and asks what we do. They fill it in themselves and it arrives in TEops as your lead.
 * Every lead from your link shows your name in TEops ("From Cooper") on the lead, the quote and the job, so the office always knows who brought the customer in.
-* The link is for customers you bring in. It is not for a customer who has already contacted Thomson Energy, or who is on the phone, in the inbox or in front of you on a job.
+* You can also send your link to an existing Thomson Energy customer, or to someone who has already contacted us, for example someone who rings 0455 415 464 and you answer. It is a quick way to get their details in, and it counts on your KPIs as your lead and your conversion. It pays no $50, because the customer came to the business, not through you.
 
 2. Leads you fill in on site
 * When a customer asks about more work while you are on a job, use New lead on My Day. Tick Same customer as the job I'm on and the details fill themselves; add photos of the roof, the switchboard or the fault.
@@ -46,7 +46,7 @@ The short version
 6. The rules
 * Never promise a customer a price, a date or a rebate to get a lead. Say Thomson Energy will contact them.
 * Tell the person you are passing their details on. We tell them again on first contact, as the Privacy Act asks us to.
-* Do not send your link to a customer who has already contacted Thomson Energy, and do not ask a customer to use your link in place of calling or emailing the office. A lead entered under someone else's name, or a referral of work that was already coming to Thomson Energy, is not paid and may be treated as misconduct under the Code of Conduct.
+* Never tell a customer who has already contacted Thomson Energy to say they came from you, and never pass one off as your own. A lead entered under someone else's name, or a referral of work that was already coming to Thomson Energy, is not paid and may be treated as misconduct under the Code of Conduct.
 * This scheme is discretionary. It is not a term of your employment contract and it sits on top of your award and contract entitlements. Thomson Energy can change the amounts, change the rules or withdraw the scheme at any time, without notice, for any lead or job not yet won. A bonus already earned is still paid, at the amount that applied on the day it was earned.
 * A bonus is paid through payroll like any other pay: tax is withheld and superannuation applies.
 * Thomson Energy pays bonuses to its own employees only. If you are referred work by someone who works for one of our clients, the reward goes to that client's account under the client scheme, never to the person privately.
