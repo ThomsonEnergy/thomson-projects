@@ -31,8 +31,8 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=150"></script>
-  <script src="/js/template-questions.js?v=8"></script>
+  <script src="/js/supabase-client.js?v=151"></script>
+  <script src="/js/template-questions.js?v=9"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
   <script src="/js/solar-sizing.js?v=3"></script>
@@ -49,7 +49,7 @@
   <script src="/js/prebuild-form.js?v=5"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
-  <script src="/js/email-compose.js?v=14"></script>
+  <script src="/js/email-compose.js?v=15"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/job-schedule.js?v=6"></script>
   <script src="/js/job-contacts.js?v=6"></script>
@@ -3488,7 +3488,7 @@
     async function wireQuoteSteps(project) {
       try {
         // the steps save themselves: that file loads while the rest is wired, and is mounted last
-        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=2', () => typeof mountQuoteAutosave === 'function');
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=3', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
@@ -3558,7 +3558,7 @@
           }
           const decision = (document.querySelector('input[name="qs2-decision"]:checked') || {}).value || project.site_visit_decision;
           if (insp) {
-            inspArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>${insp.status === 'completed' ? ' <span class="subtitle">Copy what it found into the pre-quote answers above.</span>' : ''}`;
+            inspArea.innerHTML = `<a class="link-quiet" href="/site-inspection.html?id=${insp.id}">Site inspection - <span class="badge ${insp.status === 'completed' ? 'accepted' : 'sent'}">${insp.status.replace('_', ' ')}</span> &rarr;</a>`;
           } else if (decision === 'needed') {
             inspArea.innerHTML = `<button type="button" class="secondary" id="qs2-schedule-btn" style="font-size:12px; padding:6px 10px;">Schedule inspection</button>`;
             inspArea.querySelector('#qs2-schedule-btn').addEventListener('click', () => openScheduleInspectionPanel(project, 'project', () => { refreshInspectionArea(); refreshBar(); }));
@@ -3663,7 +3663,7 @@
         // ----- step 4: scope of works -----
         renderEditSowDocList();
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
-        loadJsOnce('/js/quote-pictures.js?v=3', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
+        loadJsOnce('/js/quote-pictures.js?v=4', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
         wireScopeTools(project);
         renderCustomerGets();
