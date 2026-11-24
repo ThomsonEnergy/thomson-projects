@@ -103,6 +103,12 @@ function quoteStepDefs(project, page) {
     if (h) h.innerHTML = `${page.ticks()[n] ? '<span style="color:var(--green);">&#10003;</span> ' : ''}${n}. ${title}`;
     page.refreshBar();
   };
+  // What something else wrote to this quote while the page was open (a submitted site inspection
+  // fills blank answers and adds to the notes, item 112): read just before a save so the save keeps it.
+  const landedSince = async () => {
+    const { data } = await supabaseClient.from('projects').select('template_answers, notes').eq('id', project.id).maybeSingle();
+    return data || {};
+  };
   const saveProject = async (fields) => {
     const { error } = await supabaseClient.from('projects').update(fields).eq('id', project.id);
     if (error) throw error;
@@ -173,6 +179,13 @@ function quoteStepDefs(project, page) {
           if (picker) await picker.setClient(client);
         }
         const client_site_id = clientId ? await resolveClientSite(clientId, p.client_address, (client || {}).address || p.client_address, { columns: addressCols }) : null;
+        // notes added underneath since this page loaded stay underneath what is typed here
+        const was = project.notes || '', now = (await landedSince()).notes || '';
+        const added = now !== was && now.startsWith(was) ? now.slice(was.length).trim() : '';
+        if (added && !(p.notes || '').includes(added)) {
+          p.notes = [p.notes || '', added].filter(Boolean).join('\n\n');
+          set('p-notes', p.notes);
+        }
         await saveProject({
           name: p.name, client_id: clientId, client_name: p.client_name, client_email: p.client_email || null,
           client_phone: p.client_phone || null, client_address: p.client_address, client_site_id, notes: p.notes || null, ...addressCols,
@@ -210,6 +223,15 @@ function quoteStepDefs(project, page) {
       save: async (p) => {
         const prevTemplate = project.proposal_template || 'new_build';
         const changedTemplate = p.proposal_template !== prevTemplate;
+        // an answer filled since this page loaded, in a box still blank here, is kept and shown
+        const fresh = (await landedSince()).template_answers || {};
+        const known = project.template_answers || {};
+        const blank = (v) => !String(v ?? '').trim();
+        const kept = Object.keys(fresh).filter(k => !blank(fresh[k]) && blank(known[k]) && blank(p.template_answers[k]));
+        if (kept.length) {
+          p.template_answers = { ...p.template_answers, ...Object.fromEntries(kept.map(k => [k, fresh[k]])) };
+          page.setAnswers(p.template_answers);
+        }
         const fields = { template_answers: p.template_answers, proposal_template: p.proposal_template };
         let newMilestones = null;
         if (changedTemplate) {

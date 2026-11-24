@@ -39,6 +39,8 @@ alter table public.site_inspection_answers add column if not exists answer_text 
 alter table public.site_inspection_answers add column if not exists note text;
 
 alter table public.site_inspections add column if not exists extra_template_ids uuid[] not null default '{}';
+-- Who booked it was never recorded (the column was always blank): it is whoever makes the row.
+alter table public.site_inspections alter column created_by set default auth.uid();
 alter table public.site_inspections add column if not exists notes text;
 alter table public.site_inspections add column if not exists tasks jsonb not null default '[]'::jsonb;
 -- Who submitted it and where it landed are plain ids, not foreign keys: site_inspections already
@@ -56,6 +58,9 @@ create table if not exists public.site_inspection_photos (
   label text not null,
   url text not null,
   project_photo_id uuid references public.project_photos(id) on delete set null,
+  -- when it went to the job's Photos. Kept apart from project_photo_id on purpose: a photo deleted
+  -- from the Photos tab afterwards must not be sent again.
+  landed_at timestamptz,
   taken_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
@@ -66,7 +71,9 @@ create index if not exists site_inspection_photos_taken_by on public.site_inspec
 
 alter table public.site_inspection_photos enable row level security;
 revoke all on public.site_inspection_photos from public, anon, authenticated;
-grant select, insert, update, delete on public.site_inspection_photos to authenticated;
+-- a photo can be relabelled, nothing else about it changed
+grant select, insert, delete on public.site_inspection_photos to authenticated;
+grant update (label) on public.site_inspection_photos to authenticated;
 
 drop policy if exists "Staff read inspection photos" on public.site_inspection_photos;
 create policy "Staff read inspection photos" on public.site_inspection_photos
@@ -79,7 +86,7 @@ create policy "Staff relabel inspection photos" on public.site_inspection_photos
   for update to authenticated using (true) with check (true);
 drop policy if exists "Staff remove inspection photos" on public.site_inspection_photos;
 create policy "Staff remove inspection photos" on public.site_inspection_photos
-  for delete to authenticated using (project_photo_id is null);
+  for delete to authenticated using (landed_at is null);
 
 -- ---------------------------------------------------------------- the project guard lets the landing through
 -- guard_projects_writes stops a field role changing anything on a quote but a few site columns.
@@ -157,7 +164,7 @@ revoke execute on function public.guard_projects_writes() from public, anon, aut
 
 -- ---------------------------------------------------------------- landing an inspection on a quote or job
 -- Puts what an inspection holds onto a project: photos into project_photos named by their label,
--- ticked tasks into job_tasks for whoever booked the inspection, the notes onto the project's
+-- ticked tasks into job_tasks for whoever booked the inspection (whoever submitted it when that is not known), the notes onto the project's
 -- notes, and answers into blank pre-quote answers. Safe to run again: each photo, task and the
 -- notes land once, and an answer never overwrites one already given.
 -- Server side only (submit_site_inspection and the projects trigger call it): nobody is granted it.
@@ -187,12 +194,12 @@ begin
 
   for v_photo in
     select id, label, url, taken_by from site_inspection_photos
-    where inspection_id = p_inspection_id and project_photo_id is null order by created_at
+    where inspection_id = p_inspection_id and landed_at is null order by created_at
   loop
     insert into project_photos (project_id, staff_id, url, caption)
     values (p_project_id, v_photo.taken_by, v_photo.url, left('Inspection: ' || v_photo.label, 200))
     returning id into v_new_photo;
-    update site_inspection_photos set project_photo_id = v_new_photo where id = v_photo.id;
+    update site_inspection_photos set project_photo_id = v_new_photo, landed_at = now() where id = v_photo.id;
     v_photos := v_photos + 1;
   end loop;
 
@@ -201,7 +208,7 @@ begin
     if coalesce((v_task->>'ticked')::boolean, false) and not coalesce((v_task->>'created')::boolean, false)
        and btrim(coalesce(v_task->>'text', '')) <> '' then
       insert into job_tasks (project_id, description, assigned_to_user_id, created_by, task_type)
-      values (p_project_id, left(btrim(v_task->>'text'), 500), v_insp.created_by,
+      values (p_project_id, left(btrim(v_task->>'text'), 500), coalesce(v_insp.created_by, v_insp.submitted_by),
               coalesce(v_insp.submitted_by, v_insp.created_by),
               case when v_project.job_number is null then 'quote' else 'prejob' end);
       v_task := v_task || jsonb_build_object('created', true);
@@ -273,8 +280,9 @@ begin
     completed_at = coalesce(completed_at, now()),
     submitted_by = v_uid
   where id = p_inspection_id;
+  v_insp.submitted_by := v_uid;
 
-  v_project := v_insp.project_id;
+  v_project := coalesce(v_insp.project_id, v_insp.landed_project_id);
   if v_project is null and v_insp.lead_id is not null then
     select id into v_project from projects where lead_id = v_insp.lead_id order by created_at limit 1;
   end if;
@@ -298,7 +306,8 @@ as $$
 declare
   v_id uuid;
 begin
-  for v_id in select id from site_inspections where lead_id = new.lead_id and status = 'completed'
+  -- only what has not landed yet: a second quote from the same lead takes nothing from the first
+  for v_id in select id from site_inspections where lead_id = new.lead_id and status = 'completed' and landed_project_id is null
   loop
     begin
       perform land_site_inspection(v_id, new.id);

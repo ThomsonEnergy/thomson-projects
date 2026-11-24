@@ -4801,6 +4801,7 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       const { data: inspection, error } = await supabaseClient.from('site_inspections').insert({
         lead_id: kind === 'lead' ? record.id : null,
         project_id: kind === 'project' ? record.id : null,
+        created_by: (await supabaseClient.auth.getUser()).data.user.id, // who booked it: its tasks go to them
         template_id: picked.length ? picked[0].id : overlay.querySelector('#si-template').value,
         extra_template_ids: picked.slice(1).map(t => t.id),
       }).select('id').single();

@@ -77,7 +77,7 @@ async function siSyncTaskFor(it) {
 function siPhotoThumb(p) {
   return `<span class="si-thumb" data-photo="${p.id}">
     <img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.label)}" loading="lazy" />
-    ${p.project_photo_id ? '' : '<button type="button" class="si-thumb-x" title="Remove">&times;</button>'}
+    ${p.landed_at ? '' : '<button type="button" class="si-thumb-x" title="Remove">&times;</button>'}
   </span>`;
 }
 
@@ -87,7 +87,7 @@ function siDrawPhotos() {
   const itemIds = new Set(photoItems.map((it) => it.id));
   const others = SI.photos.filter((p) => !p.item_id || !itemIds.has(p.item_id));
   const row = (key, label, desc, photos) => `
-    <div class="si-row ${photos.length ? 'done' : ''}" data-key="${key}">
+    <div class="si-row ${photos.length ? 'done' : ''}" data-key="${escapeHtml(key)}">
       <div class="si-row-head">
         <div><strong>${escapeHtml(label)}</strong>${desc ? `<div class="subtitle" style="font-size:12px;">${escapeHtml(desc)}</div>` : ''}</div>
         <label class="btn secondary si-add ${SI.busy[key] ? 'is-loading' : ''}">&#128247; ${photos.length ? 'More' : 'Photo'}<input type="file" accept="image/*" multiple style="display:none;" ${SI.busy[key] ? 'disabled' : ''} /></label>
@@ -164,7 +164,6 @@ function siDrawQuestions() {
   el.innerHTML = questions.map((it) => {
     const a = SI.answers[it.id] || {};
     const value = siAnswerText(it);
-    const state = SI.busy[it.id];
     const control = it.item_type === 'yes_no'
       ? ['Yes', 'No'].map((v) => `<button type="button" class="secondary si-yn ${value === v ? 'selected' : ''}" data-v="${v}">${v}</button>`).join('')
       : it.item_type === 'choice'
@@ -177,21 +176,27 @@ function siDrawQuestions() {
           <div class="si-control">${control}<button type="button" class="secondary si-note-btn" title="Add a note" ${a.note ? 'style="display:none;"' : ''}>+ note</button></div>
         </div>
         <input class="si-note" value="${escapeHtml(a.note || '')}" placeholder="Note" ${a.note ? '' : 'style="display:none;"'} />
-        <div class="si-row-msg">${state && state.error ? `<div class="error-box">${escapeHtml(state.error)}</div>` : ''}</div>
+        <div class="si-row-msg"></div>
       </div>`;
   }).join('');
 
   el.querySelectorAll('.si-row').forEach((rowEl) => {
     const it = SI.items.find((i) => i.id === rowEl.dataset.item);
+    // Only this row is touched after a save: drawing the column again would wipe what is being
+    // typed in the next box and close an open note.
     const save = async (fields) => {
+      const msg = rowEl.querySelector('.si-row-msg');
       try {
         await siSaveAnswer(it.id, fields);
-        delete SI.busy[it.id];
+        msg.innerHTML = '';
         await siSyncTaskFor(it);
       } catch (err) {
-        SI.busy[it.id] = { error: 'Not saved. ' + friendlyError(err) };
+        msg.innerHTML = `<div class="error-box">Not saved. ${escapeHtml(friendlyError(err))}</div>`;
       }
-      siDrawQuestions(); siDrawSummary();
+      const value = siAnswerText(it);
+      rowEl.classList.toggle('done', !!value);
+      rowEl.querySelectorAll('.si-yn').forEach((b) => b.classList.toggle('selected', b.dataset.v === value));
+      siDrawSummary();
     };
     rowEl.querySelectorAll('.si-yn').forEach((btn) => btn.addEventListener('click', () => {
       const v = btn.dataset.v === 'Yes';
@@ -237,7 +242,7 @@ function siDrawTasks() {
 // What Submit will send, what was skipped, and the button's words.
 function siDrawSummary() {
   const skipped = SI.items.filter((it) => (siIsPhoto(it) ? !SI.photos.some((p) => p.item_id === it.id) : !siAnswerText(it)));
-  const newPhotos = SI.photos.filter((p) => !p.project_photo_id).length;
+  const newPhotos = SI.photos.filter((p) => !p.landed_at).length;
   const newTasks = (SI.insp.tasks || []).filter((t) => t.ticked && !t.created).length;
   const done = SI.insp.status === 'completed';
   const btn = document.getElementById('si-submit');

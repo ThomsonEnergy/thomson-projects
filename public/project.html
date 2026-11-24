@@ -3488,7 +3488,7 @@
     async function wireQuoteSteps(project) {
       try {
         // the steps save themselves: that file loads while the rest is wired, and is mounted last
-        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=2', () => typeof mountQuoteAutosave === 'function');
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=3', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
