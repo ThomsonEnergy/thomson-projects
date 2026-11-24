@@ -13,7 +13,10 @@
 --  * staff_bonuses: the $50 (company_settings.staff_link_amount). staff_bonus_earn(job) makes the row
 --    when a quote from an eligible link lead is approved, on a job of lead_reward_min_job or more; a
 --    trigger on invoices makes it due when the deposit is paid (or the first invoice, with no
---    deposit). Admin can cancel one with a reason, or clear a wrong Already ours with a reason.
+--    deposit). What is owed adds up on the person's Home page and stays owed until it is paid
+--    (owner, 24 Nov 2026: bonuses accrue; paying them through a pay run is built later, so nothing
+--    here marks one paid yet). Admin can cancel one with a reason, or clear a wrong Already ours
+--    with a reason.
 --  * staff_lead_stats(): leads sent, quoted, won and the won value for a person and a period.
 --  * The minimum job for every reward is now $3,000 (owner, 24 Nov 2026).
 --  * The staff policy joins the documents every person signs at their next login.
@@ -249,10 +252,10 @@ begin
   insert into activity_log (entity_type, entity_id, action, description)
   values ('project', b.project_id, 'staff_bonus_due', format('Link bonus now owed: $%s to %s (the deposit is paid).', v_amount, v_name));
   perform create_notification(b.profile_id, 'lead', format('Link bonus owed to you: $%s', v_amount),
-    format('The deposit on J%s is paid. It goes in your pay.', v_job), '/home.html', null, 'staff-bonus-due:' || b.id);
+    format('The deposit on J%s is paid. It is on your balance: Home, My link.', v_job), '/home.html', null, 'staff-bonus-due:' || b.id);
   for p in select id from profiles where active and role = 'admin' loop
     perform create_notification(p.id, 'lead', format('Link bonus owed: %s, $%s', v_name, v_amount),
-      format('J%s deposit paid. Add it to their pay.', v_job), '/leads.html', null, 'staff-bonus-due-admin:' || b.id);
+      format('J%s deposit paid. It is on their balance: Leads, Link bonuses.', v_job), '/leads.html', null, 'staff-bonus-due-admin:' || b.id);
   end loop;
 end;
 $$;
@@ -466,7 +469,8 @@ The short version
 * TEops checks every link lead against the customers, enquiries, emails and jobs we already have, and against the customer's own answer. A match is marked Already ours and pays no bonus. If you think a match is wrong, tell the owner and he will look at it.
 
 3. How it is paid
-* A bonus is added to your pay once it is payable. It is taxed like any other pay, and superannuation applies as the law requires.
+* A bonus that is payable is added to your balance in TEops (Home, My link). The balance adds up and stays owed to you until it is paid.
+* It is paid through payroll. It is taxed like any other pay, and superannuation applies as the law requires.
 * TEops (Home, My link) shows the leads from your link, every bonus earned and whether it has been paid.
 
 4. The rules

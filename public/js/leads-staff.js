@@ -54,7 +54,7 @@ async function loadLinkBonuses() {
   const el = document.getElementById('link-bonuses');
   if (!el) return;
   const [{ data: rows }, me] = await Promise.all([
-    supabaseClient.from('staff_bonuses').select('id, profile_id, project_id, amount, quote_total, status, earned_at, cancelled_reason').order('earned_at', { ascending: false }).limit(50),
+    supabaseClient.from('staff_bonuses').select('id, profile_id, project_id, amount, quote_total, status, earned_at, cancelled_reason').order('earned_at', { ascending: false }).limit(200),
     getMyProfile(),
   ]);
   if (!rows || !rows.length) { el.innerHTML = ''; return; }
@@ -67,15 +67,20 @@ async function loadLinkBonuses() {
   const jobOf = (id) => (jobs || []).find((j) => j.id === id);
   const word = (r) => ({
     earned: '<span class="badge draft">Won, waiting on the deposit</span>',
-    due: '<span class="badge sent">Owed: add it to their pay</span>',
+    due: '<span class="badge sent">Owed</span>',
     paid: '<span class="badge accepted">Paid</span>',
     cancelled: `<span class="badge draft">Cancelled${r.cancelled_reason ? `: ${escapeHtml(r.cancelled_reason)}` : ''}</span>`,
   }[r.status] || '');
   const admin = me && me.role === 'admin';
+  // what each person has built up: owed bonuses stay on their balance until they are paid
+  const owedBy = {};
+  rows.filter((r) => r.status === 'due').forEach((r) => { owedBy[r.profile_id] = (owedBy[r.profile_id] || 0) + Number(r.amount || 0); });
+  const owedLine = Object.keys(owedBy).map((id) => `${escapeHtml(nameOf(id))} ${money(owedBy[id])}`).join(', ');
   el.innerHTML = `
     <div class="card">
       <h2>Link bonuses</h2>
-      <p class="subtitle" style="margin-bottom:8px;">Jobs won from a staff member's own link. Owed once the deposit is paid.</p>
+      <p class="subtitle" style="margin-bottom:8px;">Jobs won from a staff member's own link. Owed once the deposit is paid, and it adds up on their Home page until it is paid through a pay run.</p>
+      ${owedLine ? `<p style="margin:0 0 8px; font-size:13px;"><strong>Owed now:</strong> ${owedLine}</p>` : ''}
       ${rows.map((r) => {
         const j = jobOf(r.project_id);
         return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:4px 0; border-bottom:1px solid var(--border); font-size:13px;">
