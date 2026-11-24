@@ -198,7 +198,7 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=149"></script>
+  <script src="/js/supabase-client.js?v=150"></script>
   <script src="/js/rate-cards.js?v=2"></script>
   <script src="/js/clients-agreement.js?v=4"></script>
   <script src="/js/abn-search.js?v=2"></script>
@@ -243,7 +243,7 @@
     // --- contacts sub-form ---
     // js/clients-portal.js (the portal card, item 74) comes down on first use, like the email composer.
     const loadClientPortalJs = () => loadJsOnce('/js/clients-portal.js?v=6', () => typeof renderClientPortal === 'function');
-    const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=2', () => typeof renderClientStatement === 'function');
+    const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=3', () => typeof renderClientStatement === 'function');
 
     function addContactRow({ id = null, contact_type = 'job', name = '', phone = '', email = '', portal_access = false } = {}) {
       contactCount++;
