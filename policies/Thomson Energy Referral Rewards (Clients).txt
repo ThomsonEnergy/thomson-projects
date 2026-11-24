@@ -20,11 +20,11 @@ Thomson Energy rewards clients who send us work. When you pass on someone who ne
 
 3. What you earn
 * A full referral earns, by the size of the job we win (the total the customer pays, including GST, after any solar or battery rebates):
-  - under $1,000: nothing
-  - $1,000 to $4,999: $80
+  - under $3,000: nothing
+  - $3,000 to $4,999: $80
   - $5,000 to $14,999: $200
   - $15,000 and over: $500
-* A quick referral earns a flat $50 when the job we win is $1,000 or more.
+* A quick referral earns a flat $50 when the job we win is $3,000 or more.
 * One reward per job. If the same person is referred twice, the first referral counts.
 
 4. When you earn it
