@@ -15,7 +15,7 @@ The short version
 * Every employee has a personal referral link in TEops (Home > My link). It opens a short form on any phone with no login.
 * Give it to people you know or meet who are not already dealing with Thomson Energy and who ask about solar, a battery, a switchboard, a fault or any electrical work: family, a mate, a neighbour, someone at footy or the pub, or a passer-by who stops at a job and asks what we do. They fill it in themselves and it arrives in TEops as your lead.
 * Every lead from your link shows your name in TEops ("From Cooper") on the lead, the quote and the job, so the office always knows who brought the customer in.
-* You can also send your link to a customer who has already contacted Thomson Energy, for example someone who rings 0455 415 464 and you answer. It is a quick way to get their details in, and it counts on your KPIs as your lead and your conversion. It pays no $50, because the customer came to the business, not through you.
+* You can also send your link to an existing Thomson Energy customer, or to someone who has already contacted us, for example someone who rings 0455 415 464 and you answer. It is a quick way to get their details in, and it counts on your KPIs as your lead and your conversion. It pays no $50, because the customer came to the business, not through you.
 
 2. Leads you fill in on site
 * When a customer asks about more work while you are on a job, use New lead on My Day. Tick Same customer as the job I'm on and the details fill themselves; add photos of the roof, the switchboard or the fault.
