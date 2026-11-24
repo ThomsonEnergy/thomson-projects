@@ -459,7 +459,7 @@ The short version
 2. The link bonus
 * $50 for every job we win from a new customer who came through your link, earned the day the customer approves the quote and payable once they have paid their deposit (or their first invoice, when the job has no deposit).
 * Nothing is earned for a quote that is declined or expires, for a job that falls over before the deposit is paid, or for a job under $3,000 (the total the customer pays, including GST, after any solar or battery rebates).
-* One bonus per job. Your own household's job does not count.
+* One bonus per job. You can refer your own family.
 * No bonus, for anyone, when the customer came to Thomson Energy by themselves or through the business. That means:
   - they found us on Google, the website, social media, an ad, a directory, a vehicle or a sign;
   - they called 0455 415 464 or emailed sales@thomsonenergy.com.au (or any Thomson Energy number or address) before your lead arrived;
