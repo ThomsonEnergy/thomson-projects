@@ -82,3 +82,8 @@ Facts the owner has confirmed, which the code and spec depend on. Update here wh
 - The invoice terms note (Settings > Payment Terms & T&Cs) says the same since 9 Nov 2026; before that it read 9% pa.
 - **ServiceM8 Pay deposits in Xero (10 Nov 2026):** a deposit taken in ServiceM8 before any invoice lands in Xero as a prepayment, not an invoice (it shows in Sales > Invoices as INV-2003x, Awaiting Payment, no due date, the amount in the Paid column). It stays there until it is allocated. The way to close one when the job is in TEops: raise a deposit invoice in Xero by hand for the same amount and date (one line, Labour Income 2002, GST on Income), approve it, then open the prepayment and allocate it to that invoice. TEops holds the deposit as a paid ServiceM8 claim on the job (item 71) and its final invoice claims only the balance, so Xero and TEops agree without the deposit going through TEops. First done for Keith Murdock, J7016 / #4809, prepayment INV-20039 $3,436.31.
 - In TEops, interest is charged per invoice (Charge interest on the invoice panel, item 66): shown as it accrues, quoted on reminders, and charged as a separate GST free interest invoice (Xero account 270 Interest Income, BAS excluded) so the original invoice never changes.
+
+## Hot water and air conditioning (owner, 24 Nov 2026)
+
+- Hot water: we sell heat pumps mainly, and electric storage units as well. STCs and the NSW certificates (ESCs and PRCs) are all claimed through Formbay.
+- Air conditioning brands: Mitsubishi Heavy Industries (MHIA), Mitsubishi Electric, TCL and Daikin, split and ducted. The refrigerant work is done in-house.
