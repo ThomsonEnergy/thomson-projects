@@ -453,6 +453,8 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
   // A referred quote earns its referrer's lead reward now, the amount fixed (item 74b, lead_reward_earn).
   // Best effort: it never stops a job being made, and calling it twice does nothing.
   try { const { error: lrErr } = await supabaseAdmin.rpc('lead_reward_earn', { p_job: job.id }); if (lrErr) throw lrErr; } catch (e) { console.error('create-job-from-quote: lead reward not recorded', e.message); }
+  // The same for a quote from a staff member's personal link: their link bonus (item 74b 7a, staff_bonus_earn).
+  try { const { error: sbErr } = await supabaseAdmin.rpc('staff_bonus_earn', { p_job: job.id }); if (sbErr) throw sbErr; } catch (e) { console.error('create-job-from-quote: link bonus not recorded', e.message); }
 
   // Last, so a quote still not approved while its job exists marks an attempt that stopped part way.
   await markQuoteApproved(supabaseAdmin, quote, approvedBy, approvalNote);

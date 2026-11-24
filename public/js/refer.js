@@ -3,17 +3,22 @@
 // or a draft quote for them. Their own job ("Me") or someone else ("Quick" or "Full"); the type's
 // questions use the quote's own question ids (and option lists from template-questions.js), so
 // Create quote from the lead carries the answers. Photos are made smaller on the phone first.
+// refer.html?s=<token> is a staff member's personal link (item 74b 7a): one form the customer fills in
+// about their own job, ending with "How did you first hear about Thomson Energy?". The lead is that
+// staff member's; the server decides whether it is a new customer or one we already had.
 
 (function () {
   const root = document.getElementById('rf-root');
-  const token = new URLSearchParams(location.search).get('r') || '';
+  const params = new URLSearchParams(location.search);
+  const staffToken = params.get('s') || '';
+  const token = staffToken || params.get('r') || '';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const tomorrow = (() => { const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
   const S = { info: null, who: null, kind: 'quick' };
 
   async function call(body) {
-    const res = await fetch('/.netlify/functions/refer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ r: token, ...body }) });
+    const res = await fetch('/.netlify/functions/refer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [staffToken ? 's' : 'r']: token, ...body }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) throw new Error(data.error || 'Something went wrong. Please try again, or call us.');
     return data;
@@ -42,7 +47,49 @@
   async function start() {
     try { S.info = await call({ action: 'info' }); } catch (e) { showError(e.message); return; }
     window.ADDRESS_BOX_KEY = S.info.mapsKey || '';   // the address box offers Google's addresses (item 103)
-    drawWho();
+    if (staffToken) drawStaffForm(); else drawWho();
+  }
+
+  // A staff member's link: the customer's own job, and how they heard of us. Nothing is ticked in
+  // advance on that question, so the answer is theirs.
+  function drawStaffForm() {
+    const i = S.info;
+    document.title = 'Get a quote - Thomson Energy';
+    root.innerHTML = `
+      <h1 style="font-size:20px; margin:12px 0 4px;">Get a quote from Thomson Energy</h1>
+      <p class="rf-muted" style="margin:0 0 6px;">Sent to you by ${esc(i.staff)}. It takes about a minute.</p>
+      <div class="rf-card">
+        <label style="margin-top:0;">What kind of job?</label>
+        <select id="rf-type">${i.types.map((t) => `<option>${esc(t)}</option>`).join('')}</select>
+        <div id="rf-qs"></div>
+        <label>What do you need?</label>
+        <textarea id="rf-need" rows="3" maxlength="3000" placeholder="A line or two is plenty"></textarea>
+        <label>Photos (optional, up to 5)</label><input type="file" id="rf-files" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf" />
+      </div>
+      <div class="rf-card">
+        <strong>Your details</strong>
+        <label>Name</label><input id="rf-name" autocomplete="name" />
+        <label>Phone</label><input id="rf-phone" type="tel" autocomplete="tel" />
+        <label>Email (optional)</label><input id="rf-email" type="email" autocomplete="email" />
+        <label>Site address</label><input id="rf-address" autocomplete="street-address" />
+        <label>How did you first hear about Thomson Energy?</label>
+        <select id="rf-heard">
+          <option value=""></option>
+          <option value="owner">${esc(i.staff)} told me about you</option>
+          ${i.team.length ? '<option value="staff">Someone else at Thomson Energy</option>' : ''}
+          ${i.heard.map((h) => `<option>${esc(h)}</option>`).join('')}
+        </select>
+        <div id="rf-heard-who" style="display:none;"><label>Who was it?</label><select id="rf-heard-staff"><option value=""></option>${i.team.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></div>
+      </div>
+      <div id="rf-msg"></div>
+      <button type="button" class="big" id="rf-send">Send</button>`;
+    const typeSel = root.querySelector('#rf-type');
+    const drawQs = () => { root.querySelector('#rf-qs').innerHTML = (QUESTIONS[typeSel.value] || []).map((q) => questionHtml({ ...q, label: q.label.replace('do they', 'do you') })).join(''); };
+    typeSel.addEventListener('change', drawQs);
+    drawQs();
+    root.querySelector('#rf-heard').addEventListener('change', (e) => { root.querySelector('#rf-heard-who').style.display = e.target.value === 'staff' ? '' : 'none'; });
+    wireAddressBox(root.querySelector('#rf-address'));
+    root.querySelector('#rf-send').addEventListener('click', send);
   }
 
   function drawWho() {
@@ -153,10 +200,12 @@
       const answers = {};
       root.querySelectorAll('[data-q]').forEach((el) => { if (el.value) answers[el.dataset.q] = el.value; });
       const told = root.querySelector('#rf-told');
+      if (staffToken && !v('rf-heard')) throw new Error('Tell us how you first heard about Thomson Energy, please.');
       const out = await call({
-        action: 'submit', who: S.who, kind: S.kind, type: v('rf-type'), need: v('rf-need'), answers, files, dueDate: v('rf-due'),
+        action: 'submit', heard: v('rf-heard'), heardStaffId: v('rf-heard-staff'), who: S.who, kind: S.kind, type: v('rf-type'), need: v('rf-need'), answers, files, dueDate: v('rf-due'),
         person: { name: v('rf-name'), phone: v('rf-phone'), email: v('rf-email'), address: v('rf-address'), addressParts: await addressBoxParts(root.querySelector('#rf-address')) }, told: told ? told.checked : false,
       });
+      if (staffToken) { root.innerHTML = '<div class="rf-card" style="margin-top:20px;"><h1 style="font-size:20px; margin:0 0 6px;">Thank you</h1><p>We have your details and will be in touch soon.</p><p class="rf-muted">Thomson Energy, <a href="tel:0455415464">0455 415 464</a></p></div>'; return; }
       root.innerHTML = `<div class="rf-card" style="margin-top:20px;"><h1 style="font-size:20px; margin:0 0 6px;">Thank you</h1><p>${out.kind === 'quote' ? `We have your job${out.ref ? ` (${esc(out.ref)})` : ''} and will be in touch. You can follow it in your portal.` : 'We have their details and will be in touch with them soon.'}</p><button type="button" class="secondary" id="rf-again">Send another</button></div>`;
       root.querySelector('#rf-again').addEventListener('click', drawWho);
     } catch (err) {

@@ -3,8 +3,12 @@
 // of the quote; a quick one (a name and a number) a flat amount; nothing on a job under the
 // minimum. Which clients get rewards, and whether as a credit or a payment, is set per client on
 // the Clients page. A reward is a credit off our work, taken off an invoice by itself (item 74b step 3b).
+// Also the staff side (item 74b 7a): the link bonus a staff member earns for a new customer from
+// their own link, how far back "Already ours" looks, and the choices on "How did you first hear
+// about Thomson Energy?".
 // Who calls it: settings.html, loadSettings(), as loadRewardsCard(settingsRow). Writes
-// company_settings.lead_reward_tiers, lead_reward_quick_amount and lead_reward_min_job.
+// company_settings.lead_reward_tiers, lead_reward_quick_amount, lead_reward_min_job,
+// staff_link_amount, already_ours_days and heard_from_options.
 
 function loadRewardsCard(settings) {
   const card = document.getElementById('rewards-card');
@@ -21,6 +25,14 @@ function loadRewardsCard(settings) {
       <div><label>Quick referral (a name and a number), flat $</label><input type="number" id="rw-quick" min="0" step="5" value="${Number(settings.lead_reward_quick_amount || 0)}" /></div>
       <div><label>Nothing on a job under $</label><input type="number" id="rw-min" min="0" step="100" value="${Number(settings.lead_reward_min_job || 0)}" /></div>
     </div>
+    <h2 style="margin-top:16px;">Staff link bonus</h2>
+    <p class="subtitle" style="margin:0 0 8px;">What a staff member earns when we win a job from a new customer who came through their own link (Home, My link). The same minimum job applies. Nothing when the customer was already ours: a client, someone who contacted us in the days below, or someone who says they heard of us another way. Changing an amount? Update the Lead Bonus Scheme under Onboarding Documents and press Publish new version, so everyone signs the new figure.</p>
+    <div class="grid cols-2">
+      <div><label>Link bonus, flat $</label><input type="number" id="rw-staff" min="0" step="5" value="${Number(settings.staff_link_amount || 0)}" /></div>
+      <div><label>Already ours looks back (days)</label><input type="number" id="rw-days" min="1" step="1" value="${Number(settings.already_ours_days || 90)}" /></div>
+    </div>
+    <label>"How did you first hear about us?" choices, one per line (the staff member's own name and "Someone else at Thomson Energy" are always offered)</label>
+    <textarea id="rw-heard" rows="6">${escapeHtml((settings.heard_from_options || []).join('\n'))}</textarea>
     <div style="margin-top:12px;"><button type="button" id="rw-save">Save lead rewards</button></div>
     <div id="rw-msg"></div>`;
   const wireRemove = () => card.querySelectorAll('.rw-x').forEach((b) => { b.onclick = () => b.closest('.rw-tier').remove(); });
@@ -35,6 +47,9 @@ function loadRewardsCard(settings) {
       lead_reward_tiers: list,
       lead_reward_quick_amount: Math.max(0, Number(card.querySelector('#rw-quick').value) || 0),
       lead_reward_min_job: Math.max(0, Number(card.querySelector('#rw-min').value) || 0),
+      staff_link_amount: Math.max(0, Number(card.querySelector('#rw-staff').value) || 0),
+      already_ours_days: Math.max(1, Math.round(Number(card.querySelector('#rw-days').value) || 90)),
+      heard_from_options: [...new Set(card.querySelector('#rw-heard').value.split('\n').map((x) => x.trim().slice(0, 80)).filter(Boolean))],
     }).eq('id', 1);
     e.target.disabled = false;
     msg.innerHTML = error ? `<div class="error-box">${escapeHtml(friendlyError(error))}</div>` : '<div class="success-box">Saved.</div>';

@@ -40,7 +40,7 @@ The short version
 * A job that runs over budget earns nothing and costs you nothing.
 
 5. How it is paid
-* Bonuses are added to your pay as a Lead bonus line in the pay run after they become payable. They are taxed like any other pay, and superannuation applies as the law requires.
+* A bonus that is payable is added to your balance in TEops (Home, My link). The balance adds up and stays owed to you until it is paid. It is paid through payroll as a Lead bonus line, taxed like any other pay, and superannuation applies as the law requires.
 * Your TEops staff profile shows every lead, every bonus earned and when it was paid.
 
 6. The rules
