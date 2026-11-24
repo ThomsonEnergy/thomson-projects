@@ -105,6 +105,7 @@ function buildNotesText(job, notes) {
 function matchClient(company, contacts, clients) {
   const byUuid = clients.find(c => c.sm8_company_uuid && c.sm8_company_uuid === company.uuid);
   if (byUuid) return { match: { clientId: byUuid.id, reason: 'Linked on a previous import' }, candidates: [byUuid] };
+  clients = clients.filter(c => !c.mergedAlias); // a merged client's second listing is only for the id match above
 
   const name = normName(company.name);
   const emails = new Set([company.email, ...contacts.map(c => c.email)].map(normEmail).filter(Boolean));
@@ -198,6 +199,13 @@ async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
     supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, cost_centres(imported_claims)').not('sm8_job_uuid', 'is', null),
   ]);
   if (clientsErr) throw clientsErr;
+  // A client merged into another (item 110) keeps matching by its old ServiceM8 company: the kept
+  // client is listed once more under the old company id.
+  const { data: mergedClients } = await supabaseAdmin.from('client_merges').select('into_client_id, from_sm8_company_uuid').not('from_sm8_company_uuid', 'is', null);
+  (mergedClients || []).forEach((m) => {
+    const kept = clients.find(c => c.id === m.into_client_id);
+    if (kept && kept.sm8_company_uuid !== m.from_sm8_company_uuid) clients.push({ ...kept, sm8_company_uuid: m.from_sm8_company_uuid, mergedAlias: true });
+  });
   if (importedErr) throw importedErr;
 
   const companyByUuid = new Map(companies.map(c => [c.uuid, c]));

@@ -1,6 +1,7 @@
 // The ABN register search on the Clients page (moved out of supabase-client.js, 24 Nov 2026, so
-// every other page stops carrying it): searchAbnByName for a list of matches, wireAbnNameSearch for
-// the search-as-you-type dropdown under a name box. Reads through abn-lookup.js; writes nothing.
+// every other page stops carrying it): wireAbnNameSearch is the search-as-you-type dropdown under a
+// name box, searchAbnByName the lookup behind it. The search of every client at once runs on the
+// server (item 110, client-cleanup-background.js). Reads through abn-lookup.js; writes nothing.
 // Needs supabase-client.js (supabaseClient, escapeHtml).
 
 // Proxies abn-lookup.js (which itself proxies abr.business.gov.au - needs
@@ -9,11 +10,10 @@
 // throwing on any failure (missing GUID, rate limit, bad name) - this is
 // always a convenience lookup, never something that should block a save
 // or crash a bulk run partway through.
-// details false: names only, for a bulk run (the dropdown asks who is behind each of the first five).
-async function searchAbnByName(name, { details = true } = {}) {
+async function searchAbnByName(name) {
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
-    const res = await fetch(`/.netlify/functions/abn-lookup?name=${encodeURIComponent(name)}${details ? '' : '&details=0'}`, {
+    const res = await fetch(`/.netlify/functions/abn-lookup?name=${encodeURIComponent(name)}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
     const json = await res.json();
