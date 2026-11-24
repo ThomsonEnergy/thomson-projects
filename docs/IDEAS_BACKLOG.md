@@ -32,10 +32,11 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 106 | Greentech STC catch-up for Xero: read every MMEM statement and tax invoice for account 248045 from March 2026, work out the bills, the STC payments and the GST credits by BAS quarter, give the accountant a report and Xero a bills file | Planned 21 Nov 2026, waiting on yes | N | Accountant (Adrian) confirms the GST treatment; owner says how the old customer invoices show the STC |
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
 | 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
-| 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y (part B only) | None |
+| 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, Owner's yes 24 Nov 2026 ("Yes build all"); part A live 24 Nov 2026; parts B and C on `staging` 24 Nov 2026 (PR 624), waiting for release night | Y (part B only) | None |
 | 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar, and the hot water form made in Formbay the same as solar | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | None |
 | 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, answers in 24 Nov 2026 (Sparky also drafts the quote: prebuilds, new prebuilds, draft supplier requests), waiting on yes | Y | None |
 | 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | Item 114 first (the shared plan base; it lands whole) |
+| 116 | Network applications and CCEWs follow themselves: TEops reads the Essential Connections and BCNSW eCert emails it already holds, so the job's network application (reference, status, approval PDF) and its CCEW file themselves; then a ready to lodge sheet for the Essential Connections form | Part A planned 24 Nov 2026, waiting on yes; part B waiting on the portal's form questions | Y | None for part A |
 
 ## Owner to-dos left over from shipped items
 
@@ -67,7 +68,7 @@ Live progress (D-U-N-S, Apple, Twilio, Telstra, Google Workspace) is tracked in 
 - **Apple Developer organisation account:** D-U-N-S received 17 Oct 2026; enrolment submitted 17 Oct, Apple is verifying. Blocks item 3, and so item 7.
 - **Twilio:** Business Profile and AU Mobile bundle approved 18 Oct 2026, test number active. Next: port 0455 415 464 from Telstra once the build is tested. Item 7 is built after the native app.
 - **NSW surveillance notice:** get the notice and policy reviewed by Formby or an HR adviser, then 14 days' written notice before AI reading or tracking starts. Blocks AI on chat, email, voice and location (items 2, 5, 6).
-- **BCNSW eCert API access (item 102):** owner to ask BCNSW for API access, the technical pack and test credentials, and whether a fixed IP address is needed (asked for 20 Nov 2026, not yet sent). Blocks item 102 (CCEW sent from the job).
+- **BCNSW eCert API access (item 102):** owner to ask BCNSW for API access, the technical pack and test credentials, and whether a fixed IP address is needed (asked for 20 Nov 2026, not yet sent). Blocks item 102 (CCEW sent from the job). Item 116 part A files the finished CCEW from BCNSW's own email without the API, so the API now only saves the typing.
 - **Google OAuth app:** internal Google Workspace app, no Google verification needed, so this is fast. The shared inbox already uses one; per-user Gmail scopes are an extension.
 
 ---
@@ -1094,12 +1095,12 @@ Owner, 24 Nov 2026: "When we send Statement it shows the link in the email rathe
 - Every statement send is written to `activity_log` (entity `client`, action `statement_sent`; 2 rows on production) but no page reads client activity, so nobody can see it.
 - Production has 7 site inspections: 3 in progress, 4 scheduled, none ever completed. Every item on the "Solar & Battery Install" checklist is required, each photo item takes one photo, and Mark complete stays grey until all are done. There is no notes box, no way to add a photo that is not on the list, no tasks, and the photos stay on the inspection page (never in the job's Photos tab). The checklist is picked by hand when the inspection is booked, and there are two: "Solar & Battery Install" and "General Electrical".
 
-**Part A: statements (bug fix, into `main`, no migration)**
+**Part A: statements (bug fix, into `main`, no migration). BUILT 24 Nov 2026, live.**
 
 1. The statement email gets a "View and pay your statement" button, the same way the invoice email does. The address is no longer typed in the message.
 2. The Statement line on the Clients page shows "Last sent 21 Nov to accounts@... by Jasper", with a History fold listing every send (date, who to, who sent it, the amount owing at the time). The invoice panel's Email statement button shows the same last-sent line beside it. Read from the activity log rows already being written, so the 2 sends already made show up.
 
-**Part B: site inspections (feature, into `staging`, one migration)**
+**Part B: site inspections (feature, into `staging`, one migration). BUILT 24 Nov 2026 with part C, draft PR, the SQL waiting on its yes.** As built: the checklist tables gain `proposal_types`, the choice and short answer kinds, `task_when`, `task_text` and `fills_answer`; photos are in `site_inspection_photos`; `submit_site_inspection()` lands everything through `land_site_inspection()`; a trigger on `projects.lead_id` lands a lead's inspection when its quote is made (so no change to `leads.html` or `email-compose.js`); the page is `public/js/site-inspection.js`, the Settings editor `public/js/inspection-templates.js`. A photo or question two lists share (the switchboard on Solar and Battery) is asked once. Not built: working with no signal (the page needs a connection, as before).
 
 1. **Nothing blocks Submit.** Every question and photo is a suggestion. Submit always works; what was skipped is listed quietly at the bottom ("Not done: Roof profile, Meter upgrade"), for the office to see.
 2. **Photos.** Each suggested photo takes any number of pictures (camera or library) and they carry that label. "Add photo" at the bottom takes anything else with a label typed or picked from the checklist's labels. A label can be changed after.
@@ -1288,3 +1289,48 @@ Size: large.
 Test on staging: Admin test login; the Done means clicks; needs the AI key on staging.
 Simpler: nobody counts points off a plan with a highlighter or types the counts into the quote. Counting is checked by eye on the plan itself because an AI count of a dense plan will miss some, which is why every counted point is a visible mark.
 Best model: Fable 5.1, effort high, because it is a new agent on the shared plan editor.
+
+## 116. Network applications and CCEWs follow themselves from the portal emails (planned 24 Nov 2026, part A waiting on yes)
+
+Owner, 24 Nov 2026: "Let's plan connecting the ecert and essential energy portal for solar applications what info do you need and from where? Should I get cowork to search for it instead of code and report back to code?"
+
+Found 24 Nov 2026:
+
+- **No way in from outside.** Web search found no public API for Essential Energy's Essential Connections portal (it runs on Salesforce) or for the NSW CER Installer Portal (its FAQ, as quoted in search results, says it integrates with network systems only). The only API is BCNSW eCert's (item 102, by application). Not yet read first hand: cloud sessions cannot open `www.nsw.gov.au`, `www.energy.nsw.gov.au` or `www.essentialenergy.com.au` (all three refused, 24 Nov 2026).
+- **Both portals already email everything, and TEops already has those emails.** Production `emails` (mailboxes connected: sales@, jasper@, nathan@, guy@) holds, from `sf.donotreply@essentialenergy.com.au`: "Essential Energy Connection Application Approved" (5, each with the approval PDF; the body has the ECN project reference, the case number, the customer name and the site address), "Case Submitted, Ready for Payment" (5, with a PDF), "ITC, Pending Installation" (4), "Declined" (4), "Connection Application, Requires Updates" (2), "CCEW Follow-Up" (1). From `donotreply_bcnsw@customerservice.nsw.gov.au`: "BCNSW, CCEW submitted, <address>, NMI <number>" (16, each with the certificate attached as "COC - ElectricalWork.pdf"). Approvals go to whoever lodged (Nathan), update requests to the owner.
+- **The DNSP page is unused:** `dnsp_records` has 0 rows on production. Nobody types the applications in.
+- Energex's portal sends the same kind of email for Gold Coast jobs (submitted, offer made, offer accepted, more information needed, each with the NMI), seen in the owner's Gmail from January to June 2026.
+- The solar chain on Essential Energy's network from 23 Nov 2026 (from search results, to be confirmed first hand): application in Essential Connections before the install, an approved application creates the job in the NSW CER Installer Portal, the installer registers, tests and commissions there, and that portal handles the CCEW.
+
+Plan:
+
+**Part A (needs nothing from outside, can be built now): TEops reads the portal emails.**
+
+1. An Essential Connections email is matched to its job by site address, then customer name. The job gets its network application by itself: network, ECN and case number, the status in the portal's own words (submitted, ready for payment, needs updates, approved, declined, pending installation), the date, and the approval PDF in the job's Documents. The DNSP page becomes the list of them, nothing typed.
+2. "Needs updates" and "Declined" raise a task on the job for whoever lodged it, with the email one tap away.
+3. A BCNSW "CCEW submitted" email is matched by the NMI in its subject, then the address. The certificate is filed on the job's Compliance (CCEW) card (`projects.ccew_file_path`), so "No CCEW uploaded yet" clears and the handover check passes with nobody downloading or uploading. Any job, solar or not, however the certificate was made (eCert by hand, Formbay, the CER Installer Portal, the API later). A certificate already on the job is kept.
+4. An email that matches no job, or more than one, is never guessed: it waits in a short "Pick the job" list on the DNSP page.
+5. The first run reads the emails already held, so past applications and certificates land on their jobs.
+6. The "Lodge the DNSP connection application" job task ticks itself when the submitted email arrives.
+
+**Part B (needs the portal's form questions): a ready to lodge sheet.** On a solar or battery job, one panel with every answer the Essential Connections form asks, in the form's order, filled from the job (customer, site, NMI, phases, export limit, inverter and battery make, model and size), each with a copy button, and anything missing in red with a link to where it is typed. The person still lodges in the portal, because there is no API.
+
+**Part C (only if they say yes): lodging from TEops.** Ask Essential Energy and the CER Installer Portal's support whether an API or a bulk upload exists for an installer's own software. Emails to be drafted for the owner.
+
+Info still needed, and from where:
+
+- The questions on the Essential Connections form "Modify an existing or add a new embedded generation system", in order, with the choices: the public Essential Connections Portal Guide PDF, plus screenshots of one real application the next time one is lodged (taken by hand, never by a bot in the portal).
+- What the CER Installer Portal asks at register, test and commission, how it sends the CCEW, what it emails: the public pages, FAQ and user guide at `energy.nsw.gov.au/installer-portal`.
+- The eCert API technical pack and how to apply today (item 102): the nsw.gov.au page "Software providers and developers: API documentation and support".
+- How to get it: Cowork on the laptop reads the public pages and saves the files and a summary into one Google Drive folder ("TEops portals"), which a cloud chat can read; or the three sites are added to the cloud environment's allowed domains and a chat reads them itself. Cowork does not log in to or click through any portal (eCert's terms ban driving the portal with a bot; treat the others the same).
+- From the owner: who lodges applications besides Nathan (Cooper's mailbox is not connected in TEops, so his portal emails would be missed).
+
+Done means (part A): (1) open a job with an approved Essential application: its Summary shows the network application as Approved with the ECN, and the approval PDF is in Documents, nothing typed; (2) open the DNSP page: every application is listed with its status, and anything unmatched sits under "Pick the job"; (3) open a job whose CCEW was submitted in eCert: the Compliance (CCEW) card shows the certificate and Needs attention no longer says "No CCEW uploaded yet"; (4) submit a new CCEW in eCert for a test job: within 15 minutes it is on the job; (5) a "Requires Updates" email shows as a task on its job.
+
+Touches: `public/js/supabase-client.js` (the DNSP helpers, `?v=` bump), `public/dnsp.html` (rebuilt as the list plus "Pick the job"), `public/project.html` (mounts one new card file, no new inline code), `public/js/network-application-card.js` (new), `netlify/functions/_shared/gmail-sync.js` (hands a portal email to the reader), `netlify/functions/_shared/portal-email-intake.js` (new: read, match, file), `netlify/functions/_shared/email-attachment-files.js` (reused), one migration (new columns on `dnsp_records`: case number, ECN, portal status, source email, approval file; one function for the catch-up run).
+Overlaps: item 102 (eCert API, not started, same CCEW card and column: build 102 after this); item 101 (Formbay also files a CCEW on the same column; the rule "a certificate already on the job is kept" covers both); PR 624 (`claude/sleepy-carson-kpbe9s`, item 112) changes one line of `public/dnsp.html` (a `?v=` bump). No other open PR or unmerged branch touches these files (checked 24 Nov 2026).
+Kind: feature into `staging`; migration yes; money, stock, RLS or payroll no.
+Size: medium (a morning to a day).
+Test on staging: Admin test login; the Done means clicks on jobs seeded with copies of the real emails (staging has no Gmail key, so the emails are loaded as rows).
+Simpler: nobody types an application into the DNSP page, checks the portal for a status, or downloads a CCEW and uploads it to the job. No toggle and no manual step added; "Pick the job" exists only for an email that fits no job or two.
+Best model: Opus 5.5, effort high, because it is a feature build with a known shape and one small migration (no money or stock).

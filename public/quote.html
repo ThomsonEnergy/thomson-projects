@@ -277,7 +277,7 @@
   </div>
   <div id="approve-bar" class="q-approve-bar"></div>
 
-  <script src="/js/supabase-client.js?v=149"></script>
+  <script src="/js/supabase-client.js?v=151"></script>
   <script src="/js/schedule-of-rates.js?v=5"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script>
@@ -658,7 +658,7 @@
       const picturesHtml = galleryHtml(pictures.slice(scopePics.length));
       const onSystemPage = (template === 'solar' || template === 'battery') && !vInfo; // else they print on the Photos page
 
-      const docLabel = vInfo ? 'Variation' : ({ quick_estimate: 'Estimate', service_work: 'Service quote' }[template] || 'Proposal');
+      const docLabel = vInfo ? 'Variation' : ({ quick_estimate: 'Estimate', service_work: 'Quote' }[template] || 'Proposal');
       const qNum = project.quote_number ? `Q${project.quote_number}` : '';
       const jobNo = vInfo ? thisVariation.job_number : project.job_number; // the quote row has none once it became a job
       const jNum = jobNo ? `J${jobNo}` : '';

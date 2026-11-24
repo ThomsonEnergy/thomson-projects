@@ -37,7 +37,7 @@ function tasksFor(template, a) {
     if (yes('induction_needed')) rows.push(pre('Complete the site induction or get the work permit'));
     if (a.power_off_ok === 'No') rows.push(pre('Plan how to isolate safely - the client cannot have the power switched off'));
 
-    rows.push(handover('Photograph the fault and the repair (before and after)'));
+    rows.push(handover('Photograph the work before and after'));
     rows.push(handover('Test and record results; issue a Certificate of Electrical Safety if required'));
     if (yes('repeat_issue')) rows.push(handover('Note the root cause and recommend any follow-up work to the client'));
   }

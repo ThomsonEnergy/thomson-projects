@@ -16,7 +16,7 @@ const PROPOSAL_PICTURE_TYPES = [
   { key: 'battery', label: 'Battery', builtIn: '/img/showcase/battery.jpg' },
   { key: 'new_build', label: 'New Build' },
   { key: 'renovation', label: 'Renovation' },
-  { key: 'service_work', label: 'Service Work' },
+  { key: 'service_work', label: 'Electrical work' },
   { key: 'quick_estimate', label: 'Quick Estimate' },
 ];
 const PROPOSAL_PICTURE_BUILT_IN = '/img/showcase/shed-solar.jpg';

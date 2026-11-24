@@ -82,12 +82,16 @@ const TEMPLATE_QUESTIONS = {
     { id: 'smoke_alarms', type: 'yesno', label: 'Smoke alarm upgrade required?' },
     { id: 'deadline', type: 'text', label: 'Hard deadline / must be finished by', placeholder: 'e.g. before settlement on 30 Nov' },
   ],
+  // General electrical work, not only faults (owner, 24 Nov 2026, item 112 part C): shown as
+  // "Electrical work". 'fault' keeps its key (older quotes, the referral form and the lead reader
+  // all save under it) but asks what the client wants done, whatever the kind of work.
   service_work: [
-    { id: 'urgency', type: 'select', label: 'Urgency', options: ['Emergency', 'Same day', 'This week', 'Routine'] },
-    { id: 'fault', type: 'text', label: 'Fault or request', placeholder: 'e.g. Kitchen circuit keeps tripping' },
-    { id: 'repeat_issue', type: 'yesno', label: 'Repeat issue, or previously attempted by us or another electrician?' },
+    { id: 'work_kind', type: 'select', label: 'Kind of work', options: ['Repair or fault', 'Upgrade or replacement', 'New install or addition', 'Maintenance or testing', 'Other'] },
+    { id: 'fault', type: 'text', label: 'What the client wants done', placeholder: 'e.g. 6 new power points and an oven circuit' },
+    { id: 'urgency', type: 'select', label: 'When it is needed', options: ['Emergency', 'Same day', 'This week', 'Routine'] },
+    { id: 'repeat_issue', type: 'yesno', label: 'Repeat issue, or previously attempted by us or another electrician?', showWhen: { id: 'work_kind', is: 'Repair or fault' } },
     { id: 'power_off_ok', type: 'yesno', label: 'OK to switch the power off during the works?' },
-    { id: 'parts_needed', type: 'yesno', label: 'Parts need to be sourced? (not on the van)' },
+    { id: 'parts_needed', type: 'yesno', label: 'Parts or equipment to order? (not on the van)' },
     { id: 'induction_needed', type: 'yesno', label: 'Site induction or work permit required?' },
     { id: 'site_contact', type: 'text', label: 'Site contact and access arrangements', placeholder: 'e.g. tenant Sam on 04xx xxx xxx, key in lockbox' },
   ],
@@ -131,7 +135,7 @@ const TEMPLATE_QUESTION_TITLES = {
   solar: 'Solar questions',
   battery: 'Battery questions',
   renovation: 'Renovation questions',
-  service_work: 'Service work questions',
+  service_work: 'Electrical work questions',
 };
 
 // True when the quote carries batteries: a Battery proposal, or a Solar one with Batteries as well.
@@ -141,9 +145,13 @@ function quoteHasBattery(template, answers) {
 
 // Every question group this quote asks, in order: general, the template's own, then the
 // battery set for a Solar quote with Batteries as well.
-function questionGroupsForQuote(template, answers) {
+// A question with showWhen is asked only when the question it names has that answer (or it already
+// holds an answer of its own, so nothing given earlier disappears). opts.all lists every question.
+function questionGroupsForQuote(template, answers, opts) {
+  const a = answers || {};
+  const asks = (q) => !q.showWhen || (opts && opts.all) || a[q.showWhen.id] === q.showWhen.is || !!String(a[q.id] ?? '').trim();
   const groups = [{ title: 'Where this came from', questions: GENERAL_QUESTIONS }];
-  if (TEMPLATE_QUESTIONS[template]) groups.push({ title: TEMPLATE_QUESTION_TITLES[template], questions: TEMPLATE_QUESTIONS[template] });
+  if (TEMPLATE_QUESTIONS[template]) groups.push({ title: TEMPLATE_QUESTION_TITLES[template], questions: TEMPLATE_QUESTIONS[template].filter(asks) });
   if (template === 'solar' && quoteHasBattery(template, answers)) {
     // the existing system question is already in the solar set: asked once
     const asked = new Set(SOLAR_QUESTIONS.map(q => q.id));
@@ -197,6 +205,15 @@ function questionInputHtml(q, value, template) {
 // "Batteries as well" answer changes (the page listens for change on .tq-input[data-qid=with_battery]).
 function renderTemplateQuestions(container, template, answers) {
   answers = answers || {};
+  // a question others depend on (showWhen): changing it draws the form again from what is in the boxes
+  const depends = new Set(questionGroupsForQuote(template, {}, { all: true }).flatMap(g => g.questions).map(q => q.showWhen && q.showWhen.id).filter(Boolean));
+  container.onchange = (e) => {
+    const box = e.target.closest('.tq-input');
+    if (!box || !depends.has(box.dataset.qid)) return;
+    const now = { ...answers };
+    container.querySelectorAll('.tq-input').forEach(el => { now[el.dataset.qid] = el.value; });
+    renderTemplateQuestions(container, template, now);
+  };
   container.innerHTML = questionGroupsForQuote(template, answers).map(g => `
     <div class="tq-group" style="grid-column:1 / -1;">
       <h3 style="margin:14px 0 4px; font-size:14px;">${g.title}</h3>
@@ -260,7 +277,7 @@ const TEMPLATE_INFO = {
   battery: { label: 'Battery Proposal', note: 'Battery questions (backup, AS/NZS 5139 location, CEC list, VPP, federal discount), checked before sending, with the BSTC credit on the quote. No Pylon design: the battery is named on the quote\'s lines.', photoCategory: 'solar', showDeposit: true, showPylon: false },
   quick_estimate: { label: 'Quick Estimate', note: 'Single cost centre, no deposit, labelled "Estimate only" for the client and invoiced from actual hours and materials.', photoCategory: 'general', showDeposit: false, showPylon: false, singleStage: true },
   renovation: { label: 'Renovation', note: 'Multi-stage renovation with a deposit. Asks about asbestos, switchboard, approvals and occupancy, which set up the pre-work and handover tasks.', photoCategory: 'electrical', showDeposit: true, showPylon: false },
-  service_work: { label: 'Service Work', note: 'Single-stage service call or repair with a deposit. Asks about urgency, access and parts.', photoCategory: 'electrical', showDeposit: true, showPylon: false, singleStage: true },
+  service_work: { label: 'Electrical work', note: 'General electrical work in one stage with a deposit: repairs, upgrades, additions and maintenance. Asks the kind of work, when it is needed, access and parts.', photoCategory: 'electrical', showDeposit: true, showPylon: false, singleStage: true },
 };
 
 // Default deposit % and payment stages for each type, set at Create and again when the type is

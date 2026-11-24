@@ -4686,8 +4686,8 @@ async function findLinkedSiteInspection(project) {
   return null;
 }
 
-// Schedules a site inspection against a lead or job/quote - picks a
-// checklist template (see Settings > Inspection Checklists) and who/when,
+// Schedules a site inspection against a lead or job/quote - the checklist
+// for the quote's type (see Settings > Inspection Checklists) and who/when,
 // creates the site_inspections row plus a matching schedule_assignments
 // block (block_type 'site_inspection') so it shows up on the Schedule
 // page like any other booking. `record` is the lead or project row
@@ -4699,9 +4699,19 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
   document.body.appendChild(overlay);
 
   const [{ data: templates }, { data: staff }] = await Promise.all([
-    supabaseClient.from('inspection_checklist_templates').select('id, name').eq('active', true).eq('checklist_type', 'site_inspection').order('sort_order'),
+    supabaseClient.from('inspection_checklist_templates').select('id, name, proposal_types').eq('active', true).eq('checklist_type', 'site_inspection').order('sort_order'),
     supabaseClient.from('profiles').select('id, full_name').eq('active', true).order('full_name'),
   ]);
+  // A quote or job takes the checklist for its type by itself (item 112): Solar with batteries
+  // takes the battery list too, an off-grid quote the off-grid list. A lead, or a type with no
+  // list of its own, still asks.
+  const answers = (kind === 'project' && record.template_answers) || {};
+  const wanted = kind !== 'project' ? [] : [
+    record.proposal_template,
+    record.proposal_template === 'solar' && answers.with_battery === 'Yes' ? 'battery' : null,
+    answers.grid_type === 'Off grid' ? 'off_grid' : null,
+  ].filter(Boolean);
+  const picked = [...new Set(wanted.map(t => (templates || []).find(x => (x.proposal_types || []).includes(t))).filter(Boolean))];
 
   if (!templates || !templates.length) {
     overlay.innerHTML = `<div class="card" style="max-width:420px; width:100%;"><div class="error-box">No checklist templates set up yet - add one under Settings &gt; Inspection Checklists first.</div><button type="button" class="secondary" id="si-close-btn" style="margin-top:10px; width:100%;">Close</button></div>`;
@@ -4712,9 +4722,11 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
   overlay.innerHTML = `
     <div class="card" style="max-width:460px; width:100%; max-height:88vh; overflow-y:auto;">
       <h2>Schedule inspection</h2>
-      <label style="margin-top:0">Checklist</label>
-      <select id="si-template">${templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select>
-      <label>Assign to</label>
+      ${picked.length
+        ? `<p class="subtitle" style="margin:0 0 4px;">Checklist: ${escapeHtml(picked.map(t => t.name).join(' + '))}</p>`
+        : `<label style="margin-top:0">Checklist</label>
+      <select id="si-template">${templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}</select>`}
+      <label${picked.length ? ' style="margin-top:0"' : ''}>Assign to</label>
       <select id="si-staff">${(staff || []).map(s => `<option value="${s.id}">${escapeHtml(s.full_name || 'Unnamed')}</option>`).join('')}</select>
       <div class="grid cols-3">
         <div>
@@ -4789,7 +4801,9 @@ async function openScheduleInspectionPanel(record, kind, onScheduled) {
       const { data: inspection, error } = await supabaseClient.from('site_inspections').insert({
         lead_id: kind === 'lead' ? record.id : null,
         project_id: kind === 'project' ? record.id : null,
-        template_id: overlay.querySelector('#si-template').value,
+        created_by: (await supabaseClient.auth.getUser()).data.user.id, // who booked it: its tasks go to them
+        template_id: picked.length ? picked[0].id : overlay.querySelector('#si-template').value,
+        extra_template_ids: picked.slice(1).map(t => t.id),
       }).select('id').single();
       if (error) throw error;
 
@@ -7012,9 +7026,9 @@ const loadInvoiceActuals = () => loadJsOnce('/js/project-invoice-actuals.js?v=11
 // The Stock / prebuild picker (js/stock-picker.js): variations on the job page and items added to an invoice.
 const loadStockPicker = () => loadJsOnce('/js/stock-picker.js?v=1', () => typeof openVariationStockPicker === 'function');
 const loadInvoiceActions = () => Promise.all([
-  loadJsOnce('/js/email-compose.js?v=14', () => typeof openEmailComposer === 'function'),
+  loadJsOnce('/js/email-compose.js?v=15', () => typeof openEmailComposer === 'function'),
   loadJsOnce('/js/invoice-status.js?v=3', () => typeof invoiceStatus === 'function'),
-  loadJsOnce('/js/invoice-actions.js?v=8', () => typeof openInvoicePanel === 'function'),
+  loadJsOnce('/js/invoice-actions.js?v=9', () => typeof openInvoicePanel === 'function'),
 ]);
 
 // Warehouse-or-van buttons for the stock panels (Used stock, Scan a part). place = { type, vehicleId }.
