@@ -60,6 +60,7 @@
         <button class="settings-tab" data-panel="billable-rates" data-pricing-only="1">Billable Rates</button>
         <button class="settings-tab" data-panel="auto-replies">Email Agent</button>
         <button class="settings-tab" data-panel="inspections" data-pricing-only="1">Inspection Checklists</button>
+        <button class="settings-tab" data-panel="rebates" data-pricing-only="1">Rebates</button>
         <button class="settings-tab" data-panel="sm8">Job Defaults</button>
         <button class="settings-tab" data-panel="terms" data-admin-only="1">Payment Terms &amp; T&amp;Cs</button>
         <button class="settings-tab" data-panel="users" data-admin-only="1">Users &amp; Roles</button>
@@ -513,6 +514,15 @@
           </div>
         </div>
 
+        <!-- Rebates (js/settings-rebates.js) -->
+        <div class="settings-panel" id="panel-rebates">
+          <div class="card">
+            <h2>Rebates</h2>
+            <p class="subtitle" style="margin-bottom:10px;">The rebates you can offer beside STCs (the NSW energy savings and peak reduction certificates, claimed through Formbay). A quote of a matching type and state lists the switched-on ones, ticked; each prints on the proposal on its own line and comes off the client's price with the STC credit. Type the usual certificate count and the price you pay the client per certificate; both can be changed on a quote.</p>
+            <div id="rebates-list"><p class="subtitle">Loading...</p></div>
+          </div>
+        </div>
+
         <!-- Inspection Checklists -->
         <div class="settings-panel" id="panel-inspections">
           <div class="card">
@@ -864,7 +874,7 @@
       portfolioPhotos = (data.portfolio_photos || []).map(p => typeof p === 'string' ? { url: p, category: 'general' } : { url: p.url, category: p.category || 'general' });
       logoUrl = data.logo_url || '';
       renderLogoPreview();
-      loadJsOnce('/js/settings-proposal-pictures.js?v=3', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
+      loadJsOnce('/js/settings-proposal-pictures.js?v=4', () => typeof loadProposalPicturesCard === 'function').then(() => loadProposalPicturesCard(data)).catch(() => {});
       loadJsOnce('/js/settings-photo-tags.js?v=1', () => typeof loadPhotoTagsCard === 'function').then(() => loadPhotoTagsCard(data)).catch(() => {});
       loadJsOnce('/js/settings-rewards.js?v=2', () => typeof loadRewardsCard === 'function').then(() => loadRewardsCard(data)).catch(() => {});
       loadJsOnce('/js/settings-product-pictures.js?v=1', () => typeof loadProductPicturesCard === 'function').then(() => loadProductPicturesCard()).catch(() => {});
@@ -2695,7 +2705,7 @@
       loadJsOnce('/js/settings-email-rules.js?v=1', () => typeof loadEmailRulesCard === 'function').then(() => loadEmailRulesCard()).catch(() => {});
       // Xero Mapping and connection IDs sit on an admin-only panel; the mapping loads when its tab opens
       if (myRole === 'admin') loads.push(loadUsers(), loadOnboardingDocs(), loadApiKeys(), loadXeroConnection());
-      if (isPricingRoleLocal(myRole)) loads.push(loadRateTiers(), loadJsOnce('/js/inspection-templates.js?v=1', () => typeof loadInspectionTemplates === 'function').then(() => loadInspectionTemplates()));
+      if (isPricingRoleLocal(myRole)) loads.push(loadRateTiers(), loadJsOnce('/js/inspection-templates.js?v=2', () => typeof loadInspectionTemplates === 'function').then(() => loadInspectionTemplates()), loadJsOnce('/js/settings-rebates.js?v=1', () => typeof loadRebatesPanel === 'function').then(() => loadRebatesPanel()));
       const results = await Promise.allSettled(loads);
       results.forEach(r => { if (r.status === 'rejected') console.error('Settings load failed', r.reason); });
     })();

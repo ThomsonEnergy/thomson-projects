@@ -42,6 +42,16 @@ function tasksFor(template, a) {
     if (yes('repeat_issue')) rows.push(handover('Note the root cause and recommend any follow-up work to the client'));
   }
 
+  if (template === 'hot_water') {
+    rows.push(pre('Order the hot water unit'));
+    if (a.hw_plumber !== "The client's") rows.push(pre('Book the plumber for the hot water changeover'));
+    if (yes('hw_tempering')) rows.push(pre('Allow for a tempering valve'));
+    rows.push(handover('Photograph the new unit, its nameplate and the old unit removed'));
+    rows.push(handover('Create the hot water form in Formbay for the STCs (and the certificates for any rebate on the quote)'));
+    rows.push(handover('Take the old unit away'));
+    rows.push(handover('Test and record results; issue a Certificate of Electrical Safety'));
+  }
+
   // Solar (create-default-job-tasks.js adds the ordering and battery tasks next to these).
   if (template === 'solar') {
     if (yes('life_support')) rows.push(pre('Life support equipment on site: tell the network (DNSP) and the client in writing before any planned power-off'));

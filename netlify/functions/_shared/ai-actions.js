@@ -53,7 +53,7 @@ function prefillLink(form, data) {
   }
   return `${FORM_PAGES[form]}?ai_prefill=${enc}`;
 }
-const QUOTE_TEMPLATES = { new_build: 'New Build', solar: 'Solar Proposal', quick_estimate: 'Quick Estimate', renovation: 'Renovation', service_work: 'Electrical work' };
+const QUOTE_TEMPLATES = { new_build: 'New Build', solar: 'Solar Proposal', quick_estimate: 'Quick Estimate', renovation: 'Renovation', service_work: 'Electrical work', hot_water: 'Hot Water' };
 const clip = (v, n) => (v === undefined || v === null || v === '' ? undefined : String(v).trim().slice(0, n));
 const jobLabel = (p) => (p.job_number ? `J${p.job_number}` : p.quote_number ? `Q${p.quote_number}` : '') + (p.name ? ` - ${p.name}` : '');
 

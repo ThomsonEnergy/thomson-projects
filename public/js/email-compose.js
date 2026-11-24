@@ -306,7 +306,7 @@ function openTagEmailModal({ threadId, projectId, onSaved }) {
 //  - Job (no quote): created straight away like "+ New job (no quote)".
 // Either way the conversation is tagged to the new job so it shows on its Emails tab.
 const EMAIL_QUOTE_HANDOFF_KEY = 'te_email_quote_handoff';
-const EMAIL_TEMPLATES = { service_work: 'Electrical work', new_build: 'New build', renovation: 'Renovation', solar: 'Solar proposal', battery: 'Battery proposal', quick_estimate: 'Quick estimate' };
+const EMAIL_TEMPLATES = { service_work: 'Electrical work', hot_water: 'Hot water', new_build: 'New build', renovation: 'Renovation', solar: 'Solar proposal', battery: 'Battery proposal', quick_estimate: 'Quick estimate' };
 
 function openCreateFromEmailModal(threadId) {
   const overlay = document.createElement('div');

@@ -32,7 +32,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=151"></script>
-  <script src="/js/template-questions.js?v=9"></script>
+  <script src="/js/template-questions.js?v=10"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
   <script src="/js/solar-sizing.js?v=3"></script>
@@ -46,10 +46,10 @@
     .roi-preview .roi-paper:empty { display:none; }
     .roi-preview .roi-fig figcaption { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#1a6be6; margin-bottom:4px; }
   </style>
-  <script src="/js/prebuild-form.js?v=5"></script>
+  <script src="/js/prebuild-form.js?v=6"></script>
   <script src="/js/feed.js?v=11"></script>
   <script src="/js/email-view.js?v=4"></script>
-  <script src="/js/email-compose.js?v=15"></script>
+  <script src="/js/email-compose.js?v=16"></script>
   <script src="/js/po-bills-match.js?v=1"></script>
   <script src="/js/job-schedule.js?v=6"></script>
   <script src="/js/job-contacts.js?v=6"></script>
@@ -3665,6 +3665,8 @@
         // Pictures of your system: its own file, saves itself, and the PDF is remade once the changes settle
         loadJsOnce('/js/quote-pictures.js?v=4', () => typeof mountQuotePictures === 'function').then(() => mountQuotePictures({ el: document.getElementById('quote-pictures'), project, onSettled: () => { if ((project.cost_centres || []).some(c => Number(c.quoted_amount) > 0)) autoGenerateQuotePdf(project); } }))
           .catch(() => say('quote-pictures', '<div class="error-box">The pictures box did not load. Refresh the page.</div>'));
+        // A Hot Water quote's unit, saving and rebates: its own file (item 113)
+        if (template === 'hot_water') loadJsOnce('/js/hot-water-card.js?v=1', () => typeof mountHotWater === 'function').then(() => mountHotWater({ project })).catch(() => {});
         wireScopeTools(project);
         renderCustomerGets();
 

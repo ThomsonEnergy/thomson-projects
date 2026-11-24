@@ -584,6 +584,9 @@
 
       const project = data.project;
       const template = project.proposal_template || 'new_build';
+      // A Hot Water quote's rebates and saving (item 113): read by the quote's own token
+      const extras = template === 'hot_water' ? (((await supabaseClient.rpc('get_quote_extras_by_token', { p_token: token })).data) || {}) : {};
+      if (template === 'hot_water') await loadJsOnce('/js/hot-water.js?v=1', () => typeof hwTableHtml === 'function').catch(() => {});
       const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
       const varLinesTotal = (lines) => r2((lines || []).reduce((s, l) => s + (Number(l.amount) || 0), 0));
       // A fixed-price variation's lines as the client sees them (backlog item 43): a prebuild's components
@@ -635,6 +638,9 @@
       const stcOnly = withGst(stcExGst);
       const bstcOnly = withGst(bstcExGst);
       const stcTotal = stcOnly + bstcOnly;
+      // On a Hot Water quote the credit is the STCs plus the ticked rebates: each prints on its own line
+      const rebateLines = (Array.isArray(extras.rebates) ? extras.rebates : []).map(r => ({ label: String(r.label || 'Rebate'), amount: withGst(Number(r.amount) || 0) })).filter(r => r.amount > 0);
+      const rebatesOnly = Math.min(stcOnly, rebateLines.reduce((sum, r) => sum + r.amount, 0));
       const gstAmount = Math.round(total * 0.10 * 100) / 100;
       const totalIncGst = total + gstAmount;
       const totalAfterStc = totalIncGst - stcTotal;
@@ -889,6 +895,19 @@
             ${planOptsHtml}
           </div>
         </section>` : '';
+      // A Hot Water quote's saving: the table the office saw (projects.hot_water.estimate, js/hot-water.js)
+      const hw = extras.hot_water || {};
+      const hwSavingsHtml = (template === 'hot_water' && typeof hwTableHtml === 'function' && !vInfo && hw.show !== false && hw.estimate && (hw.estimate.rows || []).length) ? `
+        <section class="pg savings">
+          ${headHtml}
+          <div class="pg-body">
+            <h1 class="pg-title">Your hot water<br>saving</h1>
+            <p class="pg-lead">${esc((hw.unit && hw.unit.name) || 'Your new hot water unit')}: what it costs to run each way, against the heater you have now.</p>
+            ${hwTableHtml(hw.estimate, hw.chosen, esc)}
+            <p class="note-line">How we worked it out</p>
+            <ul class="note-line" style="margin:4px 0 0 18px;">${(hw.estimate.assumptions || []).map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+          </div>
+        </section>` : '';
       // What we assumed and the yearly table come after the price and payment schedule (owner, 12 Nov
       // 2026). Without the three figures the table is the savings page's own figures, so it stays there.
       const workingHtml = savingsHtml && pres.headline ? `
@@ -967,7 +986,8 @@
             <div class="totals">
               <div class="l">Subtotal (ex GST): ${money(total)}</div>
               <div class="l">GST (10%): ${money(gstAmount)}</div>
-              ${stcOnly > 0 ? `<div class="stc">STC credit${isCompanyClient ? ' (inc GST)' : ''}: -${money(stcOnly)}</div>` : ''}
+              ${stcOnly - rebatesOnly > 0 ? `<div class="stc">STC credit${isCompanyClient ? ' (inc GST)' : ''}: -${money(stcOnly - rebatesOnly)}</div>` : ''}
+              ${rebatesOnly > 0 ? rebateLines.map(r => `<div class="stc">${esc(r.label)}${isCompanyClient ? ' (inc GST)' : ''}: -${money(r.amount)}</div>`).join('') : ''}
               ${bstcOnly > 0 ? `<div class="stc">BSTC credit (battery)${isCompanyClient ? ' (inc GST)' : ''}: -${money(bstcOnly)}</div>` : ''}
               <div class="big">Total${stcTotal > 0 ? (bstcOnly > 0 && stcOnly > 0 ? ' after STC and BSTC credits' : bstcOnly > 0 ? ' after BSTC credit' : ' after STC credit') : ' inc GST'}: ${money(stcTotal > 0 ? totalAfterStc : totalIncGst)}</div>
               ${stcTotal > 0 ? `<div class="note-line">The ${bstcOnly > 0 && stcOnly > 0 ? 'STC and BSTC credits are' : bstcOnly > 0 ? 'BSTC credit is' : 'STC credit is'} applied against your invoice once the system is installed and registered - not a separate payment.</div>` : ''}
@@ -1166,7 +1186,7 @@
       // original quote rather than repeating it.
       content.innerHTML = vInfo
         ? coverHtml + variationPageHtml
-        : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + investHtml + breakdownHtml + workingHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
+        : coverHtml + introHtml + scopeHtml + systemHtml + savingsHtml + hwSavingsHtml + investHtml + breakdownHtml + workingHtml + photosPageHtml + ratesPageHtml + termsPageHtml;
       // on screen only (never on the PDF): clients with a portal login see every quote and job there (item 74)
       content.insertAdjacentHTML('beforeend', '<p class="portal-note" style="text-align:center; font-size:13px; color:var(--q-grey); margin:18px 0 30px;">Have a client portal login? <a href="/portal.html">See all your quotes and jobs</a>.</p>');
 

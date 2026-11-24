@@ -82,6 +82,18 @@ const TEMPLATE_QUESTIONS = {
     { id: 'smoke_alarms', type: 'yesno', label: 'Smoke alarm upgrade required?' },
     { id: 'deadline', type: 'text', label: 'Hard deadline / must be finished by', placeholder: 'e.g. before settlement on 30 Nov' },
   ],
+  // Hot water (item 113). The unit, the rates off the bill and how it will run are on the hot
+  // water card under these (js/hot-water-card.js): the saving reads hw_old and hw_people from here,
+  // and the choices of hw_old are HW_OLD_HEATERS in js/hot-water.js.
+  hot_water: [
+    { id: 'hw_old', type: 'select', label: 'The heater there now', options: ['Electric, full rate', 'Electric, controlled load', 'Gas, mains', 'Gas, LPG bottles', 'Solar hot water', 'None'], required: true },
+    { id: 'hw_old_detail', type: 'text', label: 'Its size and age', placeholder: 'e.g. 250 L, about 12 years' },
+    { id: 'hw_people', type: 'number', label: 'People in the home', placeholder: 'e.g. 4', required: true },
+    { id: 'hw_same_spot', type: 'yesno', label: 'New unit in the same spot?' },
+    EXISTING_PV_QUESTION,
+    { id: 'hw_tempering', type: 'yesno', label: 'Tempering valve needed?' },
+    { id: 'hw_plumber', type: 'select', label: 'Plumber', options: ['Ours', "The client's", 'Subcontractor'] },
+  ],
   // General electrical work, not only faults (owner, 24 Nov 2026, item 112 part C): shown as
   // "Electrical work". 'fault' keeps its key (older quotes, the referral form and the lead reader
   // all save under it) but asks what the client wants done, whatever the kind of work.
@@ -136,6 +148,7 @@ const TEMPLATE_QUESTION_TITLES = {
   battery: 'Battery questions',
   renovation: 'Renovation questions',
   service_work: 'Electrical work questions',
+  hot_water: 'Hot water questions',
 };
 
 // True when the quote carries batteries: a Battery proposal, or a Solar one with Batteries as well.
@@ -277,6 +290,7 @@ const TEMPLATE_INFO = {
   battery: { label: 'Battery Proposal', note: 'Battery questions (backup, AS/NZS 5139 location, CEC list, VPP, federal discount), checked before sending, with the BSTC credit on the quote. No Pylon design: the battery is named on the quote\'s lines.', photoCategory: 'solar', showDeposit: true, showPylon: false },
   quick_estimate: { label: 'Quick Estimate', note: 'Single cost centre, no deposit, labelled "Estimate only" for the client and invoiced from actual hours and materials.', photoCategory: 'general', showDeposit: false, showPylon: false, singleStage: true },
   renovation: { label: 'Renovation', note: 'Multi-stage renovation with a deposit. Asks about asbestos, switchboard, approvals and occupancy, which set up the pre-work and handover tasks.', photoCategory: 'electrical', showDeposit: true, showPylon: false },
+  hot_water: { label: 'Hot Water', note: 'A heat pump or electric hot water unit in one stage with a deposit. The STC credit comes from the unit, other rebates from Settings > Rebates, and the proposal shows what it saves off the power bill.', photoCategory: 'electrical', showDeposit: true, showPylon: false, singleStage: true },
   service_work: { label: 'Electrical work', note: 'General electrical work in one stage with a deposit: repairs, upgrades, additions and maintenance. Asks the kind of work, when it is needed, access and parts.', photoCategory: 'electrical', showDeposit: true, showPylon: false, singleStage: true },
 };
 
@@ -288,6 +302,7 @@ const TEMPLATE_PAYMENT_DEFAULTS = {
   new_build: { deposit: 10, milestones: [] },
   renovation: { deposit: 10, milestones: [] },
   service_work: { deposit: 10, milestones: [] },
+  hot_water: { deposit: 10, milestones: [] },
   solar: {
     deposit: 10,
     milestones: [

@@ -101,7 +101,7 @@ async function emailClientStatement(client, st, btn, msgEl, sendsEl) {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ doc_type: 'client_statement', record_id: client.id }),
       }),
-      loadJsOnce('/js/email-compose.js?v=15', () => typeof openEmailComposer === 'function'),
+      loadJsOnce('/js/email-compose.js?v=16', () => typeof openEmailComposer === 'function'),
     ]);
     const out = await res.json().catch(() => ({}));
     if (!res.ok || !out.ok || !out.path) throw new Error(out.error || 'The PDF could not be made.');

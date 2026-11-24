@@ -9,7 +9,8 @@
 // showToast, friendlyError, openModal).
 
 const PREBUILD_SUBCATEGORIES = {
-  Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs'],
+  // 'Hot water' shows the unit's own boxes (heat pump or electric, litres, efficiency, STCs: item 113)
+  Electrical: ['Lighting', 'Power', 'Trenching', 'Cable Runs', 'Hot water'],
   Solar: ['Panels', 'Batteries', 'Inverters'],
   // These two go into their own stage (cost centre) when added to a quote or job: see
   // PREBUILD_OWN_STAGE_CATEGORIES in supabase-client.js.
@@ -46,6 +47,12 @@ function prebuildFormHtml({ heading = 'Add a prebuild', inPopup = false } = {}) 
         <select class="pb-subcategory"></select>
       </div>
     </div>
+    <div class="grid cols-4 pb-hot-water" style="display:none;">
+      <div><label>Hot water unit</label><select class="pb-hw-kind"><option value="">Not a unit</option><option value="heat_pump">Heat pump</option><option value="electric">Electric storage</option></select></div>
+      <div><label>Litres</label><input class="pb-hw-litres" type="number" inputmode="numeric" step="1" min="0" placeholder="e.g. 270" /></div>
+      <div><label>Heat out per unit of power (COP)</label><input class="pb-hw-cop" type="number" step="0.1" min="0" placeholder="e.g. 3.8" /></div>
+      <div><label>STCs for this model</label><input class="pb-hw-stcs" type="number" inputmode="numeric" step="1" min="0" placeholder="from the Clean Energy Regulator's register" /></div>
+    </div>
 
     <label>Client-facing description</label>
     <p class="subtitle" style="margin:0 0 8px;">What the client sees on the proposal - not the name above. Add components below first so the AI has something real to describe, or write your own.</p>
@@ -75,7 +82,10 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
     const cat = $('.pb-category').value;
     $('.pb-subcategory').innerHTML = `<option value="">None</option>` + (PREBUILD_SUBCATEGORIES[cat] || []).map(s => `<option value="${s}">${s}</option>`).join('');
   }
-  $('.pb-category').addEventListener('change', refreshSubcategoryOptions);
+  // the hot water unit's boxes show only for a Hot water prebuild
+  const refreshHotWaterBoxes = () => { $('.pb-hot-water').style.display = $('.pb-subcategory').value === 'Hot water' ? '' : 'none'; };
+  $('.pb-category').addEventListener('change', () => { refreshSubcategoryOptions(); refreshHotWaterBoxes(); });
+  $('.pb-subcategory').addEventListener('change', refreshHotWaterBoxes);
 
   function addComponentRow({ item_type = 'material', description = '', quantity = 1, unit_cost = '', ai = false, matched = true } = {}) {
     const row = document.createElement('div');
@@ -203,6 +213,8 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
   function clear() {
     editingPrebuildId = null;
     $('.pb-form-heading').textContent = 'Add a prebuild';
+    ['.pb-hw-kind', '.pb-hw-litres', '.pb-hw-cop', '.pb-hw-stcs'].forEach(sel => { $(sel).value = ''; });
+    $('.pb-hot-water').style.display = 'none';
     $('.pb-name').value = '';
     $('.pb-part-number').value = '';
     $('.pb-client-desc').value = '';
@@ -227,6 +239,8 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
       $('.pb-subcategory').insertAdjacentHTML('beforeend', `<option value="${escapeHtml(pb.subcategory)}">${escapeHtml(pb.subcategory)}</option>`);
     }
     $('.pb-subcategory').value = pb.subcategory || '';
+    $('.pb-hw-kind').value = pb.hw_kind || ''; $('.pb-hw-litres').value = pb.hw_litres ?? ''; $('.pb-hw-cop').value = pb.hw_cop ?? ''; $('.pb-hw-stcs').value = pb.stc_count ?? '';
+    refreshHotWaterBoxes();
     $('.pb-components').innerHTML = '';
     (pb.prebuild_components || []).slice().sort((a, b) => a.sort_order - b.sort_order).forEach(addComponentRow);
   }
@@ -315,6 +329,9 @@ function mountPrebuildForm(root, { onSaved, onCancel } = {}) {
         client_description: $('.pb-client-desc').value.trim(),
         category: $('.pb-category').value,
         subcategory: $('.pb-subcategory').value || null,
+        ...($('.pb-subcategory').value === 'Hot water'
+          ? { hw_kind: $('.pb-hw-kind').value || null, hw_litres: parseInt($('.pb-hw-litres').value, 10) || null, hw_cop: parseFloat($('.pb-hw-cop').value) || null, stc_count: parseInt($('.pb-hw-stcs').value, 10) || null }
+          : { hw_kind: null, hw_litres: null, hw_cop: null, stc_count: null }),
       };
 
       const wasEditing = !!editingPrebuildId;

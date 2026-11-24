@@ -29,7 +29,7 @@ const { quoteHasBattery } = require('../../../public/js/template-questions.js');
 async function createDefaultJobTasks(supabaseAdmin, job, newStages) {
   const template = job.proposal_template;
   const answers = job.template_answers || {};
-  if (template === 'renovation' || template === 'service_work') {
+  if (template === 'renovation' || template === 'service_work' || template === 'hot_water') {
     const rows = tasksFor(template, answers).map((t) => ({ ...t, project_id: job.id }));
     if (!rows.length) return;
     const { error } = await supabaseAdmin.from('job_tasks').insert(rows);

@@ -44,7 +44,7 @@ function inspFillChoices() {
 async function loadInspectionTemplates() {
   const listEl = document.getElementById('insp-templates-list');
   // the quote's question lists, for the proposal type boxes and the "fills" picker
-  await loadJsOnce('/js/template-questions.js?v=9', () => typeof TEMPLATE_INFO === 'object').catch(() => {});
+  await loadJsOnce('/js/template-questions.js?v=10', () => typeof TEMPLATE_INFO === 'object').catch(() => {});
   const { data: templates, error } = await supabaseClient.from('inspection_checklist_templates').select('*').order('sort_order');
   if (error) { listEl.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`; return; }
   inspTemplatesCache = templates || [];

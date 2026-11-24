@@ -24,7 +24,7 @@ exports.handler = async (event) => {
 
     const apiKey = await getIntegrationKey('anthropic');
 
-    const typeLine = { solar: 'a grid-connected solar PV system', battery: 'a home battery storage system', renovation: 'a renovation', service_work: 'general electrical work (a repair, an upgrade, a new install or maintenance: see the kind of work in the answers)', quick_estimate: 'an estimate', new_build: 'a new build' }[template] || 'electrical work';
+    const typeLine = { solar: 'a grid-connected solar PV system', battery: 'a home battery storage system', renovation: 'a renovation', service_work: 'general electrical work (a repair, an upgrade, a new install or maintenance: see the kind of work in the answers)', quick_estimate: 'an estimate', hot_water: 'a hot water unit (a heat pump or electric storage unit: supply, install, the old unit removed)', new_build: 'a new build' }[template] || 'electrical work';
     const prompt = `You are writing scope-of-works descriptions for an electrical contractor's client-facing quote.
 
 Project: ${projectName}

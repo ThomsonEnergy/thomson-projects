@@ -17,6 +17,7 @@ const PROPOSAL_PICTURE_TYPES = [
   { key: 'new_build', label: 'New Build' },
   { key: 'renovation', label: 'Renovation' },
   { key: 'service_work', label: 'Electrical work' },
+  { key: 'hot_water', label: 'Hot Water' },
   { key: 'quick_estimate', label: 'Quick Estimate' },
 ];
 const PROPOSAL_PICTURE_BUILT_IN = '/img/showcase/shed-solar.jpg';
