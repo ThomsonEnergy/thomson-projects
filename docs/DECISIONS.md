@@ -4,6 +4,7 @@ Newest first. One line per decision, scope change, idea or finished task, with w
 
 ## 24 Nov 2026
 
+- Apple, 24 Nov 2026: the owner is back in to Apple Developer with `jasper@thomsonenergy.appleaccount.com` and asked for a call back on case 103004717118. Detail: `docs/EXTERNAL_ACCOUNTS.md` ("Apple").
 - Fixed 24 Nov 2026 (owner's "Yes build all"; item 112 part A, bug fix into `main`, no migration): **the statement email has a button, and statement sends show.** "View and pay your statement" replaces the address typed in the message; "Statement last sent ... (History)" shows on the Clients page and the invoice panel, read from the activity log rows already being written. Proved on stand-in data only (the build session cannot open the site): the first real send is the owner's. Next in this chat: item 112 parts B and C, then 113, 114, 115. Detail: `docs/PROJECT_SPEC.md` "Client statements".
 - Apple, 24 Nov 2026 (read from the owner's inbox): the owner could not sign in to Apple Developer because Apple Business renamed the sign-in on 14 Nov 2026. The domain added to Apple Business on 17 Oct was never verified, so the one account on @thomsonenergy.com.au became @thomsonenergy.appleaccount.com. Enrolment still not approved. Detail: `docs/EXTERNAL_ACCOUNTS.md` (Status table and "Apple").
 - Owner, 24 Nov 2026 (item 74b 3c, the "how did you hear about us" question on the link form): a customer on one staff member's link who picks a different staff member pays "no one" the $50. Detail: `docs/IDEAS_BACKLOG.md` item 74b point 7a.
