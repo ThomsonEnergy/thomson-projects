@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 24 Nov 2026 (items 113 and 114, Hot Water and Air Conditioning quote types, planned and waiting on yes; item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 24 Nov 2026 (item 115, New Build plan count and suggest, planned and waiting on yes; items 113 and 114, Hot Water and Air Conditioning quote types, planned and waiting on yes; item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -17,7 +17,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 9 | Staff policy set (gaps and fixes) | Planned, waiting on owner's pick | N | Adviser review (Formby or HR), then load into onboarding documents |
 | 84 | Supplier bills with fewer taps: confident bills and credit notes save themselves, Accept all on a bill, no total prompt when the reader got it, uploads through the same path as emails, the Stock match default leaves junk out, Sales get the bills-to-match push | Reviewed 13 Nov 2026, waiting on yes | N | Turn `supplier_bill_auto_save` on with it |
 | 87 | A bill line that is the same item as a hand-typed PO line takes that line over instead of adding another (PO2020 doubled: the bill's five lines were added beside the five typed ones); the reader pairs by quantity and price when wording and part number do not, a Same as... choice for the rest, PO2020 repaired | Found 13 Nov 2026, planned, waiting on yes | Y (one function, one column) | None |
-| 89 | Sparky draws on plans: markup saved as objects that reopen and move, Sparky reads the plan and drafts an aircon, battery or rough-in layout from a one-line brief, people move, delete and add, ask Sparky to add more or clean up, the symbol schedule becomes quote lines | Planned 14 Nov 2026, waiting on yes | N | Item 90 first (same files) |
+| 89 | Sparky draws on plans: markup saved as objects that reopen and move, Sparky reads the plan and drafts an aircon, battery or rough-in layout from a one-line brief, people move, delete and add, ask Sparky to add more or clean up, the symbol schedule becomes quote lines | Planned 14 Nov 2026, waiting on yes; from 24 Nov 2026 its parts 1 and 5 are in item 114, its aircon layout in 114 stage 2 and its rough-in layout in item 115, leaving Sparky reading a plan in chat and the battery layout | N | Item 90 first (same files) |
 | 99 | The quote saves itself: every box on the quote steps saves as you type, Undo back to the last save point, the AI scope prompt is kept and can be re-run | PR 1 built 18 Nov 2026, on `staging` (`docs/PROJECT_SPEC.md`, "The quote steps save themselves"); PR 2 (the stage table) waiting on yes to its SQL | N | None |
 | 100 | Overheads made plain and accurate: each person's own direct cost on their rate (no averages), indirect as one figure per job hour from the Xero Profit and Loss and real timesheet hours, the % of job profit and its typed-in figure gone | Planned 18 Nov 2026, waiting on yes | N | Xero custom connection needs `accounting.reports.read` |
 | 90 | Sparky changes things from the app: knows the page you are on, one edit tool over a field registry (jobs, quotes, clients, contacts, suppliers, tasks, leads, materials, assets, fleet; never money, stock, status or settings), every change proposed then confirmed, Undo for 24 hours, the same powers for @Sparky in team chat | Planned 14 Nov 2026, waiting on yes | N | None |
@@ -35,6 +35,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, waiting on yes and five answers | Y (part B only) | None |
 | 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar | Planned 24 Nov 2026, waiting on yes and three answers | Y | How the NSW certificates are claimed (owner) |
 | 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, waiting on yes and three answers | Y | None |
+| 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, waiting on yes and two answers | Y | Item 114 stage 1 first (the shared plan base) |
 
 ## Owner to-dos left over from shipped items
 
@@ -1233,3 +1234,39 @@ Size: large (stage 1 two days or more, stage 2 the same again).
 Test on staging: Admin test login; the Done means clicks; stage 2 needs the AI key on staging.
 Simpler: the duct and pipe plan is drawn where the quote is, counted by itself and printed in the proposal, instead of drawn in another program and typed across.
 Best model: Fable 5.1, effort xhigh, because it is a migration with RLS plus a rebuild of the shared plan editor.
+
+## 115. New Build quote: upload the plan, count the electrical on it or put it in the suggested spots (planned 24 Nov 2026, waiting on yes)
+
+Owner, 24 Nov 2026: "Same for new builds allow us to upload the plan and either count the electrical that is already on the plan or put it in the suggested spots and allow us to edit and add."
+
+**Today (from the code).** The plan editor has 23 electrical symbols, measured cable runs and a symbol schedule, all placed by hand, and a saved plan cannot be reopened with its marks movable. Nothing reads a plan. Item 89 (waiting on yes) planned Sparky's rough-in layout and the schedule becoming quote lines. Item 114 stage 1 builds the shared base: the House plan box on the quote, marks saved as data, Add lines from the plan.
+
+**Plan (on top of item 114 stage 1)**
+
+1. **House plan box on New Build and Renovation quotes**, the same one as Air Conditioning: upload the PDF, one or many pages, Draw on plan.
+2. **Count what is on the plan.** For a plan that already shows the electrical (an architect's or builder's electrical layout): press Count. Sparky reads the plan's own legend, finds every point and puts one of our marks on top of each one it found (double power point, light, switch, fan, smoke alarm, data, oven, hot water, switchboard and so on), page by page. Because every counted item is a mark on the plan, a miss or a wrong one is seen and fixed by hand; the count is never just a number to trust. Anything on the legend it has no symbol for is listed as "not matched" with its count for a person to place.
+3. **Put it in the suggested spots.** For a bare floor plan: press Suggest. Sparky finds the rooms and places the points by room type from a standard kept in Settings as data (for example a bedroom: two double power points, a light, a switch at the door, a smoke alarm; a kitchen: bench power points, oven, cooktop, rangehood, fridge, dishwasher), smoke alarms to AS 3786, cable runs back to the switchboard. The standard is editable (Settings > Plan standards), so the suggestion matches how Thomson quotes.
+4. **Edit and add.** Every mark, counted or suggested, is an ordinary object: move, delete, add by hand, or ask Sparky in the bar ("add a double each side of the bed", "clean up") with a list of what changed and Undo. Nothing is saved until Save.
+5. **To the quote.** Add lines from the plan: one line per symbol with its count, and cable metres, against the mapped prebuilds; per stage (rough in, fit off) where the prebuild says so. A plan changed later offers the difference, not a second set.
+6. **In the proposal:** the marked plan prints as its own pages with the schedule.
+
+**Open questions for the owner**
+
+1. The standard for suggested spots: do you have your own points per room, or shall I draft one for you to correct in Settings?
+2. Count only what the plan shows, or count and also flag what looks missing against the standard (a bedroom with no smoke alarm)?
+
+**Done means**
+
+- New quote > New Build: the House plan box shows; upload an electrical plan, Draw on plan, Count: a mark sits on each point and the schedule lists the counts, with anything not matched listed.
+- Delete one wrong mark and add one missed: the schedule follows.
+- A bare floor plan, Suggest: points in every room by the standard, cable runs to the switchboard.
+- "Add a double each side of the bed in Bed 1 and clean up": the list says what changed, Undo puts it back.
+- Save, reopen: every mark still moves. Add lines from the plan: the quote has one line per symbol with the counts.
+
+Touches: `public/js/supabase-client.js` (the editor's Sparky bar, change list and Undo), `public/project.html` (no new inline code), `public/settings.html` (Plan standards as its own file), `public/js/electrical-symbols.js`, `public/js/template-questions.js`, `netlify/functions/plan-markup-background.js` and `agents/prompts/plan-markup.js` (shared with item 114 stage 2), `agents/evals/` (a set of plans with known counts), one migration (the plan standards as data).
+Overlaps: item 114 (builds the base this needs, and shares the drafting function: build 114 stage 1, then this with 114 stage 2), item 89 (this is its rough-in part plus counting; what is left of 89 is Sparky answering questions about a plan in chat and the battery layout), item 90 (same Sparky files), item 99.
+Kind: feature into `staging`; migration yes; money, stock, RLS or payroll no.
+Size: large.
+Test on staging: Admin test login; the Done means clicks; needs the AI key on staging.
+Simpler: nobody counts points off a plan with a highlighter or types the counts into the quote. Counting is checked by eye on the plan itself because an AI count of a dense plan will miss some, which is why every counted point is a visible mark.
+Best model: Fable 5.1, effort high, because it is a new agent on the shared plan editor.
