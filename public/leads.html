@@ -54,6 +54,7 @@
       <p class="subtitle" style="margin-bottom:14px;">"Book a call" requests from the website, with the time they asked for. Unclaimed ones also show as up-for-grabs on the Home page.</p>
       <div id="callback-requests-list"><p class="subtitle">Loading...</p></div>
     </div>
+    <div id="link-bonuses"></div><!-- js/leads-staff.js: staff link bonuses, Cancel (item 74b 7a) -->
     </div>
     <div class="page-col" style="flex-grow:1.2;">
     <div class="card">
@@ -71,8 +72,9 @@
     </div>
   </div>
 
-  <script src="/js/supabase-client.js?v=150"></script>
+  <script src="/js/supabase-client.js?v=151"></script>
   <script src="/js/theme.js?v=2"></script>
+  <script src="/js/leads-staff.js?v=1"></script>
   <script>
     function timeAgo(dateStr) {
       const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -85,7 +87,7 @@
     }
 
     function sourceLabel(source) {
-      return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form', portal_referral: 'Referral link' }[source] || source;
+      return { package: 'Package click', brand: 'Brand click', calculator: 'Solar calculator', enquiry_modal: 'Enquiry form', portal_referral: 'Referral link', staff_link: 'Staff link' }[source] || source;
     }
 
     // A value inside a PostgREST filter (.or('email.eq.…')): quoted, so a comma, bracket or
@@ -163,7 +165,7 @@
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
             <div>
               <h2 style="margin:0;">${escapeHtml(lead.name || '(no name given)')}</h2>
-              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))}${lead.details && lead.details.referred_by ? ` from ${escapeHtml(lead.details.referred_by)}` : ''}${lead.referral_kind ? ` (${escapeHtml(lead.referral_kind)})` : ''}${lead.already_client ? ' &middot; <span class="badge draft">already a client, no reward</span>' : ''} &middot; ${timeAgo(lead.created_at)}</p>
+              <p class="subtitle" style="margin:4px 0 0;">${escapeHtml(sourceLabel(lead.source))}${leadFromHtml(lead)} &middot; ${timeAgo(lead.created_at)}</p>
             </div>
             <button type="button" class="secondary" id="ld-close-btn" style="font-size:12px; padding:6px 10px;">Close</button>
           </div>
@@ -177,6 +179,7 @@
           <div id="ld-convert-msg"></div>
           `}
 
+          <div id="ld-from"></div><!-- js/leads-staff.js: how they heard of us, Already ours (item 74b 7a) -->
           <div class="card" style="margin-top:14px;">
             <h2 style="font-size:15px;">What they want</h2>
             <p id="ld-summary-text">${lead.ai_summary ? escapeHtml(lead.ai_summary) : '<span class="subtitle">Generating...</span>'}</p>
@@ -207,6 +210,7 @@
         </div>`;
       if (dock) dock.replaceChildren(overlay); else document.body.appendChild(overlay);
       overlay.querySelector('#ld-close-btn').addEventListener('click', () => overlay.remove());
+      wireLeadFrom(lead, overlay, loadLeads);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
       if (!lead.ai_summary) {
@@ -388,7 +392,7 @@
               <div class="name">${escapeHtml(l.name || '(no name given)')}</div>
               <p class="subtitle lead-summary-text" data-id="${l.id}" style="margin:4px 0; max-width:520px;">${l.ai_summary ? escapeHtml(l.ai_summary) : 'Generating description...'}</p>
               <div class="meta">
-                ${escapeHtml(sourceLabel(l.source))} &middot; ${timeAgo(l.created_at)}
+                ${escapeHtml(sourceLabel(l.source))}${leadFromHtml(l)} &middot; ${timeAgo(l.created_at)}
                 ${l.phone ? ' &middot; ' + escapeHtml(l.phone) : ''}${l.email ? ' &middot; ' + escapeHtml(l.email) : ''}
               </div>
             </div>
@@ -602,6 +606,7 @@
 
       await loadCallbackRequests();
       await loadLeads();
+      loadLinkBonuses();
     })();
 
     async function openLeadById(id) {

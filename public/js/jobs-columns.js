@@ -5,7 +5,7 @@
 // is js/jobs-columns-panel.js, loaded when the button is pressed.
 // Called by projects.html, which loads the rows. Writes profiles.ui_prefs (the person's own row).
 
-const JOB_TYPE_LABELS = { direct_job: 'Do and charge', new_build: 'New build', solar: 'Solar', battery: 'Battery', quick_estimate: 'Quick estimate', renovation: 'Renovation', service_work: 'Service work' };
+const JOB_TYPE_LABELS = { direct_job: 'Do and charge', new_build: 'New build', solar: 'Solar', battery: 'Battery', quick_estimate: 'Quick estimate', renovation: 'Renovation', service_work: 'Electrical work' };
 // The app's one status colour set (.badge in style.css): grey not started, amber waiting on
 // someone else, red needs us, green done, blue (the rest) under way.
 const JOB_STAGE_BADGE = { lead: 'draft', draft_quote: 'draft', archived: 'draft', quote_sent: 'amber', awaiting_client_action: 'amber', awaiting_payment: 'amber', awaiting_action: 'red', job_not_complete: 'red', complete: 'complete' };

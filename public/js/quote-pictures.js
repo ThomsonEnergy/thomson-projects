@@ -194,12 +194,12 @@ function mountQuotePictures({ el, project, onSettled }) {
       const insp = typeof findLinkedSiteInspection === 'function' ? await findLinkedSiteInspection(project).catch(() => null) : null;
       const [{ data, error }, { data: answers }] = await Promise.all([
         supabaseClient.from('project_photos').select('url, caption, created_at').eq('project_id', project.id).order('created_at', { ascending: false }).limit(LIMIT),
-        insp ? supabaseClient.from('site_inspection_answers').select('photo_path, photo_paths').eq('inspection_id', insp.id) : Promise.resolve({ data: [] }),
+        // the inspection's own photos, with their labels (they are also in Site Photos once it is submitted)
+        insp ? supabaseClient.from('site_inspection_photos').select('url, label').eq('inspection_id', insp.id).order('created_at') : Promise.resolve({ data: [] }),
       ]);
       if (error) throw error;
-      const visit = (answers || []).flatMap(a => (Array.isArray(a.photo_paths) && a.photo_paths.length ? a.photo_paths : (a.photo_path ? [a.photo_path] : [])));
       const seen = new Set();
-      const photos = [...visit.map(url => ({ url, caption: 'Site visit' })), ...(data || [])]
+      const photos = [...(answers || []).map(p => ({ url: p.url, caption: 'Inspection: ' + p.label })), ...(data || [])]
         .filter(p => p.url && !isVideoUrl(p.url) && !/\.pdf(\?|$)/i.test(p.url) && !seen.has(p.url) && seen.add(p.url));
       const overlay = openModal(`
         <h2 style="margin-bottom:4px;">This job's pictures</h2>

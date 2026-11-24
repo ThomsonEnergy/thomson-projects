@@ -3,11 +3,18 @@
 // in that client's name and reads nothing back but the client's name and the reward amounts.
 // Called by refer.js (public, the token is the check), portal-read.js (the referrer's rows) and
 // client-referral.js (staff: the link, Regenerate, Send link).
+// A staff member's personal link (item 74b 7a) is refer.html?s=<staff_referral_links.token>: the
+// customer fills it in themselves, the lead is that person's ("From Nathan"), and the database
+// decides whether it is Already ours (staff_lead_check: no link bonus, the KPIs still count).
 //
 //   clientForToken(admin, token)        -> the client row or null
 //   rewardTerms(admin, client)          -> what the form shows beside each choice
 //   submitReferral(admin, client, body) -> { kind: 'lead', id } or { kind: 'quote', id, ref }
 //   referralRows(admin, clientIds)      -> the referrer's referrals for the portal's Quotes list
+//   staffForToken(admin, token)         -> the active staff member's { id, full_name } or null
+//   staffLinkInfo(admin, staff)         -> what their form shows: first name, the heard-of-us choices, the team
+//                                          (publicInfo() drops the user ids before it leaves the server)
+//   submitStaffLead(admin, staff, body) -> { kind: 'lead', id }
 // Writes leads, lead-uploads storage, projects (through portal-requests.js for "Me"), activity_log,
 // notifications.
 
@@ -101,13 +108,43 @@ function leadAddress(input, address) {
   };
 }
 
-async function submitReferral(admin, client, body) {
-  // this use is logged first and then counted with the hour's others, so many at the same moment
-  // cannot all slip under the limit
+// This use of a link is logged first and then counted with the hour's others, so many at the same
+// moment cannot all slip under the limit.
+async function countUse(admin, entityType, entityId, description) {
   const since = new Date(Date.now() - 3600 * 1000).toISOString();
-  await admin.from('activity_log').insert({ entity_type: 'client', entity_id: client.id, action: 'referral_link_used', description: `Referral link used (${body.who === 'me' ? 'their own job' : 'a referral'})` });
-  const { count } = await admin.from('activity_log').select('id', { count: 'exact', head: true }).eq('entity_type', 'client').eq('entity_id', client.id).eq('action', 'referral_link_used').gte('created_at', since);
+  await admin.from('activity_log').insert({ entity_type: entityType, entity_id: entityId, action: 'referral_link_used', description });
+  const { count } = await admin.from('activity_log').select('id', { count: 'exact', head: true }).eq('entity_type', entityType).eq('entity_id', entityId).eq('action', 'referral_link_used').gte('created_at', since);
   if ((count || 0) > PER_HOUR) throw new Refused('That is a lot in an hour. Please call us instead.');
+}
+
+// The photos sent with a form: checked (kind, count, size) before anything is written.
+function checkFiles(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  if (list.length > MAX_FILES) throw new Refused(`Up to ${MAX_FILES} photos, please.`);
+  let total = 0;
+  return list.map((f) => {
+    const mime = String(f.type || '').toLowerCase();
+    if (!OK_MIME.test(mime)) throw new Refused('Photos (JPG, PNG, HEIC) and PDFs only, please.');
+    const bytes = Buffer.from(String(f.data || ''), 'base64');
+    total += bytes.length;
+    if (!bytes.length || total > MAX_TOTAL) throw new Refused('The photos come to more than 4 MB. Send fewer, or smaller ones.');
+    return { mime, bytes, name: clean(f.name, 100).replace(/[^a-zA-Z0-9._ -]/g, '_') || 'photo' };
+  });
+}
+// ...then saved in the private lead-uploads bucket and listed on the lead's details.
+async function saveFiles(admin, leadId, files, details) {
+  const attachments = [];
+  for (const f of files) {
+    const path = `referrals/${leadId}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${f.name.replace(/\s+/g, '_')}`;
+    const { error: upErr } = await admin.storage.from('lead-uploads').upload(path, f.bytes, { contentType: f.mime, upsert: false });
+    if (upErr) { console.error('referral photo not saved', upErr.message); continue; }
+    attachments.push({ path, name: f.name, type: f.mime });
+  }
+  if (attachments.length) await admin.from('leads').update({ details: { ...details, attachments } }).eq('id', leadId);
+}
+
+async function submitReferral(admin, client, body) {
+  await countUse(admin, 'client', client.id, `Referral link used (${body.who === 'me' ? 'their own job' : 'a referral'})`);
 
   const type = TYPES.includes(body.type) ? body.type : 'Other';
   const need = clean(body.need, 3000);
@@ -132,18 +169,7 @@ async function submitReferral(admin, client, body) {
   if (!body.told) throw new Refused('Please tick that you have told them we will be in touch.');
   const kind = body.kind === 'full' ? 'full' : 'quick';
 
-  // files are checked before anything is written
-  const list = Array.isArray(body.files) ? body.files : [];
-  if (list.length > MAX_FILES) throw new Refused(`Up to ${MAX_FILES} photos, please.`);
-  let total = 0;
-  const files = list.map((f) => {
-    const mime = String(f.type || '').toLowerCase();
-    if (!OK_MIME.test(mime)) throw new Refused('Photos (JPG, PNG, HEIC) and PDFs only, please.');
-    const bytes = Buffer.from(String(f.data || ''), 'base64');
-    total += bytes.length;
-    if (!bytes.length || total > MAX_TOTAL) throw new Refused('The photos come to more than 4 MB. Send fewer, or smaller ones.');
-    return { mime, bytes, name: clean(f.name, 100).replace(/[^a-zA-Z0-9._ -]/g, '_') || 'photo' };
-  });
+  const files = checkFiles(body.files); // before anything is written
 
   const already = await alreadyClient(admin, client, { email, phone, address });
   const { data: lead, error } = await admin.from('leads').insert({
@@ -153,14 +179,7 @@ async function submitReferral(admin, client, body) {
   }).select('id').single();
   if (error) throw error;
 
-  const attachments = [];
-  for (const f of files) {
-    const path = `referrals/${lead.id}/${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${f.name.replace(/\s+/g, '_')}`;
-    const { error: upErr } = await admin.storage.from('lead-uploads').upload(path, f.bytes, { contentType: f.mime, upsert: false });
-    if (upErr) { console.error('referral photo not saved', upErr.message); continue; }
-    attachments.push({ path, name: f.name, type: f.mime });
-  }
-  if (attachments.length) await admin.from('leads').update({ details: { ...answers, job_type: type, what_they_need: need, referred_by: client.name, attachments } }).eq('id', lead.id);
+  await saveFiles(admin, lead.id, files, { ...answers, job_type: type, what_they_need: need, referred_by: client.name });
 
   await admin.from('activity_log').insert({ entity_type: 'client', entity_id: client.id, action: 'referral_sent', description: `${client.name} referred ${name} (${type}, ${kind})${already ? ', already a client' : ''}` });
   const office = await R.officeIds(admin);
@@ -194,4 +213,82 @@ async function referralRows(admin, clientIds) {
   });
 }
 
-module.exports = { clientForToken, rewardTerms, submitReferral, referralRows, TYPES };
+// ---- A staff member's personal link (item 74b 7a) ----
+
+async function staffForToken(admin, token) {
+  if (!TOKEN.test(String(token || ''))) return null;
+  const { data: link } = await admin.from('staff_referral_links').select('profile_id').eq('token', token).maybeSingle();
+  if (!link) return null;
+  const { data: who } = await admin.from('profiles').select('id, full_name, active').eq('id', link.profile_id).maybeSingle();
+  return who && who.active ? who : null; // the link stops the day they are made inactive
+}
+
+const firstName = (full) => String(full || '').trim().split(/\s+/)[0] || 'Our team';
+// "Nathan S" for the list of other staff: enough to pick the right person, no full surnames on a public page
+const shortName = (full) => { const w = String(full || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}` : w[0] || ''; };
+
+async function staffLinkInfo(admin, staff) {
+  const [{ data: s }, { data: team }] = await Promise.all([
+    admin.from('company_settings').select('heard_from_options').eq('id', 1).maybeSingle(),
+    admin.from('profiles').select('id, full_name').eq('active', true).neq('id', staff.id).order('full_name'),
+  ]);
+  return {
+    staff: firstName(staff.full_name),
+    heard: ((s && s.heard_from_options) || []).map((o) => clean(o, 80)).filter(Boolean),
+    // each person goes out under a code made for this link, never their user id; profileId stays on the server
+    team: (team || []).filter((p) => p.full_name).map((p) => ({ id: crypto.createHash('sha256').update(`${staff.id}:${p.id}`).digest('hex').slice(0, 16), name: shortName(p.full_name), profileId: p.id })),
+  };
+}
+const publicInfo = (info) => ({ ...info, team: info.team.map(({ id, name }) => ({ id, name })) });
+
+// body: { type, need, answers, person: { name, phone, email, address, addressParts }, files,
+//   heard: 'owner' | 'staff' | one of the Settings choices, heardStaffId }
+async function submitStaffLead(admin, staff, body) {
+  await countUse(admin, 'profile', staff.id, 'Staff link used');
+  const type = TYPES.includes(body.type) ? body.type : 'Other';
+  const need = clean(body.need, 3000);
+  if (need.length < 5) throw new Refused('A line about what you need, please.');
+  const answers = cleanAnswers(type, body.answers);
+  const person = body.person || {};
+  const name = clean(person.name, 120);
+  const phone = clean(person.phone, 40);
+  const email = clean(person.email, 160).toLowerCase();
+  const address = clean(person.address, 300);
+  if (name.length < 2) throw new Refused('Your name, please.');
+  if (digits(phone).length < 8 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Refused('A phone number or an email, please.');
+
+  // how they heard of us: the link's owner, someone else here, or one of the choices from Settings
+  const info = await staffLinkInfo(admin, staff);
+  let heardFrom = null;
+  let heardProfile = null;
+  if (body.heard === 'owner') { heardFrom = 'Thomson Energy staff'; heardProfile = staff.id; }
+  else if (body.heard === 'staff') {
+    const picked = info.team.find((p) => p.id === body.heardStaffId);
+    if (!picked) throw new Refused('Pick who told you about us, please.');
+    heardFrom = 'Thomson Energy staff'; heardProfile = picked.profileId;
+  } else if (info.heard.includes(body.heard)) heardFrom = body.heard;
+  else throw new Refused('Tell us how you first heard about Thomson Energy, please.');
+
+  const files = checkFiles(body.files);
+  const details = { ...answers, job_type: type, what_they_need: need, referred_by: staff.full_name };
+  const { data: lead, error } = await admin.from('leads').insert({
+    source: 'staff_link', name, phone: phone || null, email: email || null, address_formatted: address || null, ...leadAddress(person.addressParts, address),
+    details, referrer_profile_id: staff.id, heard_from: heardFrom, heard_from_profile_id: heardProfile, status: 'new',
+    // no bonus until the check below has run: if it fails, an admin clears the lead by hand
+    already_client: true, already_reason: 'not checked yet',
+  }).select('id').single();
+  if (error) throw error;
+
+  // new, or someone we already had (no link bonus; the KPIs still count); before the photos, which take time
+  const { data: checked, error: checkErr } = await admin.rpc('staff_lead_check', { p_lead: lead.id });
+  if (checkErr) console.error('staff_lead_check failed', checkErr.message);
+  const reason = checkErr ? 'not checked yet' : checked;
+  await saveFiles(admin, lead.id, files, details);
+  const office = await R.officeIds(admin);
+  for (const uid of office) {
+    await admin.rpc('create_notification', { p_user: uid, p_kind: 'lead', p_title: `Lead from ${firstName(staff.full_name)}'s link: ${name}`, p_body: `${type}${address ? `, ${address.split(',').slice(-2).join(',').trim()}` : ''}. ${need.slice(0, 120)}${reason ? ' (Already ours: no bonus)' : ''}`, p_link: '/leads.html', p_actor: null, p_dedupe: `staff-lead:${lead.id}` });
+  }
+  return { kind: 'lead', id: lead.id };
+}
+
+module.exports = { clientForToken, rewardTerms, submitReferral, referralRows, staffForToken, staffLinkInfo, publicInfo, submitStaffLead, TYPES };
