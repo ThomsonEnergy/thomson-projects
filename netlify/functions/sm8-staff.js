@@ -1,7 +1,7 @@
 // POST /.netlify/functions/sm8-staff
 // Body: {} to list, or { links: [{ sm8StaffUuid, profileId|null }] } to save.
 // Admin only. Matches each ServiceM8 staff member to a TEops person, so the
-// ServiceM8 import (sm8-copy-attachments-background.js) can put their
+// ServiceM8 run (_shared/sm8-run.js) can put their
 // check-ins on the right person and say who ticked off each checklist item.
 // The match is saved in profiles.sm8_staff_uuid (migration 20261021000000).
 // Listing suggests a match (saved one, then email, mobile, name) but saves

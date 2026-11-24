@@ -326,10 +326,18 @@ async function portalProject(admin, p) {
   const cl = client.data;
   const agreementOn = !!(cl && cl.agreement_sent_at && !cl.agreement_withdrawn_at && cl.agreement_token);
   if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: fmtDay(localDateKey(cl.agreement_sent_at)) });
+  // Invoices ServiceM8 sent before the job moved to TEops (item 111): every one, no share tick
+  // needed, since the client was sent them already. Money, so only to the client's own logins.
+  const { data: oldInvoices } = p.money ? await admin.from('project_documents').select('file_path, file_name, mime_type, created_at')
+    .eq('project_id', p.id).eq('folder', 'ServiceM8 invoices').order('created_at') : { data: [] };
+  const earlier = (oldInvoices || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: fmtDay(localDateKey(d.created_at)), earlier: true }));
+  files.push(...earlier.filter((e) => !files.some((f) => f.path === e.path)));
   const signed = files.length ? await admin.storage.from('project-documents').createSignedUrls(files.map((f) => f.path), 3600) : { data: [] };
   const urlByPath = {};
   (signed.data || []).forEach((s) => { if (s.signedUrl && !s.error) urlByPath[s.path] = s.signedUrl; });
-  const documents = files.map((f) => ({ name: f.name, mime: f.mime, when: f.when, url: urlByPath[f.path] || null })).filter((f) => f.url);
+  const linked = files.map((f) => ({ name: f.name, mime: f.mime, when: f.when, url: urlByPath[f.path] || null, earlier: !!f.earlier })).filter((f) => f.url);
+  const documents = linked.filter((f) => !f.earlier).map(({ earlier: _e, ...f }) => f);
+  const earlierInvoices = linked.filter((f) => f.earlier).map(({ earlier: _e, ...f }) => f);
 
   return {
     ...projectRow(p, { bookings, onSite, invoices }),
@@ -340,6 +348,7 @@ async function portalProject(admin, p) {
     photos: (photos.data || []).map((ph) => ({ url: ph.url, thumb: isVideoUrl(ph.url) ? null : thumbUrl(ph.url), caption: ph.caption || '', when: fmtDay(localDateKey(ph.created_at)), video: isVideoUrl(ph.url) })),
     documents,
     invoices,
+    earlierInvoices,
     variations: (variations.data || []).map((v) => ({ number: v.variation_number, description: v.description, status: v.approval_status === 'sent' ? 'To sign' : 'Signed', url: v.approval_status === 'sent' ? `/quote.html?variation=${v.variation_token}` : null })),
     ratesUrl: p.money ? (agreementOn ? `/rates.html?agreement=${cl.id}&token=${cl.agreement_token}` : '/rates.html') : null,
     agreement: agreementOn && cl.rate_cards ? { name: cl.rate_cards.name, percentOff: Math.max(0, r2(100 - Number(cl.rate_cards.percent))) } : null,

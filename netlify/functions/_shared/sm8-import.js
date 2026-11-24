@@ -531,4 +531,4 @@ function stageFromLines(lines) {
   };
 }
 
-module.exports = { stcsText, loadSm8Everything, shapeSm8Job, matchClient, buildJobStage, stageFromLines, sm8GetAll, Sm8RateLimit, SM8_BASE, clean, isOn, r2 };
+module.exports = { stcsText, loadSm8Everything, shapeSm8Job, matchClient, stageFromLines, sm8GetAll, Sm8RateLimit, SM8_BASE, r2 };

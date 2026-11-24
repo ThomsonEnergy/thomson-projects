@@ -23,7 +23,6 @@
     "export TRIAGE_MODEL in netlify/functions/_shared/email-agent.js: nothing outside the file uses it",
     "export buildSignature in netlify/functions/_shared/build-email-signature.js: nothing outside the file uses it",
     "export connectedPersonalMailboxes in netlify/functions/_shared/mailboxes.js: nothing outside the file uses it",
-    "export copyJobChecklist in netlify/functions/_shared/sm8-labour.js: nothing outside the file uses it",
     "export emailSafeLogoUrl in netlify/functions/_shared/build-email-signature.js: nothing outside the file uses it",
     "export ensureGmailLabel in netlify/functions/_shared/mailboxes.js: nothing outside the file uses it",
     "export exchangeRefreshToken in netlify/functions/_shared/google-client.js: nothing outside the file uses it",
