@@ -32,7 +32,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 110 | Merge two clients into one: on a client, "Merge another client into this one", a preview of what moves (jobs, quotes, invoices, sites, contacts, equipment, emails, lead rewards), one all or nothing server step, the old record kept as a pointer so old links still work, and a Possible duplicates list | Built 24 Nov 2026, in `claude/solar-disconnect-reconnect-job-bldydk`, waiting on the yes to the SQL | Y (pointer columns on clients, a log table, two functions, a trigger) | Owner's answers in the item |
 | 106 | Greentech STC catch-up for Xero: read every MMEM statement and tax invoice for account 248045 from March 2026, work out the bills, the STC payments and the GST credits by BAS quarter, give the accountant a report and Xero a bills file | Planned 21 Nov 2026, waiting on yes | N | Accountant (Adrian) confirms the GST treatment; owner says how the old customer invoices show the STC |
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
-| 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, waiting on yes and five answers | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first; calls still made through ServiceM8 (item 7) |
+| 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
 
 ## Owner to-dos left over from shipped items
 
@@ -1097,19 +1097,21 @@ Owner, 24 Nov 2026: "I want to stop paying for sm8. We will change all the jobs 
 
 **Outside the import, before cancelling (owner steps, listed in the cutover checklist the build writes into `docs/`):** disconnect ServiceM8 from Xero; ServiceM8 Pay deposits still unallocated in Xero (`docs/BUSINESS_FACTS.md`); anything still pointing at ServiceM8 (website or email booking links, recurring jobs, forms); download ServiceM8's own data export as a second copy; cancel on the billing date.
 
-**Open questions for the owner:**
-1. Calls: `docs/EXTERNAL_ACCOUNTS.md` says keep ServiceM8 calling until the 0455 415 464 port finishes (item 7). Is anyone still calling or texting through ServiceM8? If yes, that has to move first or go back to the phone.
-2. Clients with no job at all in ServiceM8: bring them all, or only clients on a job or quote that comes across? (Recommended: only those on a job or quote.)
-3. Old quotes: every quote not marked Unsuccessful, however old? (Recommended: yes, since the owner is marking the unwanted ones.) Old ones that were never sent land in Draft quote, sent ones in Quote sent, which will fill those two folders.
-4. J number: J4809 for ServiceM8 #4809 (recommended), or a new 7000s number with the old number shown beside it?
-5. Should a client see their archived ServiceM8 jobs in the client portal? (Recommended: yes, photos and documents marked shared only, as for any job.)
+**Owner's answers, 24 Nov 2026 (no questions left, waiting on the yes to build):**
+1. Calls: "Yes we will organise the phone before canceling sm8". An owner step on the cutover checklist, not part of the build.
+2. Clients: "All clients". Every active ServiceM8 client comes across, with or without a job, matched to an existing client the same way (point 4) so nobody is doubled. Item 110 (merge two clients) is the tidy-up for any doubles that are already there.
+3. Old quotes: yes, every quote not marked Unsuccessful, however old.
+4. J number: yes, ServiceM8 #4809 is J4809.
+5. Client portal: "Yes but as default have it unticked but show all invoices". The archived jobs show in the client's portal; their photos and documents come across not shared (the share tick off on every one, staff tick what the client should see); every ServiceM8 invoice PDF on the job shows to the client without a tick.
 
 **Done means:**
 - The dry run shows a count for Quote, Work Order and Completed, and zero Unsuccessful.
 - After the run, the Archived folder on Jobs holds every Completed ServiceM8 job, and searching an old ServiceM8 number opens it.
 - An archived job shows its photos, documents, ServiceM8 invoices, Time tab hours and notes, shows $0 left to invoice, and has no Invoice button that can bill it again.
+- In the client portal, a client sees their archived ServiceM8 job and every ServiceM8 invoice on it, and none of its photos or documents until a staff member ticks one as shared.
+- A ServiceM8 client with no job is on the Clients page once, not twice.
 - No email, text or notification went to any client or staff member from the run, and nothing new appeared in Xero.
 - The check report reads zero missing jobs and zero failed files.
 - Running it a second time adds nothing.
 
-Touches: `public/sm8-import.html`, `netlify/functions/_shared/sm8-import.js`, `netlify/functions/sm8-import-jobs.js`, `netlify/functions/sm8-import-preview.js`, `netlify/functions/sm8-import-lines.js`, `netlify/functions/sm8-copy-attachments-background.js`, `netlify/functions/_shared/sm8-labour.js`, a new background function for the whole run and a new check report function, one migration (run progress table, completed date and raw copy path on `projects`, additions only), `public/projects.html` and `public/js/global-search.js` only if the old number does not already search, `docs/PROJECT_SPEC.md` A27. Not `project.html` or `settings.html`.
+Touches: `public/sm8-import.html`, `netlify/functions/_shared/sm8-import.js`, `netlify/functions/sm8-import-jobs.js`, `netlify/functions/sm8-import-preview.js`, `netlify/functions/sm8-import-lines.js`, `netlify/functions/sm8-copy-attachments-background.js`, `netlify/functions/_shared/sm8-labour.js`, a new background function for the whole run and a new check report function, one migration (run progress table, completed date and raw copy path on `projects`, additions only), `public/projects.html` and `public/js/global-search.js` only if the old number does not already search, `docs/PROJECT_SPEC.md` A27; the client portal's job and invoice functions (`_shared/portal-session.js` and the portal page) so ServiceM8 invoice PDFs show there. Not `project.html` or `settings.html`.
