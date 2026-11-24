@@ -187,7 +187,8 @@
           <p class="subtitle">${escapeHtml(label)}: ${n(done)} of ${n(total)}${failed ? ` &middot; <span class="sm8-bad">${n(failed)} failed</span>` : ''}</p>
         </div>`;
       el.innerHTML = bar('Clients', clientsDone, clients, clientsFailed) + bar('Quotes and jobs', jobsDone, jobs, jobsFailed)
-        + bar('Photos and files', filesDone, files, filesFailed)
+        // files are listed as their job lands, so until the jobs are in the total is ServiceM8's own count
+        + bar('Photos and files', filesDone, Math.max(files, Number((run.counts || {}).files) || 0), filesFailed)
         + '<p class="imp-meta" style="margin:8px 0 0;">Clients first, then jobs, then the files, which take the longest: ServiceM8 hands out one file per call and limits the calls in a day.</p>';
     }
 
