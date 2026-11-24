@@ -31,7 +31,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 105 | Website prices built like a quote in TEops: each website package is made from Stock items, prebuilds and labour with the STC and battery STC credits worked out, the public website rebuilds itself, and prices move by themselves when an item's cost, the STC price or the battery STC factor changes | Part 1 live; parts 2 and 3 paused in draft PR 560, waiting on the owner's yes to the SQL; picked up by `claude/friendly-fermat-c0wd24` (22 Nov 2026) | N | Owner: build the packages once on the new page; a Netlify build hook on the website project if it cannot be made from a chat. Builds the battery STC factor part of item 58 |
 | 106 | Greentech STC catch-up for Xero: read every MMEM statement and tax invoice for account 248045 from March 2026, work out the bills, the STC payments and the GST credits by BAS quarter, give the accountant a report and Xero a bills file | Planned 21 Nov 2026, waiting on yes | N | Accountant (Adrian) confirms the GST treatment; owner says how the old customer invoices show the STC |
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
-| 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
+| 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Built 24 Nov 2026 in `claude/sm8-migration-strategy-1q7ntj`, waiting on the owner's yes to the SQL | Y (three queue tables, one report function, two columns) | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
 
 ## Owner to-dos left over from shipped items
 
@@ -49,7 +49,7 @@ Short steps the owner still has to take on things that are already built. Strike
 - Item 68: the first real card payment with interest: check the interest invoice lands in Xero.
 - Item 92: Schedule > Plan > Plan settings, tick who is on the tools (Staff are ticked by default) and check the four numbers.
 - Item 70: one Allow tap for the production checklist change (point 9).
-- Item 71: Settings > Import from ServiceM8 once, "Deposits to add", tick, Import.
+- Item 71: the missing ServiceM8 deposits are added by Bring everything across (item 111), no ticking.
 - Item 73: run the picture tagger dry run in Settings (the tagger is off until then); a Photoroom key for the automatic cut-out.
 - Item 75: prove the live sun records fetch and Pylon's location call on one draft Solar quote.
 - Item 83 part C: purchase account codes for the Xero bill map.
@@ -1041,7 +1041,33 @@ To prove first on the Xero Demo Company: that writing a payslip's earnings lines
 
 Touches: `netlify/functions/push-timesheets-to-xero.js`, one migration (a table of LAHA nights sent, by person, night and payslip), `public/timesheets.html` (the card's wording and result), `public/settings.html` (wording under the LAHA box), `docs/PROJECT_SPEC.md`, `docs/DECISIONS.md`. Overlaps: none on 23 Nov 2026. Kind: feature into `staging`; migration yes; payroll yes (approved timesheets, a pay run and payslip lines written to Xero). Size: medium to large. Test on staging: needs the Xero Demo Company connected to the staging site (Settings > API Keys there, the owner's step). Simpler: nobody approves timesheets in Xero, opens the pay run or adds LAHA by hand; the one step left is checking and posting the pay run.
 
-## 111. Leave ServiceM8 for good (planned 24 Nov 2026, waiting on yes)
+## 111. Leave ServiceM8 for good (owner's "Done build", 24 Nov 2026)
+
+Building in: `claude/sm8-migration-strategy-1q7ntj` (a cloud session pushes one branch), off `staging`. The migration waits for the owner's yes to the SQL before it runs anywhere.
+
+**Built 24 Nov 2026, not merged, the migration not run on staging or production: waiting on the owner's yes to the SQL** (`supabase/migrations/20261222000000_sm8_full_run.sql`). Detail of what was built: `docs/PROJECT_SPEC.md` A27. Proved on a scratch database with a made-up ServiceM8 account (64 checks: every status, lettered claims, deposits, STCs, time, checklists, files, the report, a second run adding nothing, picking up after running out of time, one worker at a time, and the awkward shapes a fresh reviewer found: credit jobs, overpayments, two deposits, archived clients, a supplier's invoice among the files). **Not yet proved: against the real ServiceM8** (cloud sessions cannot reach it), so the first real read is the Dry run on staging.
+
+What changed from the plan while building:
+- The old tick-one-at-a-time list is gone (one way of doing it). A job's type and value can still be changed on the job afterwards.
+- No client picking. A sure match links; anything else is a new client, and the report lists the ones that look like an existing client to merge on the Clients page (item 110, now live).
+- The raw copy of each job is kept in the database (`sm8_run_jobs.payload`), not as a file.
+- ServiceM8 does not say how big the files are, so the dry run shows how many, not how big.
+- Old checklist items never ticked on a Completed job are closed with a note (otherwise thousands land on the Tasks page). Photos on Archived jobs skip the picture tagger (each would cost an AI read).
+- Time by people with no TEops login cannot be a time entry: it is written in the job's notes and counted in the report.
+
+Open with the owner: (a) every quote that lands in Quote sent gets the usual valid-until date from that day, so in a few weeks they all remind and then expire together unless extended. Leave that, or bring old sent quotes in with no expiry? (b) former staff with no TEops login: add them as inactive people so their hours become real time entries, or leave their hours as a note on each job?
+
+**Cutover checklist (owner):**
+1. In ServiceM8, mark every job and quote that should not come across Unsuccessful.
+2. Settings > ServiceM8 Import > Staff: Load ServiceM8 staff, check the matches, Save.
+3. Press Dry run. Check the numbers, and that "Staying behind" looks right.
+4. Press Bring everything across. It can be left alone: the files take a night or more.
+5. Read the check report. Fix what it lists (a video too big: Supabase > Storage > Settings, raise the limit to 500 MB, press Bring everything across again).
+6. Clients page > Possible duplicates: merge the new clients that are really existing ones.
+7. Chase "Completed jobs not paid in full" in Xero.
+8. Sort the phone (calls and texts no longer go through ServiceM8), disconnect ServiceM8 from Xero, allocate any ServiceM8 Pay deposits still unallocated in Xero, download ServiceM8's own export as a second copy.
+9. Press Bring everything across one last time on the day, read the report, then cancel ServiceM8 on its billing date.
+10. Tell any chat "ServiceM8 is cancelled": it removes the import screen and its functions.
 
 Owner, 24 Nov 2026: "I want to stop paying for sm8. We will change all the jobs we don't want to move over to unsuccessful so don't bring them but quotes and jobs come over as quotes and jobs and completed jobs should come over as archived jobs so we can still see all the photos and docs and labour ect that is on them for reporting or going back to later if the customer asked."
 
@@ -1077,4 +1103,4 @@ Owner, 24 Nov 2026: "I want to stop paying for sm8. We will change all the jobs 
 - The check report reads zero missing jobs and zero failed files.
 - Running it a second time adds nothing.
 
-Touches: `public/sm8-import.html`, `netlify/functions/_shared/sm8-import.js`, `netlify/functions/sm8-import-jobs.js`, `netlify/functions/sm8-import-preview.js`, `netlify/functions/sm8-import-lines.js`, `netlify/functions/sm8-copy-attachments-background.js`, `netlify/functions/_shared/sm8-labour.js`, a new background function for the whole run and a new check report function, one migration (run progress table, completed date and raw copy path on `projects`, additions only), `public/projects.html` and `public/js/global-search.js` only if the old number does not already search, `docs/PROJECT_SPEC.md` A27; the client portal's job and invoice functions (`_shared/portal-session.js` and the portal page) so ServiceM8 invoice PDFs show there. Not `project.html` or `settings.html`.
+Touches: `public/sm8-import.html`, `netlify/functions/_shared/sm8-import.js`, new `_shared/sm8-run.js`, `_shared/sm8-job-writer.js` (was `sm8-import-jobs.js`), `_shared/sm8-files.js` (was `sm8-copy-attachments-background.js`), `_shared/sm8-labour.js`, new `sm8-run-background.js` and `sm8-run-sweep.js`, deleted `sm8-import-preview.js` and `sm8-import-lines.js`, `netlify.toml`, `_shared/portal-data.js`, `public/js/portal.js`, `public/portal.html`, `public/settings.html` (wording), migration `20261222000000_sm8_full_run.sql`, `docs/PROJECT_SPEC.md` A27.

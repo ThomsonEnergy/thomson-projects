@@ -452,6 +452,8 @@
     header(email);
     const contact = d.manager ? `${esc(d.manager)} at ${esc(d.company.name)}${d.company.phone ? `, ${phoneLink(d.company)}` : ''}` : (d.company.phone ? `${esc(d.company.name)}, ${phoneLink(d.company)}` : '');
     const pictures = d.photos.filter((p) => !p.video);
+    // invoices ServiceM8 sent before the job moved to TEops: the PDFs, listed under the Invoices card
+    const earlierInvoices = d.earlierInvoices || [];
     const photoTile = (p) => `<div>${p.video
       ? `<video src="${esc(p.url)}" controls playsinline preload="metadata" style="width:100%; height:120px; object-fit:cover; border-radius:8px; background:#000;"></video>`
       : `<img src="${esc(p.thumb || p.url)}" data-i="${pictures.indexOf(p)}" loading="lazy" alt="" />`}<div class="cap">${esc(p.caption || p.when)}</div></div>`;
@@ -481,11 +483,12 @@
         <div id="pl-msg-err"></div><button type="button" id="pl-msg-send" style="margin-top:6px;">Send</button>`) : ''}
       </div><div class="pl-col">
       ${d.hasWork ? `<h2 class="pl-h">Work so far</h2><div class="pl-card" id="pl-work"></div>` : ''}
-      ${d.money ? card('Invoices', d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
+      ${d.money ? card('Invoices', (d.invoices.length ? table(['Invoice', 'Status', 'Due', '$Balance', ''], d.invoices.map((i) => `
             <tr><td><strong>${esc(i.number)}</strong>${i.description ? `<br><span class="pl-muted">${esc(i.description)}</span>` : ''}</td>
             <td><span class="pl-status ${i.status === 'overdue' ? 'warn' : ''}">${esc(i.label)}</span></td>
             <td>${esc(i.due)}</td><td class="n">${i.status === 'paid' ? '' : esc(money(i.balance))}</td>
-            <td><a href="${esc(i.url)}" target="_blank" rel="noopener" data-open="opened_invoice" data-project="${esc(d.id)}" data-detail="${esc(i.number)}">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`)) : `<span class="pl-muted">No invoices yet.</span>`) : ''}
+            <td><a href="${esc(i.url)}" target="_blank" rel="noopener" data-open="opened_invoice" data-project="${esc(d.id)}" data-detail="${esc(i.number)}">${i.status === 'paid' ? 'View' : 'View and pay'}</a></td></tr>`)) : (earlierInvoices.length ? '' : `<span class="pl-muted">No invoices yet.</span>`))
+        + earlierInvoices.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener" data-open="opened_invoice" data-project="${esc(d.id)}" data-detail="${esc(f.name)}">Open</a></div>`).join('')) : ''}
       ${card('Photos', d.photos.length ? `<div class="pl-grid">${d.photos.map(photoTile).join('')}</div>` : `<span class="pl-muted">No photos shared yet.</span>`)}
       ${card('Documents', `
         ${d.documents.length ? d.documents.map((f) => `<div class="pl-need"><span>${esc(f.name)}<br><span class="pl-muted">${esc(f.when)}</span></span><a href="${esc(f.url)}" target="_blank" rel="noopener" data-open="opened_document" data-project="${esc(d.id)}" data-detail="${esc(f.name)}">Open</a></div>`).join('') : `<span class="pl-muted">No documents shared yet.</span>`}

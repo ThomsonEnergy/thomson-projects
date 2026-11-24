@@ -2975,7 +2975,7 @@
     // that happened, an Open button, and how the invoice posts to Xero (xeroBreakdownHtml, the same
     // one the Invoices page uses). The scripts (loadInvoiceActions, supabase-client.js) come down the
     // first time the tab is opened.
-    // Invoice PDFs brought across from ServiceM8 (sm8-copy-attachments,
+    // Invoice PDFs brought across from ServiceM8 (_shared/sm8-files.js,
     // folder "ServiceM8 invoices"). Copies of what ServiceM8 already sent,
     // for reference: not invoices in the app, so they never touch Xero or
     // invoiced to date. Kept out of the Documents tab.
@@ -5764,7 +5764,7 @@
       wireSm8();
     }
 
-    // Jobs brought across from ServiceM8 (sm8-import-jobs.js) arrive with
+    // Jobs brought across from ServiceM8 (sm8-job-writer.js) arrive with
     // their STCs as the job's credits and listed in projects.sm8_stcs. This
     // lists the ones not yet recorded here (for Formbay) with an Add button
     // that opens the normal STC form prefilled, and warns when the job's

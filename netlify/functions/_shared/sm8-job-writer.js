@@ -1,41 +1,32 @@
-// POST /.netlify/functions/sm8-import-jobs
-// Body: { rows: [{ sm8JobUuid, sm8JobNumber, companyUuid, companyName,
-//   companyAddress, clientEmail, clientPhone, siteAddress, description,
-//   notesText, name, clientId ('new' or an existing client id),
-//   jobType ('quoted' | 'do_and_charge'),
-//   stage: { name, quotedExGst, invoicedExGst,
-//     lines: [{ item_type, description, quantity, cost, price, group, base_quantity }],
-//     groups: [{ key, description }] } }] }
-// Admin only. Writes the rows the admin ticked on the review screen
-// (sm8-import-preview.js + sm8-import-lines.js) as jobs, a few at a time -
-// the page sends them in small batches so no single call runs past the
-// function time limit.
-//
-// Each job is created like a job from an approved quote (ready_to_book, job
-// number from the usual trigger) with one stage holding:
-//   * every ServiceM8 bundle as a prebuild group of its real components,
-//     plus the standalone lines - labour at ServiceM8's sell rate (on the
-//     matching rate tier), materials at ServiceM8 cost, and the stage
-//     markup that makes them sell for exactly the ServiceM8 value
-//     (stageFromLines), so labour and materials split properly for Xero
-//   * invoiced_amount = the Completed ServiceM8 claims plus the deposits
-//     paid on the job, kept on the stage as imported_claims (a deposit with
-//     paid and method), so "Invoice project" only bills what ServiceM8
-//     hasn't already billed or taken
-// A job already in the app is not made again; a deposit it is missing is
-// added to its first stage as a paid claim (item 71).
-// A "quoted" job is a normal quoted job (new_build); "do_and_charge" is a
-// Direct Job, invoiced from actual time and materials logged in the app.
-// Also the ServiceM8 notes (projects.notes) and sm8_job_uuid /
-// sm8_job_number, which make a re-run skip it. Nothing is read from or
+// Writes one ServiceM8 job into TEops (item 111). Called by _shared/sm8-run.js, one job at a time,
+// with the row _shared/sm8-import.js shapeSm8Job() made and the TEops client it belongs to.
+// Tables: projects, cost_centres, cost_centre_line_items, client_sites. Nothing is read from or
 // written to ServiceM8.
+//
+// What a job becomes, by row.kind:
+//   quote      a TEops quote with a Q number: Quote sent (with ServiceM8's sent date) or Draft quote.
+//   job        a job at Ready to Book with a new J number from the usual trigger.
+//   completed  a job at Archived under its old ServiceM8 number (#4809 is J4809: TEops J numbers
+//              start at 7000 and ServiceM8's are below that), dated when ServiceM8 says it was made
+//              and finished. A number that is not a plain number below the J counter, or is already
+//              a J number, takes the next J number instead.
+//
+// Each job gets one stage holding:
+//   * every ServiceM8 bundle as a prebuild group of its real components, plus the standalone
+//     lines: labour at ServiceM8's sell rate (on the matching rate tier), materials at ServiceM8
+//     cost, and the stage markup that makes them sell for exactly the ServiceM8 value
+//     (stageFromLines), so labour and materials split properly for Xero
+//   * invoiced_amount = the ServiceM8 claims and deposits in row.stage.claims, kept on the stage as
+//     imported_claims, so "Invoice project" only bills what ServiceM8 has not already billed or
+//     taken. A completed job's claims add up to its whole value: nothing is left to invoice.
+// A job already in the app is not made again; a deposit it is missing is added to its first stage
+// as a paid claim (item 71). A job with a value is a quoted job (new_build); one with none is a
+// Direct Job, invoiced from actual time and materials. sm8_job_uuid makes a re-run skip it.
 
 const crypto = require('crypto');
-const { resolveClientSite } = require('./_shared/client-sites');
-const { requireAdmin } = require('./_shared/require-admin');
-const { stageFromLines, stcsText } = require('./_shared/sm8-import');
+const { resolveClientSite } = require('./client-sites');
+const { stageFromLines, stcsText } = require('./sm8-import');
 
-const MAX_ROWS = 10;
 const MAX_LINES = 3000;
 const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -49,75 +40,68 @@ function tierFor(tierIds, description) {
   return hit ? tierIds.get(hit) : null;
 }
 
-async function resolveClient(supabaseAdmin, row) {
-  if (row.clientId && row.clientId !== 'new') {
-    const { data: client, error } = await supabaseAdmin
-      .from('clients').select('id, name, email, phone, address, sm8_company_uuid').eq('id', row.clientId).maybeSingle();
-    if (error) throw error;
-    if (!client) throw new Error('The chosen client no longer exists - re-run the preview');
-    // Remember the link so a later run matches straight to this client. A
-    // unique clash (another client already holds this ServiceM8 company)
-    // just means the link stays where it is.
-    if (!client.sm8_company_uuid && row.companyUuid) {
-      await supabaseAdmin.from('clients').update({ sm8_company_uuid: row.companyUuid }).eq('id', client.id).is('sm8_company_uuid', null);
-    }
-    return client;
-  }
-
-  // "New client": an earlier job in this run may already have created it
-  // (several open jobs for the same ServiceM8 company).
-  if (row.companyUuid) {
-    const { data: existing } = await supabaseAdmin
-      .from('clients').select('id, name, email, phone, address').eq('sm8_company_uuid', row.companyUuid).maybeSingle();
-    if (existing) return existing;
-  }
-
-  const { data: created, error } = await supabaseAdmin
-    .from('clients')
-    .insert({
-      name: str(row.companyName, 300) || 'Unknown client',
-      email: str(row.clientEmail, 300) || null,
-      phone: str(row.clientPhone, 100) || null,
-      address: str(row.companyAddress, 500) || str(row.siteAddress, 500) || null,
-      sm8_company_uuid: row.companyUuid || null,
-    })
-    .select('id, name, email, phone, address')
-    .single();
-  if (error) throw error;
-  return created;
-}
-
-// A job brought across earlier: the paid claims (deposits) in this run that are not on any of
-// its stages yet go onto its first stage, and its invoiced figure moves up by the same amount.
-// Matched by claim number, so pressing Import twice adds nothing twice.
+// A job brought across earlier: the deposits ServiceM8 holds that are not on any of its stages yet
+// go onto its first stage, and its invoiced figure moves up by the same amount. Nothing else about
+// a job already in the app is touched. A deposit is known by its ServiceM8 payment id; ones brought
+// across before that id was kept are known by their order (the oldest payments). Never past the
+// stage's value, and saved only if nobody changed the stage in the meantime, so a second press or a
+// second worker adds nothing twice.
 async function addMissingDeposits(supabaseAdmin, project, claims) {
-  const paid = claims.filter(c => c.paid);
+  // deposits only: a final invoice paid in ServiceM8 since then is not put on a job TEops now runs
+  const paid = claims.filter(c => c.paid && /deposit/i.test(String(c.number)));
   if (!paid.length || !project.job_number) return { added: [] };
-  const { data: stages, error } = await supabaseAdmin.from('cost_centres').select('id, invoiced_amount, imported_claims').eq('project_id', project.id).order('sort_order');
+  const { data: stages, error } = await supabaseAdmin.from('cost_centres').select('id, quoted_amount, invoiced_amount, imported_claims').eq('project_id', project.id).order('sort_order');
   if (error) throw error;
   if (!stages || !stages.length) return { added: [] };
-  const have = new Set(stages.flatMap(s => (Array.isArray(s.imported_claims) ? s.imported_claims : []).map(c => String(c.number))));
-  const missing = paid.filter(c => !have.has(String(c.number)));
+  const held = stages.flatMap(st => (Array.isArray(st.imported_claims) ? st.imported_claims : []));
+  const havePayments = new Set(held.map(c => c.payment).filter(Boolean));
+  const haveNumbers = new Set(held.map(c => String(c.number)));
+  const olderDeposits = held.filter(c => !c.payment && /deposit/i.test(String(c.number))).length;
+  const missing = paid.filter((c, i) => i >= olderDeposits && !(c.payment && havePayments.has(c.payment)) && !haveNumbers.has(String(c.number)));
   if (!missing.length) return { added: [] };
   const first = stages[0];
-  const { error: upErr } = await supabaseAdmin.from('cost_centres').update({
+  const was = Number(first.invoiced_amount || 0);
+  const next = r2(was + missing.reduce((t, c) => t + c.amount, 0));
+  if (next > Number(first.quoted_amount || 0) + 0.01) return { added: [], overValue: missing.map(c => c.number) };
+  const { data: saved, error: upErr } = await supabaseAdmin.from('cost_centres').update({
     imported_claims: [...(Array.isArray(first.imported_claims) ? first.imported_claims : []), ...missing],
-    invoiced_amount: r2(Number(first.invoiced_amount || 0) + missing.reduce((t, c) => t + c.amount, 0)),
-  }).eq('id', first.id);
+    invoiced_amount: next,
+  }).eq('id', first.id).eq('invoiced_amount', was).select('id');
   if (upErr) throw upErr;
+  if (!saved || !saved.length) return { added: [] };
   return { added: missing.map(c => ({ number: c.number, amount: c.amount })) };
 }
 
-async function importRow(supabaseAdmin, userId, row, tierIds) {
+// tierIds: Map of rate tier name (lower case) -> id. Returns { projectId, jobNumber, quoteNumber,
+// skipped (already in the app), added (deposits added to a job already in the app) }.
+async function writeSm8Job(supabaseAdmin, userId, row, client, tierIds) {
   const sm8JobUuid = str(row.sm8JobUuid, 100);
   if (!sm8JobUuid) throw new Error('Missing ServiceM8 job id');
-  const name = str(row.name, 300);
-  if (!name) throw new Error('Job name is required');
   // A ServiceM8 quote comes across as a TEops quote: Q number, no job
   // number, Draft quote or Quote sent by whether ServiceM8 sent it.
   const isQuote = row.kind === 'quote';
-  const jobType = !isQuote && row.jobType === 'do_and_charge' ? 'do_and_charge' : 'quoted';
+  const isCompleted = row.kind === 'completed';
   const s = row.stage || {};
+  // The ServiceM8 claims and deposits, kept on the stage so the claims card, the Invoice project
+  // panel, the claim numbering and the invoice's Claim summary count them (item 45).
+  const importedClaims = isQuote ? [] : (Array.isArray(s.claims) ? s.claims : []).slice(0, 50).map(c => ({
+    number: str(c.number, 50) || '?', amount: r2(c.amount), source: 'servicem8',
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(c.date || '')) ? c.date : null,
+    // a deposit, or an invoice paid in ServiceM8: the payment date and method, and ServiceM8's payment id
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(c.paid || '')) ? { paid: c.paid, method: str(c.method, 50) || 'ServiceM8', ...(n(c.amount_inc) > 0 ? { amount_inc: r2(c.amount_inc) } : {}), ...(c.payment ? { payment: str(c.payment, 100) } : {}) } : {}),
+  }));
+
+  // Already in the app from an earlier run: only a deposit it is missing is added. Checked before
+  // anything below can refuse the job, so a job that is in can never turn up as failed.
+  const { data: priorJob, error: priorErr } = await supabaseAdmin.from('projects').select('id, job_number, quote_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
+  if (priorErr) throw priorErr;
+  if (priorJob) {
+    return { skipped: true, projectId: priorJob.id, jobNumber: priorJob.job_number, quoteNumber: priorJob.quote_number, ...(await addMissingDeposits(supabaseAdmin, priorJob, importedClaims.filter(c => c.amount > 0))) };
+  }
+  if (!client) throw new Error('No client for this job');
+
+  const name = str(row.name, 300);
+  if (!name) throw new Error('Job name is required');
   const stageName = str(s.name, 200) || 'Labour & Materials';
   const rawLines = Array.isArray(s.lines) ? s.lines : [];
   if (rawLines.length > MAX_LINES) throw new Error(`More than ${MAX_LINES} line items`);
@@ -129,27 +113,13 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
     base_quantity: l.base_quantity == null ? null : n(l.base_quantity),
   }));
   if (lines.some(l => [l.quantity, l.cost, l.price].some(Number.isNaN) || Number.isNaN(l.base_quantity))) throw new Error('A line item has a non-numeric amount');
-  // With line items the value is theirs (ServiceM8's sell prices); without,
-  // it is the figure typed on the review screen.
-  const quoted = lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst);
+  // With line items the value is theirs (ServiceM8's sell prices); without, it is ServiceM8's job
+  // total. A credit job (lines adding to less than $0) comes across at $0 with its lines kept.
+  const quoted = Math.max(0, lines.length ? r2(lines.reduce((t, l) => t + r2(l.quantity * l.price), 0)) : r2(s.quotedExGst));
   const invoiced = isQuote ? 0 : r2(s.invoicedExGst);
-  // The Completed ServiceM8 claims behind that figure, kept on the stage so the claims card, the
-  // Invoice project panel, the claim numbering and the invoice's Claim summary count them (item 45).
-  const importedClaims = isQuote ? [] : (Array.isArray(s.claims) ? s.claims : []).slice(0, 50).map(c => ({
-    number: str(c.number, 50) || '?', amount: r2(c.amount), source: 'servicem8',
-    date: /^\d{4}-\d{2}-\d{2}$/.test(String(c.date || '')) ? c.date : null,
-    // a deposit, or an invoice paid in ServiceM8: the payment date and method
-    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(c.paid || '')) ? { paid: c.paid, method: str(c.method, 50) || 'ServiceM8', ...(n(c.amount_inc) > 0 ? { amount_inc: r2(c.amount_inc) } : {}) } : {}),
-  }));
   if (importedClaims.some(c => !(c.amount >= 0))) throw new Error('A ServiceM8 claim has a bad amount');
   if (importedClaims.length && Math.abs(r2(importedClaims.reduce((t, c) => t + c.amount, 0)) - invoiced) > 0.01) throw new Error('The ServiceM8 claims do not add up to the invoiced figure');
 
-  // Already in the app from an earlier run: only a deposit it is missing is added.
-  const { data: priorJob, error: priorErr } = await supabaseAdmin.from('projects').select('id, job_number, quote_number').eq('sm8_job_uuid', sm8JobUuid).maybeSingle();
-  if (priorErr) throw priorErr;
-  if (priorJob) {
-    return { skipped: true, projectId: priorJob.id, jobNumber: priorJob.job_number, quoteNumber: priorJob.quote_number, ...(await addMissingDeposits(supabaseAdmin, priorJob, importedClaims)) };
-  }
   // ServiceM8's STC rebate lines: kept as the list the STCs tab offers for Formbay, and set as the
   // job's STC and BSTC credits (hot water STCs are STCs too) so they come off the invoice.
   const stcs = (Array.isArray(s.stcs) ? s.stcs : []).slice(0, 10).map(x => ({
@@ -178,15 +148,31 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   // brought across: approve the TEops quote to make it the job.
   if (existing) return { skipped: true, projectId: existing.id, jobNumber: existing.job_number, quoteNumber: existing.quote_number };
 
-  const client = await resolveClient(supabaseAdmin, row);
-
   let quoteNumber = null;
   if (isQuote) {
     const { data: qn, error: qErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'quote' });
     if (qErr) throw qErr;
     quoteNumber = qn;
   }
-  const sentAt = isQuote && row.quoteSent ? (/^\d{4}-\d{2}-\d{2}$/.test(String(row.quoteSentDate || '')) ? `${row.quoteSentDate}T09:00:00+10:00` : new Date().toISOString()) : null;
+  const isYmd = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+  const sentAt = isQuote && row.quoteSent ? (isYmd(row.quoteSentDate) ? `${row.quoteSentDate}T09:00:00+10:00` : new Date().toISOString()) : null;
+  // A completed job keeps its ServiceM8 number as its J number when that number is free.
+  let jobNumber = null;
+  if (isCompleted) {
+    const { data: settings, error: setErr } = await supabaseAdmin.from('company_settings').select('next_job_number').eq('id', 1).maybeSingle();
+    if (setErr) throw setErr;
+    const wanted = /^\d{1,9}$/.test(String(row.sm8JobNumber || '')) ? Number(row.sm8JobNumber) : 0;
+    if (wanted > 0 && settings && wanted < Number(settings.next_job_number)) {
+      const { data: taken, error: takenErr } = await supabaseAdmin.from('projects').select('id').eq('job_number', wanted).limit(1);
+      if (takenErr) throw takenErr;
+      if (!taken.length) jobNumber = wanted;
+    }
+    if (!jobNumber) {
+      const { data: jn, error: jErr } = await supabaseAdmin.rpc('get_next_number_serverside', { counter_name: 'job' });
+      if (jErr) throw jErr;
+      jobNumber = jn;
+    }
+  }
 
   const { data: project, error: projectErr } = await supabaseAdmin
     .from('projects')
@@ -206,12 +192,17 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
       // new_build: the general quoted electrical job, invoiced as a share
       // of its quoted value ("Invoice project"). direct_job: invoiced from
       // actual time and materials.
-      // a "Quoted" job with no value has nothing to claim against: it is invoiced from actual costs
-      proposal_template: jobType === 'quoted' && quoted > 0 ? 'new_build' : 'direct_job',
+      // a job with no value has nothing to claim against: it is invoiced from actual costs
+      proposal_template: quoted > 0 ? 'new_build' : 'direct_job',
       // Job Booked once someone is scheduled or clocks in (database rule, migration 20261023000000).
-      pipeline_stage: isQuote ? (sentAt ? 'quote_sent' : 'draft_quote') : 'ready_to_book',
+      pipeline_stage: isQuote ? (sentAt ? 'quote_sent' : 'draft_quote') : isCompleted ? 'archived' : 'ready_to_book',
       status: isQuote ? (sentAt ? 'sent' : 'draft') : 'in_progress',
       ...(isQuote ? { quote_number: quoteNumber, sent_at: sentAt } : {}),
+      ...(isCompleted ? {
+        job_number: jobNumber,
+        completed_at: isYmd(row.completedOn) ? `${row.completedOn}T09:00:00+10:00` : new Date().toISOString(),
+        ...(isYmd(row.sm8Date) ? { created_at: `${row.sm8Date}T09:00:00+10:00` } : {}),
+      } : {}),
       created_by: userId,
       sm8_job_uuid: sm8JobUuid,
       sm8_job_number: str(row.sm8JobNumber, 50) || null,
@@ -275,47 +266,4 @@ async function importRow(supabaseAdmin, userId, row, tierIds) {
   return { projectId: project.id, jobNumber: project.job_number, quoteNumber: project.quote_number };
 }
 
-exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method not allowed' };
-  }
-
-  const auth = await requireAdmin(event);
-  if (!auth) {
-    return { statusCode: 403, body: JSON.stringify({ error: 'Not authorized' }) };
-  }
-  const { supabaseAdmin, user } = auth;
-
-  try {
-    const { rows } = JSON.parse(event.body || '{}');
-    if (!Array.isArray(rows) || !rows.length) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'rows is required' }) };
-    }
-    if (rows.length > MAX_ROWS) {
-      return { statusCode: 400, body: JSON.stringify({ error: `Send at most ${MAX_ROWS} jobs per call` }) };
-    }
-
-    // Labour lines land on the rate tier of the same name ("Licensed
-    // Electrical Specialist"), like a prebuild's labour does.
-    const { data: tiers, error: tierErr } = await supabaseAdmin.from('billable_rate_tiers').select('id, name');
-    if (tierErr) throw tierErr;
-    const tierIds = new Map((tiers || []).map(t => [String(t.name).trim().toLowerCase(), t.id]));
-
-    // One at a time, not in parallel: two jobs for the same new client
-    // must not both create it.
-    const results = [];
-    for (const row of rows) {
-      try {
-        const r = await importRow(supabaseAdmin, user.id, row, tierIds);
-        results.push({ sm8JobUuid: row.sm8JobUuid, ok: true, ...r });
-      } catch (err) {
-        console.error('sm8-import-jobs row error:', row.sm8JobUuid, err.message);
-        results.push({ sm8JobUuid: row.sm8JobUuid, ok: false, error: err.message });
-      }
-    }
-    return { statusCode: 200, body: JSON.stringify({ ok: true, results }) };
-  } catch (err) {
-    console.error('sm8-import-jobs error:', err.message);
-    return { statusCode: 500, body: JSON.stringify({ ok: false, error: err.message }) };
-  }
-};
+module.exports = { writeSm8Job };
