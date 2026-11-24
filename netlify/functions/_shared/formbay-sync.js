@@ -474,7 +474,8 @@ async function createOptions(db, token, projectId) {
   // A kind of form the job already has is not offered again ("Add a battery form" on a job with a solar one).
   const { data: has } = await db.from('formbay_forms').select('ftype').eq('project_id', projectId);
   const got = new Set((has || []).map(h => h.ftype));
-  const solar = !got.has('pv') && (got.has('bstc') || Number(project.stc_quantity) > 0 || project.proposal_template === 'solar');
+  // a Hot Water job's STCs are hot water ones: never offered as a solar form (its own form is not built, item 113)
+  const solar = !got.has('pv') && project.proposal_template !== 'hot_water' && (got.has('bstc') || Number(project.stc_quantity) > 0 || project.proposal_template === 'solar');
   const battery = !got.has('bstc') && (got.has('pv') || Number(project.bstc_quantity) > 0 || project.proposal_template === 'battery');
   return {
     ok: true,

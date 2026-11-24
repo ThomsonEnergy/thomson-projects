@@ -50,10 +50,12 @@ async function mountHotWater({ project }) {
   let rebatesSeen = !!state.rebates_seen;
   await loadJsOnce('/js/hot-water.js?v=1', () => typeof hwEstimate === 'function');
 
-  const [{ data: units }, { data: rebateRows }] = await Promise.all([
+  const [{ data: units }, { data: rebateRows, error: rebatesErr }] = await Promise.all([
     supabaseClient.from('prebuilds').select('id, name, hw_kind, hw_litres, hw_cop, stc_count').not('hw_kind', 'is', null).order('name'),
     supabaseClient.from('rebates').select('*').eq('active', true).order('sort_order'),
   ]);
+  // the page may have been drawn again while those loaded: this copy of the quote is gone
+  if (!questions.isConnected || document.getElementById('hw-card')) return;
   const answer = (qid) => { const el = document.querySelector(`.tq-input[data-qid="${qid}"]`); return el ? el.value : (project.template_answers || {})[qid] || ''; };
   const quoteTotal = () => (project.cost_centres || []).reduce((sum, c) => sum + Number(c.quoted_amount || 0), 0) * 1.1;
   const num = (id) => { const v = parseFloat((document.getElementById(id) || {}).value); return Number.isFinite(v) ? v : 0; };
@@ -88,10 +90,11 @@ async function mountHotWater({ project }) {
     <div id="hw-msg"></div>`;
   questions.insertAdjacentElement('afterend', card);
 
-  // Saves a moment after the last change, and only when something is different from what is saved
-  // (opening the quote writes nothing).
+  // The unit, the typed figures and the saving save here, a moment after the last change and only
+  // when something is different (opening the quote writes nothing). The rebates do not: they are
+  // money, so they save with the STC total in the quote's own autosave (window.hwCredits below).
   let saveTimer = null;
-  const snapshot = () => JSON.stringify({ hot_water: project.hot_water || null, rebates: project.rebates || [], rebates_total: Number(project.rebates_total) || 0 });
+  const snapshot = () => JSON.stringify({ hot_water: project.hot_water || null });
   let savedSnapshot = snapshot();
   const saveSoon = (fields) => {
     Object.assign(project, fields);
@@ -158,59 +161,97 @@ async function mountHotWater({ project }) {
   }
 
   const siteState = hwSiteState(project);
-  const fits = (r) => (!r.state || !siteState || r.state.toUpperCase() === siteState) && (!(r.proposal_types || []).length || r.proposal_types.includes('hot_water'));
-  const offered = (rebateRows || []).filter(fits);
+  // A rebate tied to a state is offered only when the site is known to be in it.
+  const fits = (r) => (!r.state || (!!siteState && r.state.toUpperCase() === siteState)) && (!(r.proposal_types || []).length || r.proposal_types.includes('hot_water'));
+  const offered = rebatesErr ? [] : (rebateRows || []).filter(fits);
   const saved = Array.isArray(project.rebates) ? project.rebates : [];
-  const firstTime = !saved.length && !(project.hot_water && project.hot_water.rebates_seen);
+  // Rows: what this quote already has ticked (kept at its own figures even when the rebate has since
+  // been switched off or changed in Settings), then whatever else is on offer.
+  const rows = [
+    ...saved.map((r) => ({ id: r.rebate_id, label: r.label, stc_type: r.stc_type || null, certs: r.certificates != null, certificates: r.certificates, price: r.price, amount: r.amount, on: true })),
+    ...offered.filter((r) => !saved.some((x) => x.rebate_id === r.id)).map((r) => ({ id: r.id, label: r.client_label, stc_type: r.stc_type || null, certs: r.kind === 'certificates', certificates: r.certificates, price: r.certificate_price, amount: r.amount, on: false })),
+  ];
+  // The first time a quote sees rebates on offer they start ticked, and that is saved.
+  const firstTime = !saved.length && !rebatesSeen && offered.length > 0;
+  if (firstTime) rows.forEach((r) => { r.on = true; });
+
   const rebateBox = document.createElement('div');
   rebateBox.id = 'hw-rebates';
   rebateBox.style.cssText = 'margin-top:14px; padding-top:12px; border-top:0.5px solid var(--border);';
+  const rowHtml = (r, i) => `<div class="hw-rebate" data-i="${i}" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px;">
+      <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400; flex:1 1 200px;"><input type="checkbox" class="hw-rb-on" style="width:auto;" ${r.on ? 'checked' : ''} /> ${escapeHtml(r.label)}</label>
+      ${r.certs
+        ? `<input class="hw-rb-count" type="number" step="1" min="0" value="${escapeHtml(r.certificates ?? '')}" title="Certificates" style="width:90px;" /> <span class="subtitle">x $</span> <input class="hw-rb-price" type="number" step="0.01" min="0" value="${escapeHtml(r.price ?? '')}" title="$ per certificate" style="width:90px;" />`
+        : `<span class="subtitle">$</span> <input class="hw-rb-amount" type="number" step="0.01" min="0" value="${escapeHtml(r.amount ?? '')}" style="width:110px;" />`}
+      <strong class="hw-rb-total" style="min-width:80px; text-align:right;"></strong>
+    </div>`;
   rebateBox.innerHTML = `
     <label style="margin-top:0;">Other rebates${siteState ? ` (${escapeHtml(siteState)})` : ''}</label>
-    ${offered.length ? `<p class="subtitle" style="margin:2px 0 6px; font-size:12px;">From Settings &gt; Rebates. Each ticked one prints on the proposal on its own line and comes off the client's price with the STCs.</p>` + offered.map((r) => {
-      const was = saved.find((s) => s.rebate_id === r.id);
-      const on = was ? true : firstTime;
-      const count = was ? was.certificates : r.certificates;
-      const price = was ? was.price : r.certificate_price;
-      return `<div class="hw-rebate" data-id="${r.id}" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px;">
-        <label style="display:flex; align-items:center; gap:6px; margin:0; font-weight:400; flex:1 1 200px;"><input type="checkbox" class="hw-rb-on" style="width:auto;" ${on ? 'checked' : ''} /> ${escapeHtml(r.client_label)}</label>
-        ${r.kind === 'certificates'
-          ? `<input class="hw-rb-count" type="number" step="1" min="0" value="${escapeHtml(count ?? '')}" title="Certificates" style="width:90px;" /> <span class="subtitle">x $</span> <input class="hw-rb-price" type="number" step="0.01" min="0" value="${escapeHtml(price ?? '')}" title="$ per certificate" style="width:90px;" />`
-          : `<span class="subtitle">$</span> <input class="hw-rb-amount" type="number" step="0.01" min="0" value="${escapeHtml(was ? was.amount : r.amount)}" style="width:110px;" />`}
-        <strong class="hw-rb-total" style="min-width:80px; text-align:right;"></strong>
-      </div>`;
-    }).join('') : `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">None set up for this quote${siteState ? ' in ' + escapeHtml(siteState) : ''}. Add them under Settings &gt; Rebates.</p>`}`;
+    ${rebatesErr ? `<div class="error-box">The rebates did not load, so nothing here was changed. Refresh the page. ${escapeHtml(friendlyError(rebatesErr))}</div>` : ''}
+    ${rows.length ? `<p class="subtitle" style="margin:2px 0 6px; font-size:12px;">From Settings &gt; Rebates. Each ticked one prints on the proposal on its own line and comes off the client's price with the STCs.</p>${rows.map(rowHtml).join('')}`
+      : rebatesErr ? '' : `<p class="subtitle" style="margin:2px 0 0; font-size:12px;">None on offer for this quote${siteState ? ' in ' + escapeHtml(siteState) : ' (the site address has no state on it yet)'}. They are set up under Settings &gt; Rebates.</p>`}`;
   credits.appendChild(rebateBox);
+  const qtyEl = document.getElementById('q-stc-qty'), priceEl = document.getElementById('q-stc-price');
+  const totalEl = document.getElementById('q-stc-total'), calcEl = document.getElementById('q-stc-calc');
+  const boxNum = (el) => { const v = parseFloat(el && el.value); return Number.isFinite(v) ? v : 0; };
 
-  // STC total = STCs x price + ticked rebates. Runs after the page's own sum, on the same boxes.
-  function sumCredits(fromUser) {
+  // What is ticked on screen now, as it is saved: [{ rebate_id, label, stc_type, certificates, price, amount }].
+  function pickedRebates() {
     const picked = [];
-    rebateBox.querySelectorAll('.hw-rebate').forEach((row) => {
-      const r = offered.find((x) => x.id === row.dataset.id);
-      const val = (cls) => parseFloat((row.querySelector(cls) || {}).value) || 0;
-      const amount = r.kind === 'certificates' ? val('.hw-rb-count') * val('.hw-rb-price') : val('.hw-rb-amount');
-      const on = row.querySelector('.hw-rb-on').checked;
-      row.querySelector('.hw-rb-total').textContent = on && amount ? money(amount) : '';
-      if (on && amount > 0) picked.push({ rebate_id: r.id, label: r.client_label, stc_type: r.stc_type || null, certificates: r.kind === 'certificates' ? val('.hw-rb-count') : null, price: r.kind === 'certificates' ? val('.hw-rb-price') : null, amount: Math.round(amount * 100) / 100 });
+    rebateBox.querySelectorAll('.hw-rebate').forEach((rowEl) => {
+      const r = rows[Number(rowEl.dataset.i)];
+      const val = (cls) => parseFloat((rowEl.querySelector(cls) || {}).value) || 0;
+      const amount = Math.round((r.certs ? val('.hw-rb-count') * val('.hw-rb-price') : val('.hw-rb-amount')) * 100) / 100;
+      const on = rowEl.querySelector('.hw-rb-on').checked;
+      rowEl.querySelector('.hw-rb-total').textContent = on && amount ? money(amount) : '';
+      if (on && amount > 0) picked.push({ rebate_id: r.id, label: r.label, stc_type: r.stc_type, certificates: r.certs ? val('.hw-rb-count') : null, price: r.certs ? val('.hw-rb-price') : null, amount });
     });
-    const rebatesTotal = picked.reduce((sum, p) => sum + p.amount, 0);
-    const stcs = num('q-stc-qty') * num('q-stc-price');
-    const totalEl = document.getElementById('q-stc-total');
-    const combined = (stcs + rebatesTotal).toFixed(2);
-    const calc = document.getElementById('q-stc-calc');
-    if (calc) calc.textContent = `= ${num('q-stc-qty')} STCs x ${money(num('q-stc-price'))}${rebatesTotal ? ` + ${money(rebatesTotal)} of rebates` : ''} = ${money(stcs + rebatesTotal)}`;
-    if (totalEl && totalEl.value !== combined && (stcs + rebatesTotal > 0 || totalEl.value)) {
-      totalEl.value = stcs + rebatesTotal > 0 ? combined : '';
-      totalEl.dispatchEvent(new Event('input', { bubbles: true })); // the quote's own autosave takes the new total
-    }
-    if (fromUser || firstTime) {
-      rebatesSeen = true;
-      Object.assign(project, { rebates: picked, rebates_total: Math.round(rebatesTotal * 100) / 100 });
+    return picked;
+  }
+  const totalOf = (picked) => Math.round(picked.reduce((sum, p) => sum + p.amount, 0) * 100) / 100;
+
+  // STC total = STCs x price + ticked rebates. write: put the figure in the box (a change made
+  // here, or the first time rebates are offered); otherwise only the working line is redrawn, so
+  // opening a quote never changes its money.
+  function sumCredits(write) {
+    const rebatesTotal = totalOf(pickedRebates());
+    const stcs = boxNum(qtyEl) * boxNum(priceEl);
+    if (calcEl) calcEl.textContent = `= ${boxNum(qtyEl)} STCs x ${money(boxNum(priceEl))}${rebatesTotal ? ` + ${money(rebatesTotal)} of rebates` : ''} = ${money(stcs + rebatesTotal)}`;
+    if (write && totalEl) {
+      const combined = stcs + rebatesTotal > 0 ? (stcs + rebatesTotal).toFixed(2) : '';
+      if (totalEl.value !== combined) {
+        totalEl.value = combined;
+        totalEl.dispatchEvent(new Event('input', { bubbles: true })); // the quote's own autosave takes the total and the rebates together
+      }
     }
     redraw();
   }
-  rebateBox.addEventListener('input', () => sumCredits(true));
-  ['q-stc-qty', 'q-stc-price'].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener('input', () => sumCredits(false)); });
 
-  sumCredits(false);
+  // The quote's autosave reads the rebates with the STC total (one save), and Undo puts both back.
+  window.hwCredits = {
+    read: () => {
+      if (!rebateBox.isConnected || rebatesErr) return {};
+      const picked = pickedRebates();
+      return { rebates: picked, rebates_total: totalOf(picked) };
+    },
+    apply: (p) => {
+      if (!rebateBox.isConnected || !Array.isArray(p.rebates)) return;
+      rebateBox.querySelectorAll('.hw-rebate').forEach((rowEl) => {
+        const was = p.rebates.find((x) => x.rebate_id === rows[Number(rowEl.dataset.i)].id);
+        rowEl.querySelector('.hw-rb-on').checked = !!was;
+        if (was) {
+          const set = (cls, v) => { const el = rowEl.querySelector(cls); if (el && v != null) el.value = v; };
+          set('.hw-rb-count', was.certificates); set('.hw-rb-price', was.price); set('.hw-rb-amount', was.amount);
+        }
+      });
+      sumCredits(false);
+    },
+  };
+
+  if (!rebatesErr) {
+    rebateBox.addEventListener('input', () => { rebatesSeen = true; sumCredits(true); });
+    [qtyEl, priceEl].forEach((el) => { if (el) el.addEventListener('input', () => sumCredits(true)); });
+  }
+  if (firstTime) rebatesSeen = true;
+  sumCredits(firstTime);
 }

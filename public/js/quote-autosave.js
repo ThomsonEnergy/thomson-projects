@@ -294,6 +294,8 @@ function quoteStepDefs(project, page) {
           bstc_quantity: num('q-bstc-qty'), bstc_price_per_certificate: num('q-bstc-price'), bstc_total: num('q-bstc-total') || 0,
           bstc_cost_centre_id: val('q-bstc-stage') || null,
           bstc_not_claimed: !!(el('q-bstc-none') && el('q-bstc-none').checked),
+          // a Hot Water quote's ticked rebates are inside stc_total: they save, and undo, with it (js/hot-water-card.js)
+          ...(window.hwCredits ? window.hwCredits.read() : {}),
           milestones: page.milestones(),
         };
       },
@@ -316,6 +318,7 @@ function quoteStepDefs(project, page) {
         set('q-bstc-qty', p.bstc_quantity); set('q-bstc-price', p.bstc_price_per_certificate); set('q-bstc-total', p.bstc_total || '');
         set('q-bstc-stage', p.bstc_cost_centre_id);
         if (el('q-bstc-none')) el('q-bstc-none').checked = !!p.bstc_not_claimed;
+        if (window.hwCredits) window.hwCredits.apply(p);
         page.setMilestones((p.milestones || []).map(m => ({ label: String(m.label || ''), percent: Number(m.percent) || 0 })));
       },
       preview: (p) => {

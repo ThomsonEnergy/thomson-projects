@@ -31,7 +31,7 @@
     <div id="content"><p class="subtitle">Loading...</p></div>
   </div>
 
-  <script src="/js/supabase-client.js?v=151"></script>
+  <script src="/js/supabase-client.js?v=152"></script>
   <script src="/js/template-questions.js?v=10"></script>
   <script src="/js/solar-roi.js?v=22"></script>
   <script src="/js/solar-roi-staff.js?v=3"></script>
@@ -3488,7 +3488,7 @@
     async function wireQuoteSteps(project) {
       try {
         // the steps save themselves: that file loads while the rest is wired, and is mounted last
-        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=3', () => typeof mountQuoteAutosave === 'function');
+        const autosaveReady = loadJsOnce('/js/quote-autosave.js?v=4', () => typeof mountQuoteAutosave === 'function');
         if (!RATE_TIERS.length) RATE_TIERS = await loadRateTiersForProject(project);
         if (!Object.keys(companySettings).length) {
           const { data: settingsRow } = await supabaseClient.from('company_settings')
@@ -5799,7 +5799,7 @@
       const quotePrice = Number(project.stc_price_per_certificate) > 0 ? Number(project.stc_price_per_certificate) : ((centres.find(c => Number(c.stc_price_per_certificate) > 0) || {}).stc_price_per_certificate || 35);
       const paid = !!(row && (row.formbay_payment_advice_lines || []).length);
       const bstcOffered = Number(project.bstc_quantity) > 0 && jobStcRows.some(r => r.stc_type === 'pv') && !jobStcRows.some(r => r.stc_type === 'bstc');
-      const v = row || { stc_type: bstcOffered ? 'bstc' : 'pv', stc_count: bstcOffered ? Math.round(Number(project.bstc_quantity)) : (jobStcRows.length ? '' : (quoteCount || '')), booked_price: bstcOffered ? (Number(project.bstc_price_per_certificate) || quotePrice) : quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
+      const v = row || { stc_type: bstcOffered ? 'bstc' : project.proposal_template === 'hot_water' ? 'swh' : 'pv', stc_count: bstcOffered ? Math.round(Number(project.bstc_quantity)) : (jobStcRows.length ? '' : (quoteCount || '')), booked_price: bstcOffered ? (Number(project.bstc_price_per_certificate) || quotePrice) : quotePrice, status: project.formbay_lodgement_status || 'not_lodged', formbay_job_id: project.formbay_lodgement_id || '', ...(prefill || {}) };
       holder.innerHTML = `
         <div style="margin-top:14px; padding:14px; background:var(--surface-2); border-radius:8px;">
           <h3 style="margin:0 0 8px;">${row ? 'Edit STCs' : 'Add STCs'}</h3>

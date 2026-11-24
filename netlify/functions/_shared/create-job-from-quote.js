@@ -308,6 +308,8 @@ async function createJobFromQuote(supabaseAdmin, { quoteId, approvedBy = null, a
         stc_install_year: quote.stc_install_year, stc_price_per_certificate: quote.stc_price_per_certificate, stc_total: quote.stc_total || 0,
         bstc_quantity: quote.bstc_quantity, bstc_price_per_certificate: quote.bstc_price_per_certificate, bstc_total: quote.bstc_total || 0,
         bstc_not_claimed: !!quote.bstc_not_claimed,
+        // a Hot Water quote's rebates (inside stc_total) and its saving go with it (item 113)
+        rebates: quote.rebates || [], rebates_total: Number(quote.rebates_total) || 0, hot_water: quote.hot_water || null,
         laha_approved: quote.laha_approved,
         estimate_disclaimer_text: quote.estimate_disclaimer_text,
         project_manager_contact_id: quote.project_manager_contact_id,

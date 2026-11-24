@@ -4958,7 +4958,7 @@ function calculateStcQuantity({ kw, zoneRating, installYear }) {
 }
 
 // --- STC tracking (job_stcs, Formbay payment advices; migration 147) ---
-const STC_TYPES = { pv: 'Solar', bstc: 'Battery', swh: 'Hot water' };
+const STC_TYPES = { pv: 'Solar', bstc: 'Battery', swh: 'Hot water', esc: 'Energy savings (ESC)', prc: 'Peak reduction (PRC)' };
 const STC_STATUSES = [
   { value: 'not_lodged', label: 'Not lodged' },
   { value: 'pending_installer_action', label: 'Pending installer' },
