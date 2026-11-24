@@ -151,7 +151,8 @@ async function loadSm8Everything(apiKey, onPage) {
   // One after another, not all at once: nine paged lists side by side trip the minute limit.
   const get = (object, filter) => sm8GetAll(apiKey, object, filter, onPage);
   const allJobs = await get('job', 'active eq 1');
-  const companies = await get('company', 'active eq 1');
+  // every company, archived ones too: a job of an archived client still needs its client
+  const everyCompany = await get('company');
   const companyContacts = await get('companycontact', 'active eq 1');
   const jobContacts = await get('jobcontact', 'active eq 1');
   const notes = await get('note', "related_object eq 'job' and active eq 1");
@@ -174,7 +175,7 @@ async function loadSm8Everything(apiKey, onPage) {
   const activitiesByJob = group(activities, 'job_uuid');
   const checklistByJob = group(checklist, 'job_uuid');
   const attachmentsByJob = group(attachments, 'related_object_uuid');
-  const companyByUuid = new Map(companies.map(c => [c.uuid, c]));
+  const companyByUuid = new Map(everyCompany.map(c => [c.uuid, c]));
   const staffNames = Object.fromEntries(staff.map(s => [s.uuid, `${clean(s.first)} ${clean(s.last)}`.trim() || 'Unknown ServiceM8 staff']));
 
   // Lettered jobs (4515A deposit, 4515B claim...) belong to the main job of the same number.
@@ -201,7 +202,8 @@ async function loadSm8Everything(apiKey, onPage) {
       left.letteredOfLeftJobs += lettered.length;
       continue;
     }
-    const uuids = [job.uuid, ...lettered.map(l => l.uuid)];
+    // an Unsuccessful lettered job stays behind like any other: only its status is kept, for the claims
+    const uuids = [job.uuid, ...lettered.filter(l => KIND_BY_STATUS[l.status]).map(l => l.uuid)];
     const every = (byJob) => uuids.flatMap(u => byJob.get(u) || []);
     const jobActivities = every(activitiesByJob);
     jobs.push({
@@ -229,6 +231,9 @@ async function loadSm8Everything(apiKey, onPage) {
     });
   }
 
+  // the clients that come across: every active one, and an archived one when a job that comes across is its
+  const needed = new Set(jobs.map(j => j.payload.job.company_uuid).filter(Boolean));
+  const companies = everyCompany.filter(c => isOn(c.active) || needed.has(c.uuid));
   const contactRow = (c) => ({ name: contactName(c), email: clean(c.email), phone: clean(c.mobile) || clean(c.phone), type: String(c.type || '').toUpperCase(), primary: isOn(c.is_primary_contact) });
   return {
     companies: companies.filter(c => c.uuid).map(c => {
@@ -285,19 +290,32 @@ function shapeSm8Job(kind, payload, tierNames) {
   // lettered claims, then one claim for whatever is left, so it can never be invoiced again here.
   const dateByNumber = new Map(claims.map(c => [c.number.toLowerCase(), c.date]));
   let quoted = stage.lines.length ? stage.quotedExGst : exGst(totalIncGst);
-  let importedClaims = stage.claimsUsed.filter(c => c.invoiced).map(c => ({
+  // A credit or refund job: the app has no job worth less than nothing, so it comes across at $0
+  // with its lines kept.
+  if (quoted < 0) { warnings.push(`ServiceM8 has this job at less than $0 ($${quoted.toFixed(2)}): brought across at $0, check it`); quoted = 0; }
+  let importedClaims = stage.claimsUsed.filter(c => c.invoiced && c.valueExGst > 0).map(c => ({
     number: c.number, amount: c.valueExGst, date: c.date || dateByNumber.get(String(c.number).toLowerCase()) || null,
-    ...(c.paid ? { paid: c.paid, method: c.method, ...(c.amountIncGst ? { amount_inc: c.amountIncGst } : {}) } : {}),
+    ...(c.paid ? { paid: c.paid, method: c.method, ...(c.amountIncGst ? { amount_inc: c.amountIncGst } : {}), ...(c.payment ? { payment: c.payment } : {}) } : {}),
   }));
+  // Claims and deposits can come to more than the job in ServiceM8 (a surcharge, an overpayment, a
+  // payment on a job with no value): the ones that fit are kept, the rest are named for checking.
+  if (kind === 'job') {
+    let running = 0;
+    const kept = [];
+    for (const c of importedClaims) {
+      if (r2(running + c.amount) <= quoted + 0.01) { kept.push(c); running = r2(running + c.amount); }
+      else warnings.push(`ServiceM8 has ${c.paid ? 'a payment' : 'a claim'} "${c.number}" of $${c.amount.toFixed(2)} that takes invoiced to date past the job's value ($${quoted.toFixed(2)}): left off, check it`);
+    }
+    importedClaims = kept;
+  }
   let owing = 0;
   if (kind === 'completed') {
     const completedOn = dateOf(job.completion_date) || dateOf(job.date) || null;
-    const lettered = stage.claimsUsed.filter(c => c.invoiced && c.status !== 'Paid' && String(c.number) !== number);
+    const lettered = stage.claimsUsed.filter(c => c.invoiced && c.valueExGst > 0 && c.status !== 'Paid' && String(c.number) !== number);
     const letteredTotal = r2(lettered.reduce((t, c) => t + c.valueExGst, 0));
     const paidIncGst = r2(deposits.reduce((t, d) => t + d.amountIncGst, 0));
     const last = deposits[deposits.length - 1];
     owing = Math.max(0, r2(totalIncGst - paidIncGst));
-    if (quoted < 0) { warnings.push(`ServiceM8 has this job at less than $0 ($${quoted.toFixed(2)}): brought across at $0`); quoted = 0; }
     importedClaims = letteredTotal <= quoted + 0.01
       ? lettered.map(c => ({ number: c.number, amount: c.valueExGst, date: dateByNumber.get(String(c.number).toLowerCase()) || null }))
       : [];
@@ -393,6 +411,7 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
     if (!number) { warnings.push(`A partial invoice line has no claim number ("${clean(m.name)}") - check invoiced to date`); }
     const status = claimStatus.get(number.toLowerCase());
     if (!value) continue; // empty claim (e.g. 4515C at $0): nothing taken off the job yet
+    if (value < 0) { warnings.push(`Claim #${number || '?'} is a reversal in ServiceM8 ($${value.toFixed(2)}): left out of invoiced to date, check it`); continue; }
     let invoiced = status === 'Completed';
     if (!status) { invoiced = true; warnings.push(`Claim #${number || '?'} not found in ServiceM8 - counted as invoiced, check it`); }
     else if (status === 'Unsuccessful') warnings.push(`Claim #${number} ($${value.toFixed(2)}) is Unsuccessful (voided) in ServiceM8 but still taken off the job there - counted as not invoiced, check it`);
@@ -407,7 +426,7 @@ function buildJobStage(job, claims, jobMaterials, bundles, tierNames, taxRates =
   // job's value is known).
   const invoiceOnly = isOn(job.invoiceSent) && !claimsUsed.length;
   if (!invoiceOnly) {
-    for (const d of deposits) claimsUsed.push({ number: d.number, status: 'Paid', valueExGst: d.amount, amountIncGst: d.amountIncGst, invoiced: true, date: d.date, paid: d.date, method: d.method });
+    for (const d of deposits) claimsUsed.push({ number: d.number, status: 'Paid', valueExGst: d.amount, amountIncGst: d.amountIncGst, invoiced: true, date: d.date, paid: d.date, method: d.method, payment: d.payment });
   }
 
   // Line items, in ServiceM8's order: each bundle followed by its
@@ -501,6 +520,7 @@ function depositsFrom(job, payments) {
     const date = String(p.payment_date || p.timestamp || '').slice(0, 10);
     return {
       number: `${job.number} deposit${rows.length > 1 ? ' ' + (i + 1) : ''}`,
+      payment: p.uuid || null,
       amountIncGst: r2(p.amount),
       amount: exGst(p.amount),
       date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null,
@@ -515,10 +535,13 @@ function stageFromLines(lines) {
     if (l.item_type === 'labour') labourSell += l.quantity * l.price;
     else { materialCost += l.quantity * l.cost; materialSell += l.quantity * l.price; }
   }
-  const costBasis = materialCost > 0.005;
+  // The stage markup column holds up to 9999.99%: past that (a few dollars of cost recorded against
+  // thousands of sell) or below -100% the costs are not usable, so the sell price is carried as the cost.
+  let costBasis = materialCost > 0.005;
   let markup = 45;
   if (costBasis) markup = Math.round(((materialSell / materialCost) - 1) * 100 * 10000) / 10000;
-  else if (Math.abs(materialSell) > 0.005) markup = 0; // no costs in ServiceM8: carry the sell price as the cost
+  if (costBasis && (markup > 9999 || markup < -100)) costBasis = false;
+  if (!costBasis) markup = Math.abs(materialSell) > 0.005 ? 0 : 45; // no usable costs in ServiceM8: carry the sell price as the cost
   const items = lines.map(l => ({
     ...l,
     unit_cost: l.item_type === 'labour' ? l.price : (costBasis ? l.cost : l.price),

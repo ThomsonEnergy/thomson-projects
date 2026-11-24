@@ -15,8 +15,6 @@ const fetch = require('node-fetch');
 const { SM8_BASE, Sm8RateLimit } = require('./sm8-import');
 const { sm8DateToIso } = require('./sm8-labour');
 
-const STALE_CLAIM_MS = 16 * 60 * 1000;
-
 // Formats the Photos tab can show (pictures, and videos, which it plays);
 // anything else (PDF, Word, HEIC...) goes to Documents, where it can still
 // be opened or downloaded. ServiceM8 saves most site photos as AVIF.
@@ -42,13 +40,14 @@ function fileParts(att) {
   return { fileName, ext, kind, mime };
 }
 
-// ServiceM8's own invoice PDFs ("Thomson Energy Invoice #4515B") are listed
-// on the job's Invoices tab, not in Documents. "Partial Invoice #4515A"
+// ServiceM8's own invoice PDFs ("Thomson Energy Invoice #4515B": the word, a hash, the job
+// number) are listed on the job's Invoices tab, not in Documents. Any other file with invoice in
+// its name (a supplier's invoice someone attached) is an ordinary document. "Partial Invoice #4515A"
 // PDFs are ServiceM8's internal copy of each claim line on the main job,
 // not what the client got, so they are not brought across at all.
 const isPartialInvoice = (fileName) => /\bpartial\s+invoice\b/i.test(String(fileName || ''));
 // A quote's own PDF ("Quote #4600", "Proposal") goes to its own folder.
-const docFolder = (fileName) => (/\binvoice\b/i.test(fileName) ? 'ServiceM8 invoices'
+const docFolder = (fileName) => (/\binvoice\s*#\s*\d+[a-z]*\b/i.test(fileName) ? 'ServiceM8 invoices'
   : /\b(quote|quotation|proposal)\b/i.test(fileName) ? 'ServiceM8 proposal' : 'ServiceM8');
 
 const safe = (s) => s.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
@@ -108,6 +107,9 @@ async function copyOne(supabaseAdmin, apiKey, userId, row, meta) {
     const { error: upErr } = await supabaseAdmin.storage.from('site-photos').upload(path, bytes, { contentType: mime, upsert: true });
     if (upErr) throw upErr;
     const { data: pub } = supabaseAdmin.storage.from('site-photos').getPublicUrl(path);
+    // a worker that died after adding the photo and before saying so: use the one it added
+    const { data: had } = await supabaseAdmin.from('project_photos').select('id').eq('project_id', row.project_id).eq('url', pub.publicUrl).limit(1);
+    if (had && had.length) return { project_photo_id: had[0].id };
     const { data: photo, error: insErr } = await supabaseAdmin.from('project_photos')
       .insert({ project_id: row.project_id, staff_id: meta.staffId || userId, url: pub.publicUrl, caption: captionOf(row.file_name), ...(meta.createdAt ? { created_at: meta.createdAt } : {}), ...(meta.archived ? { tagged_at: new Date().toISOString(), tag_note: 'ServiceM8 archive: not sent to the picture tagger' } : {}) })
       .select('id').single();
@@ -118,6 +120,8 @@ async function copyOne(supabaseAdmin, apiKey, userId, row, meta) {
   const path = `documents/${row.project_id}/sm8-${row.sm8_attachment_uuid}-${safe(row.file_name)}`;
   const { error: upErr } = await supabaseAdmin.storage.from('project-documents').upload(path, bytes, { contentType: mime === 'application/octet-stream' ? contentType : mime, upsert: true });
   if (upErr) throw upErr;
+  const { data: hadDoc } = await supabaseAdmin.from('project_documents').select('id').eq('project_id', row.project_id).eq('file_path', path).limit(1);
+  if (hadDoc && hadDoc.length) return { project_document_id: hadDoc[0].id };
   const { data: doc, error: insErr } = await supabaseAdmin.from('project_documents')
     .insert({ project_id: row.project_id, folder: docFolder(row.file_name), file_path: path, file_name: row.file_name, mime_type: mime === 'application/octet-stream' ? contentType : mime, uploaded_by: meta.staffId || userId, ...(meta.createdAt ? { created_at: meta.createdAt } : {}) })
     .select('id').single();
@@ -129,11 +133,9 @@ async function copyOne(supabaseAdmin, apiKey, userId, row, meta) {
 // Returns { copied, failed, left }. Throws Sm8RateLimit when ServiceM8 will take no more today:
 // the file it was on goes back to waiting. beat: called after each file (the run's heartbeat).
 async function copyPendingFiles(supabaseAdmin, apiKey, userId, deadline, beat) {
-  // A run that crashed mid-file leaves its claim behind: hand it back.
-  await supabaseAdmin.from('sm8_attachment_copies')
-    .update({ status: 'pending', claimed_at: null })
-    .eq('status', 'copying')
-    .lt('claimed_at', new Date(Date.now() - STALE_CLAIM_MS).toISOString());
+  // Only one worker holds the run at a time (sm8-run.js), so a file still marked as being copied
+  // was left by a worker that died: hand it back.
+  await supabaseAdmin.from('sm8_attachment_copies').update({ status: 'pending', claimed_at: null }).eq('status', 'copying');
 
   const { data: linked, error: linkErr } = await supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null);
   if (linkErr) throw linkErr;
@@ -179,7 +181,7 @@ async function copyPendingFiles(supabaseAdmin, apiKey, userId, deadline, beat) {
       }
     }
   }
-  const { count } = await supabaseAdmin.from('sm8_attachment_copies').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  const { count } = await supabaseAdmin.from('sm8_attachment_copies').select('id', { count: 'exact', head: true }).in('status', ['pending', 'copying']);
   return { copied, failed, left: count || 0 };
 }
 

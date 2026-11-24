@@ -159,8 +159,6 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
     // The Sydney date as ServiceM8 shows it (not the UTC one).
     const due = [item.reminder_date, item.due_date].map(d => String(d || '').slice(0, 10)).find(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00');
     if (due && !completedAt) fields.due_date = due;
-    const assignee = profileByStaff.get(item.reminder_staff_uuid) || profileByStaff.get(item.assigned_to_staff_uuid);
-    if (assignee && !completedAt) fields.assigned_to_user_id = assignee;
     return fields;
   };
 

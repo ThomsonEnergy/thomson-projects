@@ -2,6 +2,7 @@
 -- Completed job across (netlify/functions/_shared/sm8-run.js). Additions only.
 --
 -- sm8_runs          one row per press of Dry run or Bring everything across: where it is up to.
+--                   One run at a time (unique index), one worker at a time (worker_id).
 -- sm8_run_clients   one row per ServiceM8 client: the TEops client it became.
 -- sm8_run_jobs      one row per ServiceM8 job that comes across, with the full ServiceM8 record
 --                   (payload: the job, its lines, notes, payments, contacts, check-ins, checklist
@@ -19,6 +20,8 @@ create table if not exists public.sm8_runs (
   started_by uuid references public.profiles(id) on delete set null,
   started_at timestamptz not null default now(),
   heartbeat_at timestamptz not null default now(),
+  -- the worker holding the run: one at a time, taken over only when its heartbeat has stopped
+  worker_id uuid,
   resume_after timestamptz,
   finished_at timestamptz,
   counts jsonb not null default '{}'::jsonb,
@@ -26,6 +29,8 @@ create table if not exists public.sm8_runs (
 );
 create index if not exists sm8_runs_started_at_idx on public.sm8_runs (started_at desc);
 create index if not exists sm8_runs_started_by_idx on public.sm8_runs (started_by);
+-- only one run can be going at a time
+create unique index if not exists sm8_runs_one_active on public.sm8_runs ((true)) where status in ('listing', 'running', 'paused');
 
 create table if not exists public.sm8_run_clients (
   sm8_company_uuid text primary key,

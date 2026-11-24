@@ -12,11 +12,16 @@
 //   4. files    the files are downloaded from ServiceM8, one call each.
 // Unsuccessful and deleted jobs are never listed, so they stay behind.
 //
+// One run at a time (a unique index on sm8_runs) and one worker on it at a time: each go takes the
+// run (worker_id) and every write to the run row checks it still holds it. A worker whose
+// heartbeat has stopped for four minutes can be taken over; the one that lost the run stops.
+//
 // Nothing here sends anything to anyone: no email, text or notification, no invoice, nothing to
 // Xero or payroll. Tables written: sm8_runs, sm8_run_clients, sm8_run_jobs, clients,
 // client_contacts, and through the helpers projects, cost_centres, cost_centre_line_items,
 // client_sites, time_entries, job_tasks, sm8_attachment_copies, project_photos, project_documents.
 
+const crypto = require('crypto');
 const { getIntegrationKey } = require('./get-integration-key');
 const { loadSm8Everything, shapeSm8Job, matchClient, r2 } = require('./sm8-import');
 const { writeSm8Job } = require('./sm8-job-writer');
@@ -25,11 +30,14 @@ const { queueJobFiles, copyPendingFiles, retryFailedFiles, wantedFiles } = requi
 
 // A dry run's list is good for this long: Bring everything across pressed after it starts from
 // that list instead of reading ServiceM8 again.
-const LIST_FRESH_MS = 6 * 60 * 60 * 1000;
+const LIST_FRESH_MS = 60 * 60 * 1000;
 // ServiceM8 said no more for now (its daily limit): try again after this long.
 const RATE_LIMIT_WAIT_MS = 30 * 60 * 1000;
 const ERROR_WAIT_MS = 5 * 60 * 1000;
 const MAX_STRIKES = 6;
+// Reading ServiceM8 cannot stop part way: a read that dies this many times stops the run.
+const MAX_LIST_TRIES = 3;
+const TAKE_OVER_AFTER_MS = 4 * 60 * 1000;
 const ACTIVE = ['listing', 'running', 'paused'];
 
 const nowIso = () => new Date().toISOString();
@@ -45,18 +53,27 @@ async function all(query) {
   }
 }
 
-async function patchRun(db, runId, fields) {
-  const { error } = await db.from('sm8_runs').update({ heartbeat_at: nowIso(), ...fields }).eq('id', runId);
+class LostRun extends Error {
+  constructor() { super('Another worker has taken over this run'); this.lostRun = true; }
+}
+
+// Writes to the run row, and proves this worker still holds it: if another worker has taken the
+// run over, nothing is written and this one stops (LostRun).
+async function patchRun(db, run, fields) {
+  let q = db.from('sm8_runs').update({ heartbeat_at: nowIso(), ...fields }).eq('id', run.id);
+  if (run.worker) q = q.eq('worker_id', run.worker);
+  const { data, error } = await q.select('id');
   if (error) throw error;
+  if (run.worker && !data.length) throw new LostRun();
 }
 
 // A heartbeat no more than every 15 seconds, so the sweep can tell a live run from a dead one.
-function heartbeat(db, runId) {
+function heartbeat(db, run) {
   let last = Date.now();
   return async () => {
     if (Date.now() - last < 15000) return;
     last = Date.now();
-    await patchRun(db, runId, {});
+    await patchRun(db, run, {});
   };
 }
 
@@ -74,7 +91,7 @@ async function startRun(db, userId, mode) {
   const last = await latestRun(db);
   if (last && ACTIVE.includes(last.status)) {
     if (mode === 'full' && last.mode === 'dry_run') {
-      await patchRun(db, last.id, { mode: 'full' });
+      await patchRun(db, { id: last.id }, { mode: 'full' });
       return { run: { ...last, mode: 'full' }, already: true };
     }
     return { run: last, already: true };
@@ -83,8 +100,10 @@ async function startRun(db, userId, mode) {
   const listed = last && last.status === 'listed' && Date.now() - new Date(last.finished_at || last.started_at).getTime() < LIST_FRESH_MS;
   const reuse = mode === 'full' && listed;
   const { data: run, error } = await db.from('sm8_runs')
-    .insert({ mode, status: reuse ? 'running' : 'listing', started_by: userId, counts: reuse ? { ...last.counts, strikes: 0 } : {} })
+    .insert({ mode, status: reuse ? 'running' : 'listing', started_by: userId, counts: reuse ? { ...last.counts, strikes: 0, requeued: false } : {} })
     .select('*').single();
+  // two presses at once: the unique index lets one run start, the other press joins it
+  if (error && error.code === '23505') return { run: await latestRun(db), already: true };
   if (error) throw error;
   if (mode === 'full') await retryFailedFiles(db);
   return { run, already: false };
@@ -92,27 +111,42 @@ async function startRun(db, userId, mode) {
 
 // ---- 1. list ----------------------------------------------------------------
 
+async function knownKeys(db, table, key) {
+  const rows = await all(() => db.from(table).select(key).order(key));
+  return new Set(rows.map(r => r[key]));
+}
+
 async function listEverything(db, run) {
   const apiKey = await getIntegrationKey('servicem8');
   const listStart = nowIso();
-  const { companies, jobs, left } = await loadSm8Everything(apiKey, heartbeat(db, run.id));
+  const beat = heartbeat(db, run);
+  const { companies, jobs, left } = await loadSm8Everything(apiKey, beat);
 
-  for (let i = 0; i < companies.length; i += 200) {
-    const rows = companies.slice(i, i + 200).map(c => ({ sm8_company_uuid: c.uuid, name: c.name, payload: c, status: 'pending', error: null, updated_at: nowIso() }));
-    const { error } = await db.from('sm8_run_clients').upsert(rows, { onConflict: 'sm8_company_uuid' });
+  // A row already on the list keeps its status and figures (a dry run after a finished run must
+  // not make the report read "missing"): only what ServiceM8 says is refreshed. New rows wait.
+  const knownClients = await knownKeys(db, 'sm8_run_clients', 'sm8_company_uuid');
+  const knownJobs = await knownKeys(db, 'sm8_run_jobs', 'sm8_job_uuid');
+  const upsert = async (table, key, rows) => {
+    if (!rows.length) return;
+    const { error } = await db.from(table).upsert(rows, { onConflict: key });
     if (error) throw error;
-    await patchRun(db, run.id, {});
+  };
+  for (let i = 0; i < companies.length; i += 200) {
+    const rows = companies.slice(i, i + 200).map(c => ({ sm8_company_uuid: c.uuid, name: c.name, payload: c, updated_at: nowIso() }));
+    await upsert('sm8_run_clients', 'sm8_company_uuid', rows.filter(r => knownClients.has(r.sm8_company_uuid)));
+    await upsert('sm8_run_clients', 'sm8_company_uuid', rows.filter(r => !knownClients.has(r.sm8_company_uuid)));
+    await beat();
   }
   let files = 0;
   for (let i = 0; i < jobs.length; i += 25) {
     const rows = jobs.slice(i, i + 25).map(j => {
       const n = wantedFiles(j.payload.attachments).length;
       files += n;
-      return { sm8_job_uuid: j.uuid, sm8_job_number: j.number, kind: j.kind, payload: j.payload, status: 'pending', error: null, stats: { files: n }, warnings: [], updated_at: nowIso() };
+      return { sm8_job_uuid: j.uuid, sm8_job_number: j.number, kind: j.kind, payload: j.payload, updated_at: nowIso(), files: n };
     });
-    const { error } = await db.from('sm8_run_jobs').upsert(rows, { onConflict: 'sm8_job_uuid' });
-    if (error) throw error;
-    await patchRun(db, run.id, {});
+    await upsert('sm8_run_jobs', 'sm8_job_uuid', rows.filter(r => knownJobs.has(r.sm8_job_uuid)).map(({ files: _n, ...r }) => r));
+    await upsert('sm8_run_jobs', 'sm8_job_uuid', rows.filter(r => !knownJobs.has(r.sm8_job_uuid)).map(({ files: n, ...r }) => ({ ...r, stats: { files: n } })));
+    await beat();
   }
   // Listed on an earlier run, gone from ServiceM8 since (marked Unsuccessful, deleted) and not
   // brought across yet: off the list.
@@ -122,7 +156,7 @@ async function listEverything(db, run) {
   if (cErr) throw cErr;
 
   const { count: alreadyIn } = await db.from('sm8_run_jobs').select('sm8_job_uuid', { count: 'exact', head: true }).not('project_id', 'is', null);
-  const counts = {
+  return {
     listedAt: nowIso(),
     clients: companies.length,
     quotes: jobs.filter(j => j.kind === 'quote').length,
@@ -133,7 +167,15 @@ async function listEverything(db, run) {
     left,
     strikes: 0,
   };
-  return counts;
+}
+
+// A full run goes over everything again, the rows done before included: time by newly matched
+// staff, files added since, a deposit paid since. Nothing is made twice.
+async function requeueAll(db) {
+  const { error: jErr } = await db.from('sm8_run_jobs').update({ status: 'pending', error: null }).neq('status', 'pending');
+  if (jErr) throw jErr;
+  const { error: cErr } = await db.from('sm8_run_clients').update({ status: 'pending', error: null }).neq('status', 'pending');
+  if (cErr) throw cErr;
 }
 
 // ---- 2. clients -------------------------------------------------------------
@@ -176,7 +218,7 @@ async function createClient(db, company) {
 }
 
 async function syncClients(db, run, deadline) {
-  const beat = heartbeat(db, run.id);
+  const beat = heartbeat(db, run);
   const clients = await loadClients(db);
   const byId = new Map(clients.filter(c => !c.mergedAlias).map(c => [c.id, c]));
   while (Date.now() < deadline) {
@@ -223,8 +265,9 @@ async function syncClients(db, run, deadline) {
 // ---- 3. jobs ----------------------------------------------------------------
 
 // The TEops client a queued job belongs to. A client merged away since its row was settled is
-// followed to the client it was merged into. A job with no ServiceM8 company goes to a client
-// named after its contact.
+// followed to the client it was merged into. A job with no ServiceM8 company gets a new client
+// named after its contact: a name alone is never enough to put a job on an existing client (the
+// Clients page offers the merge if it is one).
 async function clientForJob(db, payload, contactName) {
   const pickClient = async (id) => {
     const { data } = await db.from('clients').select('id, name, email, phone, address').eq('id', id).maybeSingle();
@@ -240,13 +283,9 @@ async function clientForJob(db, payload, contactName) {
       const client = await pickClient(row.client_id);
       if (client) return client;
     }
-    if (row) throw new Error(`Its client was not brought across${row.error ? `: ${row.error}` : ''}`);
+    throw new Error(`Its client was not brought across${row && row.error ? `: ${row.error}` : ''}`);
   }
-  const name = cut(contactName, 300) || 'ServiceM8 job with no client';
-  const { data: found, error: fErr } = await db.from('clients').select('id, name, email, phone, address').ilike('name', name.replace(/[%_\\]/g, '\\$&')).limit(1);
-  if (fErr) throw fErr;
-  if (found.length) return found[0];
-  return createClient(db, { name });
+  return createClient(db, { name: cut(contactName, 300) || 'ServiceM8 job with no client' });
 }
 
 const hoursText = (h) => `${Math.round(h * 10) / 10} h`;
@@ -254,8 +293,11 @@ const hoursText = (h) => `${Math.round(h * 10) / 10} h`;
 async function processJob(db, userId, row, ctx) {
   const { payload } = row;
   const shaped = shapeSm8Job(row.kind, payload, ctx.tierNames);
-  const client = await clientForJob(db, payload, shaped.row.contactName);
-  shaped.row.name = `${client.name} - ${shaped.row.name}`;
+  // A job already in the app needs no client worked out (and must not have one made for it again).
+  const { data: prior, error: priorErr } = await db.from('projects').select('id').eq('sm8_job_uuid', row.sm8_job_uuid).maybeSingle();
+  if (priorErr) throw priorErr;
+  const client = prior ? null : await clientForJob(db, payload, shaped.row.contactName);
+  if (client) shaped.row.name = `${client.name} - ${shaped.row.name}`;
   const res = await writeSm8Job(db, userId, shaped.row, client, ctx.tierIds);
   const labour = await copyJobRecords(db, userId, res.projectId, payload, ctx.profileByStaff);
   const files = await queueJobFiles(db, res.projectId, payload.attachments);
@@ -269,7 +311,7 @@ async function processJob(db, userId, row, ctx) {
   }
   return {
     projectId: res.projectId,
-    warnings: shaped.warnings,
+    warnings: [...shaped.warnings, ...(res.overValue || []).map(nm => `ServiceM8 has a payment "${nm}" that is not on this job and would take invoiced to date past its value: left off, check it`)],
     stats: {
       files,
       hoursSeen: r2(labour.hoursSeen), hoursMatched: r2(labour.hoursMatched), hoursUnmatched: r2(labour.hoursUnmatched),
@@ -283,7 +325,7 @@ async function processJob(db, userId, row, ctx) {
 }
 
 async function processJobs(db, run, deadline) {
-  const beat = heartbeat(db, run.id);
+  const beat = heartbeat(db, run);
   const userId = run.started_by;
   const [{ data: tiers, error: tierErr }, { data: linked, error: linkErr }] = await Promise.all([
     db.from('billable_rate_tiers').select('id, name'),
@@ -324,55 +366,88 @@ async function processJobs(db, run, deadline) {
 
 // ---- the run ----------------------------------------------------------------
 
+// Takes the run for this worker: free (the last worker handed it back), or its worker has gone
+// quiet. Returns the run, or null when someone else is on it.
+async function takeRun(db, runId) {
+  const worker = crypto.randomUUID();
+  const quiet = new Date(Date.now() - TAKE_OVER_AFTER_MS).toISOString();
+  const { data, error } = await db.from('sm8_runs').update({ worker_id: worker, heartbeat_at: nowIso() })
+    .eq('id', runId).in('status', ACTIVE).or(`worker_id.is.null,heartbeat_at.lt.${quiet}`).select('*');
+  if (error) throw error;
+  return data.length ? { ...data[0], worker } : null;
+}
+
 // Does as much of the run as fits before the deadline (a Date.now() value).
 // Returns { more }: true when there is work left and the caller should start another go now.
 async function runStep(db, runId, deadline) {
-  const { data: run, error } = await db.from('sm8_runs').select('*').eq('id', runId).maybeSingle();
-  if (error) throw error;
-  if (!run || !ACTIVE.includes(run.status)) return { more: false };
-  if (run.status === 'paused') {
-    if (run.resume_after && new Date(run.resume_after).getTime() > Date.now()) return { more: false };
-    run.status = run.counts && run.counts.listedAt ? 'running' : 'listing';
-    await patchRun(db, run.id, { status: run.status, resume_after: null, error: null });
-  }
+  const run = await takeRun(db, runId);
+  if (!run) return { more: false };
   try {
+    if (run.status === 'paused') {
+      if (run.resume_after && new Date(run.resume_after).getTime() > Date.now()) {
+        await patchRun(db, run, { worker_id: null });
+        return { more: false };
+      }
+      run.status = run.counts && run.counts.listedAt ? 'running' : 'listing';
+      await patchRun(db, run, { status: run.status, resume_after: null, error: null });
+    }
     if (run.status === 'listing') {
+      const tries = ((run.counts && run.counts.listTries) || 0) + 1;
+      if (tries > MAX_LIST_TRIES) {
+        await patchRun(db, run, { status: 'failed', finished_at: nowIso(), worker_id: null, error: `Reading ServiceM8 did not finish in ${MAX_LIST_TRIES} tries` });
+        return { more: false };
+      }
+      run.counts = { ...run.counts, listTries: tries };
+      await patchRun(db, run, { counts: run.counts });
       const counts = await listEverything(db, run);
       // the mode may have changed while listing: Bring everything across pressed during a dry run
       const { data: fresh } = await db.from('sm8_runs').select('mode').eq('id', run.id).maybeSingle();
       run.mode = (fresh && fresh.mode) || run.mode;
       if (run.mode === 'dry_run') {
-        await patchRun(db, run.id, { status: 'listed', counts, finished_at: nowIso() });
+        await patchRun(db, run, { status: 'listed', counts, finished_at: nowIso(), worker_id: null });
         return { more: false };
       }
-      run.counts = counts;
-      await patchRun(db, run.id, { status: 'running', counts });
+      run.counts = { ...counts, requeued: true };
+      await requeueAll(db);
+      await patchRun(db, run, { status: 'running', counts: run.counts });
+    } else if (!run.counts.requeued) {
+      // started from a dry run's list: the same going over, once
+      await requeueAll(db);
+      run.counts = { ...run.counts, requeued: true };
+      await patchRun(db, run, { counts: run.counts });
     }
     const clientsDone = await syncClients(db, run, deadline);
     const jobsDone = clientsDone && await processJobs(db, run, deadline);
     if (jobsDone) {
       const apiKey = await getIntegrationKey('servicem8');
-      const { left } = await copyPendingFiles(db, apiKey, run.started_by, deadline, heartbeat(db, run.id));
+      const { left } = await copyPendingFiles(db, apiKey, run.started_by, deadline, heartbeat(db, run));
       if (!left) {
-        await patchRun(db, run.id, { status: 'done', finished_at: nowIso(), counts: { ...run.counts, strikes: 0 } });
+        await patchRun(db, run, { status: 'done', finished_at: nowIso(), worker_id: null, counts: { ...run.counts, strikes: 0 } });
         return { more: false };
       }
     }
-    await patchRun(db, run.id, { counts: { ...run.counts, strikes: 0 } });
+    await patchRun(db, run, { worker_id: null, counts: { ...run.counts, strikes: 0 } });
     return { more: true };
   } catch (err) {
+    // Another worker has the run now: this one stops and touches nothing.
+    if (err.lostRun) return { more: false };
     console.error('sm8-run error:', err.message);
     // ServiceM8's limit, or a hiccup: wait and carry on (sm8-run-sweep.js restarts it). The same
     // failure six times in a row stops the run with the reason on screen.
     const strikes = err.rateLimited ? 0 : ((run.counts && run.counts.strikes) || 0) + 1;
     const stop = strikes >= MAX_STRIKES;
-    await patchRun(db, run.id, {
-      status: stop ? 'failed' : 'paused',
-      error: String(err.message).slice(0, 500),
-      resume_after: stop ? null : new Date(Date.now() + (err.rateLimited ? RATE_LIMIT_WAIT_MS : ERROR_WAIT_MS)).toISOString(),
-      counts: { ...run.counts, strikes },
-      ...(stop ? { finished_at: nowIso() } : {}),
-    });
+    try {
+      await patchRun(db, run, {
+        status: stop ? 'failed' : 'paused',
+        worker_id: null,
+        error: String(err.message).slice(0, 500),
+        resume_after: stop ? null : new Date(Date.now() + (err.rateLimited ? RATE_LIMIT_WAIT_MS : ERROR_WAIT_MS)).toISOString(),
+        counts: { ...run.counts, strikes },
+        ...(stop ? { finished_at: nowIso() } : {}),
+      });
+    } catch (again) {
+      if (!again.lostRun) console.error('sm8-run could not record the stop:', again.message);
+    }
     return { more: false };
   }
 }
@@ -383,7 +458,7 @@ async function runToResume(db) {
   const run = await latestRun(db);
   if (!run) return null;
   const quietFor = Date.now() - new Date(run.heartbeat_at).getTime();
-  if (['listing', 'running'].includes(run.status) && quietFor > 5 * 60 * 1000) return run;
+  if (['listing', 'running'].includes(run.status) && quietFor > TAKE_OVER_AFTER_MS + 60 * 1000) return run;
   if (run.status === 'paused' && run.resume_after && new Date(run.resume_after).getTime() <= Date.now()) return run;
   return null;
 }

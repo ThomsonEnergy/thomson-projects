@@ -328,9 +328,14 @@ async function portalProject(admin, p) {
   if (agreementOn && cl.agreement_document_path) files.push({ path: cl.agreement_document_path, name: 'Commercial agreement.pdf', mime: 'application/pdf', when: fmtDay(localDateKey(cl.agreement_sent_at)) });
   // Invoices ServiceM8 sent before the job moved to TEops (item 111): every one, no share tick
   // needed, since the client was sent them already. Money, so only to the client's own logins.
+  // Only ServiceM8's own invoice for this job's number ("Invoice #4515B" on job 4515): never
+  // another file that happens to sit in the folder.
   const { data: oldInvoices } = p.money ? await admin.from('project_documents').select('file_path, file_name, mime_type, created_at')
     .eq('project_id', p.id).eq('folder', 'ServiceM8 invoices').order('created_at') : { data: [] };
-  const earlier = (oldInvoices || []).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: fmtDay(localDateKey(d.created_at)), earlier: true }));
+  const { data: sm8 } = (oldInvoices || []).length ? await admin.from('projects').select('sm8_job_number').eq('id', p.id).maybeSingle() : { data: null };
+  const sm8Number = String((sm8 && sm8.sm8_job_number) || '').replace(/\D/g, '');
+  const ownInvoice = sm8Number ? new RegExp(`\\binvoice\\s*#\\s*${sm8Number}[a-z]*\\b`, 'i') : null;
+  const earlier = (oldInvoices || []).filter((d) => ownInvoice && ownInvoice.test(d.file_name)).map((d) => ({ path: d.file_path, name: d.file_name, mime: d.mime_type || '', when: fmtDay(localDateKey(d.created_at)), earlier: true }));
   files.push(...earlier.filter((e) => !files.some((f) => f.path === e.path)));
   const signed = files.length ? await admin.storage.from('project-documents').createSignedUrls(files.map((f) => f.path), 3600) : { data: [] };
   const urlByPath = {};
