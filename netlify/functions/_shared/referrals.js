@@ -13,6 +13,7 @@
 //   referralRows(admin, clientIds)      -> the referrer's referrals for the portal's Quotes list
 //   staffForToken(admin, token)         -> the active staff member's { id, full_name } or null
 //   staffLinkInfo(admin, staff)         -> what their form shows: first name, the heard-of-us choices, the team
+//                                          (publicInfo() drops the user ids before it leaves the server)
 //   submitStaffLead(admin, staff, body) -> { kind: 'lead', id }
 // Writes leads, lead-uploads storage, projects (through portal-requests.js for "Me"), activity_log,
 // notifications.
@@ -234,9 +235,11 @@ async function staffLinkInfo(admin, staff) {
   return {
     staff: firstName(staff.full_name),
     heard: ((s && s.heard_from_options) || []).map((o) => clean(o, 80)).filter(Boolean),
-    team: (team || []).filter((p) => p.full_name).map((p) => ({ id: p.id, name: shortName(p.full_name) })),
+    // each person goes out under a code made for this link, never their user id; profileId stays on the server
+    team: (team || []).filter((p) => p.full_name).map((p) => ({ id: crypto.createHash('sha256').update(`${staff.id}:${p.id}`).digest('hex').slice(0, 16), name: shortName(p.full_name), profileId: p.id })),
   };
 }
+const publicInfo = (info) => ({ ...info, team: info.team.map(({ id, name }) => ({ id, name })) });
 
 // body: { type, need, answers, person: { name, phone, email, address, addressParts }, files,
 //   heard: 'owner' | 'staff' | one of the Settings choices, heardStaffId }
@@ -260,8 +263,9 @@ async function submitStaffLead(admin, staff, body) {
   let heardProfile = null;
   if (body.heard === 'owner') { heardFrom = 'Thomson Energy staff'; heardProfile = staff.id; }
   else if (body.heard === 'staff') {
-    if (!info.team.some((p) => p.id === body.heardStaffId)) throw new Refused('Pick who told you about us, please.');
-    heardFrom = 'Thomson Energy staff'; heardProfile = body.heardStaffId;
+    const picked = info.team.find((p) => p.id === body.heardStaffId);
+    if (!picked) throw new Refused('Pick who told you about us, please.');
+    heardFrom = 'Thomson Energy staff'; heardProfile = picked.profileId;
   } else if (info.heard.includes(body.heard)) heardFrom = body.heard;
   else throw new Refused('Tell us how you first heard about Thomson Energy, please.');
 
@@ -270,13 +274,16 @@ async function submitStaffLead(admin, staff, body) {
   const { data: lead, error } = await admin.from('leads').insert({
     source: 'staff_link', name, phone: phone || null, email: email || null, address_formatted: address || null, ...leadAddress(person.addressParts, address),
     details, referrer_profile_id: staff.id, heard_from: heardFrom, heard_from_profile_id: heardProfile, status: 'new',
+    // no bonus until the check below has run: if it fails, an admin clears the lead by hand
+    already_client: true, already_reason: 'not checked yet',
   }).select('id').single();
   if (error) throw error;
-  await saveFiles(admin, lead.id, files, details);
 
-  // new, or someone we already had (no link bonus; the KPIs still count)
-  const { data: reason, error: checkErr } = await admin.rpc('staff_lead_check', { p_lead: lead.id });
+  // new, or someone we already had (no link bonus; the KPIs still count); before the photos, which take time
+  const { data: checked, error: checkErr } = await admin.rpc('staff_lead_check', { p_lead: lead.id });
   if (checkErr) console.error('staff_lead_check failed', checkErr.message);
+  const reason = checkErr ? 'not checked yet' : checked;
+  await saveFiles(admin, lead.id, files, details);
   const office = await R.officeIds(admin);
   for (const uid of office) {
     await admin.rpc('create_notification', { p_user: uid, p_kind: 'lead', p_title: `Lead from ${firstName(staff.full_name)}'s link: ${name}`, p_body: `${type}${address ? `, ${address.split(',').slice(-2).join(',').trim()}` : ''}. ${need.slice(0, 120)}${reason ? ' (Already ours: no bonus)' : ''}`, p_link: '/leads.html', p_actor: null, p_dedupe: `staff-lead:${lead.id}` });
@@ -284,4 +291,4 @@ async function submitStaffLead(admin, staff, body) {
   return { kind: 'lead', id: lead.id };
 }
 
-module.exports = { clientForToken, rewardTerms, submitReferral, referralRows, staffForToken, staffLinkInfo, submitStaffLead, TYPES };
+module.exports = { clientForToken, rewardTerms, submitReferral, referralRows, staffForToken, staffLinkInfo, publicInfo, submitStaffLead, TYPES };

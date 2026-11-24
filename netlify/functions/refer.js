@@ -25,7 +25,7 @@ exports.handler = async (event) => {
     if (body.s) {
       const staff = await F.staffForToken(admin, body.s);
       if (!staff) return json(404, { ok: false, error: 'This link is not working any more. Please call us instead.' });
-      if (body.action === 'info') return json(200, { ok: true, ...(await F.staffLinkInfo(admin, staff)), types: F.TYPES, mapsKey: await mapsKey() });
+      if (body.action === 'info') return json(200, { ok: true, ...F.publicInfo(await F.staffLinkInfo(admin, staff)), types: F.TYPES, mapsKey: await mapsKey() });
       if (body.action === 'submit') { await F.submitStaffLead(admin, staff, body); return json(200, { ok: true, kind: 'lead' }); }
       return json(400, { ok: false, error: 'Unknown action' });
     }

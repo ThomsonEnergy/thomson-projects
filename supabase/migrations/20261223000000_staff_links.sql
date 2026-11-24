@@ -128,7 +128,7 @@ begin
   v_phone := right(regexp_replace(coalesce(l.phone, ''), '\D', '', 'g'), 8);
   if length(v_phone) < 8 then v_phone := null; end if;
   v_street := lower(btrim(split_part(coalesce(l.address_formatted, l.address_line, ''), ',', 1)));
-  if length(v_street) < 6 then v_street := null; end if;
+  if length(v_street) < 8 then v_street := null; end if;
 
   -- an existing client, or a contact at one
   select c.name into v_name from clients c
@@ -150,7 +150,11 @@ begin
       where coalesce(p.lead_id, '00000000-0000-0000-0000-000000000000'::uuid) <> l.id
         and ((v_email is not null and lower(btrim(p.client_email)) = v_email)
           or (v_phone is not null and right(regexp_replace(coalesce(p.client_phone, ''), '\D', '', 'g'), 8) = v_phone)
-          or (v_street is not null and p.pipeline_stage not in ('complete', 'archived') and lower(p.client_address) like replace(replace(replace(v_street, '\', '\\'), '%', '\%'), '_', '\_') || '%'))
+          -- the same street line in the same suburb and postcode (when the lead has them), still open
+          or (v_street is not null and p.pipeline_stage not in ('complete', 'archived')
+              and lower(p.client_address) like replace(replace(replace(v_street, '\', '\\'), '%', '\%'), '_', '\_') || '%'
+              and (nullif(btrim(l.postcode), '') is null or position(btrim(l.postcode) in p.client_address) > 0)
+              and (nullif(btrim(l.suburb), '') is null or position(lower(btrim(l.suburb)) in lower(p.client_address)) > 0)))
       order by p.created_at desc limit 1;
     if v_name is not null then v_reason := format('already has %s with us', v_name); end if;
   end if;
@@ -219,6 +223,7 @@ create table if not exists public.staff_bonuses (
 create unique index if not exists staff_bonuses_one_per_job on public.staff_bonuses (project_id, kind);
 create unique index if not exists staff_bonuses_one_per_lead on public.staff_bonuses (lead_id, kind) where status <> 'cancelled';
 create index if not exists staff_bonuses_profile on public.staff_bonuses (profile_id, status);
+create index if not exists staff_bonuses_lead on public.staff_bonuses (lead_id);
 
 alter table public.staff_bonuses enable row level security;
 revoke all on public.staff_bonuses from public, anon, authenticated;
@@ -227,10 +232,38 @@ drop policy if exists "Own bonuses, or Admin and Finance" on public.staff_bonuse
 create policy "Own bonuses, or Admin and Finance" on public.staff_bonuses
   for select to authenticated using (profile_id = (select auth.uid()) or (select is_finance_role()));
 
+-- A bonus is owed: the person and the admins are told, the job's log says so. Server only.
+create or replace function public.staff_bonus_set_due(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare b staff_bonuses; v_job integer; v_name text; v_amount text; p record;
+begin
+  update staff_bonuses set status = 'due', due_at = now() where id = p_id and status = 'earned' returning * into b;
+  if b.id is null then return; end if;
+  v_amount := to_char(b.amount, 'FM999,999,990');
+  select job_number into v_job from projects where id = b.project_id;
+  select full_name into v_name from profiles where id = b.profile_id;
+  insert into activity_log (entity_type, entity_id, action, description)
+  values ('project', b.project_id, 'staff_bonus_due', format('Link bonus now owed: $%s to %s (the deposit is paid).', v_amount, v_name));
+  perform create_notification(b.profile_id, 'lead', format('Link bonus owed to you: $%s', v_amount),
+    format('The deposit on J%s is paid. It goes in your pay.', v_job), '/home.html', null, 'staff-bonus-due:' || b.id);
+  for p in select id from profiles where active and role = 'admin' loop
+    perform create_notification(p.id, 'lead', format('Link bonus owed: %s, $%s', v_name, v_amount),
+      format('J%s deposit paid. Add it to their pay.', v_job), '/leads.html', null, 'staff-bonus-due-admin:' || b.id);
+  end loop;
+end;
+$$;
+revoke execute on function public.staff_bonus_set_due(uuid) from public, anon, authenticated;
+
 -- A quote from a staff link lead was approved: the link bonus is earned, its amount fixed now. Safe
--- to call twice. Nothing when the lead is Already ours, the person has left, or the job is under the
--- minimum; the job's log says which. Called by the server (create-job-from-quote.js) and by
--- lead_clear_already_ours().
+-- to call twice. Nothing when the lead is Already ours, the quote is for someone other than the
+-- lead's person (any logged-in user can point a quote at a lead, so the phone or email must match),
+-- the person has left, or the job is under the minimum; the job's log says which. Owed straight away
+-- when the deposit is already paid (a match cleared late). Called by the server
+-- (create-job-from-quote.js) and by lead_clear_already_ours().
 create or replace function public.staff_bonus_earn(p_job uuid)
 returns uuid
 language plpgsql
@@ -239,7 +272,7 @@ set search_path = public
 as $$
 declare
   v_job projects; v_quote projects; v_lead leads; v_who profiles;
-  v_total numeric; v_amount numeric; v_min numeric; v_id uuid; v_first text;
+  v_total numeric; v_amount numeric; v_min numeric; v_id uuid; v_first text; v_same boolean; v_why text;
 begin
   select * into v_job from projects where id = p_job;
   if not found or v_job.source_quote_id is null then return null; end if;
@@ -253,17 +286,22 @@ begin
   v_first := split_part(coalesce(v_who.full_name, 'a staff member'), ' ', 1);
   select staff_link_amount, lead_reward_min_job into v_amount, v_min from company_settings where id = 1;
   v_total := quote_client_total(v_quote.id);
+  v_same := (nullif(lower(btrim(coalesce(v_lead.email, ''))), '') is not null and lower(btrim(v_quote.client_email)) = lower(btrim(v_lead.email)))
+    or (length(regexp_replace(coalesce(v_lead.phone, ''), '\D', '', 'g')) >= 8
+        and right(regexp_replace(coalesce(v_quote.client_phone, ''), '\D', '', 'g'), 8) = right(regexp_replace(v_lead.phone, '\D', '', 'g'), 8));
 
-  if v_lead.already_client or not coalesce(v_who.active, false) or coalesce(v_amount, 0) <= 0 or coalesce(v_total, 0) < coalesce(v_min, 0)
-     or exists (select 1 from staff_bonuses where lead_id = v_lead.id and kind = 'link' and status <> 'cancelled') then
+  v_why := case
+    when v_lead.already_client then 'already ours (' || coalesce(v_lead.already_reason, 'matched') || ')'
+    when not coalesce(v_same, false) then 'the quote''s phone and email are not the lead''s'
+    when not coalesce(v_who.active, false) then 'they no longer work here'
+    when coalesce(v_total, 0) < coalesce(v_min, 0) then format('the job is under $%s', to_char(v_min, 'FM999,999,990'))
+    when coalesce(v_amount, 0) <= 0 then 'the link bonus is set to $0'
+    when exists (select 1 from staff_bonuses where lead_id = v_lead.id and kind = 'link' and status <> 'cancelled') then 'one was already earned on this lead'
+  end;
+  if v_why is not null then
     if not exists (select 1 from activity_log where entity_type = 'project' and entity_id = p_job and action = 'staff_link_no_bonus') then
       insert into activity_log (entity_type, entity_id, action, description)
-      values ('project', p_job, 'staff_link_no_bonus', format('Lead from %s''s link, no link bonus: %s.', v_first,
-        case when v_lead.already_client then 'already ours (' || coalesce(v_lead.already_reason, 'matched') || ')'
-             when not coalesce(v_who.active, false) then 'they no longer work here'
-             when coalesce(v_total, 0) < coalesce(v_min, 0) then format('the job is under $%s', to_char(v_min, 'FM999,999,990'))
-             when coalesce(v_amount, 0) <= 0 then 'the link bonus is set to $0'
-             else 'one was already earned on this lead' end));
+      values ('project', p_job, 'staff_link_no_bonus', format('Lead from %s''s link, no link bonus: %s.', v_first, v_why));
     end if;
     return null;
   end if;
@@ -274,9 +312,13 @@ begin
   returning id into v_id;
   if v_id is not null then
     insert into activity_log (entity_type, entity_id, action, description)
-    values ('project', p_job, 'staff_bonus_earned', format('Link bonus earned: $%s for %s (the lead came through their link). Owed once the deposit is paid.', v_amount, v_first));
-    perform create_notification(v_who.id, 'lead', format('Link bonus earned: $%s', v_amount),
+    values ('project', p_job, 'staff_bonus_earned', format('Link bonus earned: $%s for %s (the lead came through their link). Owed once the deposit is paid.', to_char(v_amount, 'FM999,999,990'), v_first));
+    perform create_notification(v_who.id, 'lead', format('Link bonus earned: $%s', to_char(v_amount, 'FM999,999,990')),
       format('J%s was won from your link. It is owed once the deposit is paid.', v_job.job_number), '/home.html', null, 'staff-bonus-earned:' || v_id);
+    if exists (select 1 from invoices i where i.project_id = p_job and i.paid_at is not null
+               and (i.is_deposit or not exists (select 1 from invoices d where d.project_id = p_job and d.is_deposit))) then
+      perform staff_bonus_set_due(v_id);
+    end if;
   end if;
   return v_id;
 end;
@@ -290,23 +332,13 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare b staff_bonuses; v_job integer; v_name text; p record;
+declare v_id uuid;
 begin
   if new.paid_at is null or (tg_op = 'UPDATE' and old.paid_at is not null) or new.project_id is null then return new; end if;
-  select * into b from staff_bonuses where project_id = new.project_id and kind = 'link' and status = 'earned';
-  if b.id is null then return new; end if;
+  select id into v_id from staff_bonuses where project_id = new.project_id and kind = 'link' and status = 'earned';
+  if v_id is null then return new; end if;
   if not new.is_deposit and exists (select 1 from invoices i where i.project_id = new.project_id and i.is_deposit and i.id <> new.id) then return new; end if;
-  update staff_bonuses set status = 'due', due_at = now() where id = b.id and status = 'earned';
-  select job_number into v_job from projects where id = b.project_id;
-  select full_name into v_name from profiles where id = b.profile_id;
-  insert into activity_log (entity_type, entity_id, action, description)
-  values ('project', b.project_id, 'staff_bonus_due', format('Link bonus now owed: $%s to %s (the deposit is paid).', b.amount, v_name));
-  perform create_notification(b.profile_id, 'lead', format('Link bonus owed to you: $%s', b.amount),
-    format('The deposit on J%s is paid. It goes in your pay.', v_job), '/home.html', null, 'staff-bonus-due:' || b.id);
-  for p in select id from profiles where active and role = 'admin' loop
-    perform create_notification(p.id, 'lead', format('Link bonus owed: %s, $%s', v_name, b.amount),
-      format('J%s deposit paid. Add it to their pay.', v_job), '/leads.html', null, 'staff-bonus-due-admin:' || b.id);
-  end loop;
+  perform staff_bonus_set_due(v_id);
   return new;
 exception when others then
   -- never stop an invoice being marked paid
@@ -337,9 +369,9 @@ begin
   update staff_bonuses set status = 'cancelled', cancelled_reason = left(v_why, 300), cancelled_by = auth.uid(), cancelled_at = now() where id = p_id;
   if b.project_id is not null then
     insert into activity_log (entity_type, entity_id, action, description, changed_by)
-    values ('project', b.project_id, 'staff_bonus_cancelled', format('Link bonus $%s cancelled: %s', b.amount, v_why), auth.uid());
+    values ('project', b.project_id, 'staff_bonus_cancelled', format('Link bonus $%s cancelled: %s', to_char(b.amount, 'FM999,999,990'), v_why), auth.uid());
   end if;
-  perform create_notification(b.profile_id, 'lead', format('Link bonus cancelled: $%s', b.amount), left(v_why, 200), '/home.html', auth.uid(), 'staff-bonus-cancelled:' || b.id);
+  perform create_notification(b.profile_id, 'lead', format('Link bonus cancelled: $%s', to_char(b.amount, 'FM999,999,990')), left(v_why, 200), '/home.html', auth.uid(), 'staff-bonus-cancelled:' || b.id);
 end;
 $$;
 revoke execute on function public.staff_bonus_cancel(uuid, text) from public, anon;

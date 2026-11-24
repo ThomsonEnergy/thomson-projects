@@ -54,6 +54,7 @@
   // advance on that question, so the answer is theirs.
   function drawStaffForm() {
     const i = S.info;
+    document.title = 'Get a quote - Thomson Energy';
     root.innerHTML = `
       <h1 style="font-size:20px; margin:12px 0 4px;">Get a quote from Thomson Energy</h1>
       <p class="rf-muted" style="margin:0 0 6px;">Sent to you by ${esc(i.staff)}. It takes about a minute.</p>
