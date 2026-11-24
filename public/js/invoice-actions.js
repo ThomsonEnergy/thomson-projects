@@ -27,7 +27,7 @@ const INVOICE_PANEL_PROJECT = 'projects(id, name, job_number, quote_number, clie
 const INVOICE_PANEL_SELECT = `*, balance_due, interest_accrued, interest_days, interest_daily, cost_centres(name, project_id, ${INVOICE_PANEL_PROJECT}), ${INVOICE_PANEL_PROJECT}, invoice_claims(*, cost_centres(name, sort_order)), credit_notes(*), invoice_line_items(id), invoice_events(*, actor:profiles(full_name))`;
 const INVOICE_BTN = 'font-size:12px; padding:6px 10px;';
 const loadInvoiceNotes = () => loadJsOnce('/js/invoice-notes.js?v=4', () => typeof openInvoiceNotesPanel === 'function');
-const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=2', () => typeof emailStatementForClient === 'function');
+const loadClientStatementJs = () => loadJsOnce('/js/client-statement.js?v=3', () => typeof emailStatementForClient === 'function');
 
 // One history line from the browser. The insert policy needs the actor to be the signed in person.
 // Throws when it could not be written: for "Sent another way" the line is the action itself, so the
@@ -196,6 +196,7 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       ${why.length ? `<p class="subtitle" style="font-size:12px; margin:8px 0 0;">${why.map(escapeHtml).join('<br>')}</p>` : ''}
       ${xeroPending ? `<div class="error-box" style="margin-top:8px; font-size:12px;">The last change is saved here but Xero did not take it. Press Resend to Xero; the reason is in the history below.</div>` : ''}
       ${inv.pdf_error ? `<div class="error-box" style="margin-top:8px; font-size:12px;">The PDF could not be made: ${escapeHtml(inv.pdf_error)}. Try Generate PDF again.</div>` : ''}
+      <div id="ip-statement-sends"></div>
       <div id="ip-msg"></div>
       <h3 style="font-size:14px; margin:18px 0 6px;">History</h3>
       ${invoiceTimelineHtml(status)}
@@ -268,7 +269,10 @@ function openInvoicePanel(invoiceId, { onChange } = {}) {
       ? loadInvoiceActuals().then(() => openInvoiceActualCostsPanel(project, { invoice: inv, onDone: () => afterChange(true) })).catch(fail)
       : openEditInvoicePanel(inv, project, () => afterChange(true))));
     on('#ip-details', () => openInvoiceDetailsPanel(inv, project, () => afterChange(true)));
-    on('#ip-statement', (e) => { const btn = e.currentTarget; loadClientStatementJs().then(() => emailStatementForClient(statementClientId, { btn, msgEl: msg })).catch(fail); });
+    // when the client's statement last went, under the buttons (js/client-statement.js)
+    const sendsEl = card.querySelector('#ip-statement-sends');
+    if (statementClientId) loadClientStatementJs().then(() => showStatementSends(statementClientId, sendsEl)).catch(() => {});
+    on('#ip-statement', (e) => { const btn = e.currentTarget; loadClientStatementJs().then(() => emailStatementForClient(statementClientId, { btn, msgEl: msg, sendsEl })).catch(fail); });
     const resendBtn = card.querySelector('#ip-resend-xero');
     if (resendBtn) resendBtn.addEventListener('click', call(resendBtn, 'Sending...', async () => {
       const d = await saveInvoiceDetails({ invoiceId: inv.id, resend: true });
