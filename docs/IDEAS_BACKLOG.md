@@ -33,8 +33,8 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
 | 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
 | 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, waiting on yes and five answers | Y (part B only) | None |
-| 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar, and the hot water form made in Formbay the same as solar | Planned 24 Nov 2026, waiting on yes and three answers | Y | How the NSW certificates are claimed (owner) |
-| 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, waiting on yes and three answers | Y | None |
+| 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar, and the hot water form made in Formbay the same as solar | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | None |
+| 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, answers in 24 Nov 2026 (Sparky also drafts the quote: prebuilds, new prebuilds, draft supplier requests), waiting on yes | Y | None |
 | 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, waiting on yes and two answers | Y | Item 114 stage 1 first (the shared plan base) |
 
 ## Owner to-dos left over from shipped items
@@ -1170,11 +1170,13 @@ Owner, 24 Nov 2026: "create 2 more quote templates, one for hot water units it s
 8. **Formbay, the same as solar (owner, 24 Nov 2026: "hot water units will connect to Formbay same as solar").** Today the job's STCs tab already takes a hot water row and the Payment Advice import already reads Formbay's hot water (SWH) lines, but Create form (`formbay-create-form.js`, `_shared/formbay-sync.js`) makes only solar and battery forms. This adds the hot water form: on a Hot Water job the STCs tab's Create form makes the draft in Formbay with the owner, address, the unit picked from Formbay's own water heater list, the install date and the installer; signing and submitting stay in Formbay's app as now; the status then follows by itself through the webhook and the payment matches by Formbay job id, exactly as a solar row does. Where Formbay's list gives a model's STC count, the prebuild takes it from there instead of being typed (point 3). The "create the STCs" job task becomes "Create the Formbay form", ticked by itself once the form exists. To prove first on the build: that Formbay's API makes a hot water form and lists water heaters the way it does panels and inverters (the solar path was built from their API; the hot water one has not been tried). This is the Formbay half of spec Tier 3 item 3.
 7. **Inspection list (item 112):** photos of the old heater and its nameplate, the spot for the new one, the switchboard, the hot water circuit and its breaker, the meter (controlled load or not), the pipe run, drainage for the relief valve, access for the unit; questions on circuit size, distance to the board, a slab or base needed, noise near a bedroom or a neighbour (heat pump).
 
-**Open questions for the owner**
+**Owner's answers (24 Nov 2026)**
 
-1. Which units do you sell: heat pumps only (which brands), or electric storage as well?
-2. The NSW certificates (ESCs and PRCs): do you create them yourself or go through a certificate provider (who), and are you paid like STCs (it comes off the client's price and you claim it back)? Any Queensland rebate you offer?
-3. Is the list of heaters to compare against right (electric full rate, electric controlled load, gas, LPG, old solar hot water)?
+1. Units: both, "mainly heat pumps". Electric storage is offered too; the heat pump is the default choice on the form.
+2. The NSW certificates (ESCs and PRCs) go through **Formbay**, the same as STCs. So they are handled as STCs are: each kind is a credit off the client's price on the quote, a row on the job's STCs tab, claimed through Formbay and paid on Formbay's Payment Advice, and it reaches Xero through the STC mapping as the BSTC credit does. The Settings > Rebates list still holds each kind's name, state, certificate count rule and price, so nothing is typed into code. To prove on the build: how Formbay names these lines on a Payment Advice (the import reads PV, BSTC and SWH today) and whether its API takes them on the hot water form. No Queensland rebate was named, so none is set up.
+3. The list of old heaters to compare against is right.
+
+No questions left on this item.
 
 **Done means**
 
@@ -1214,11 +1216,19 @@ Stage 1, the type and drawing by hand:
 
 Stage 2, Sparky drafts it (item 89 parts 3 and 4, right after stage 1): a brief ("ducted upstairs, 14 kW") and Draft: Sparky reads the plan, puts an outlet in every room sized by area, the return in the hall, the outdoor unit where the brief says, the duct and pipe runs, then people move, delete and ask for changes. This is how J7040's was done, inside the app.
 
-**Open questions for the owner**
+Stage 3, Sparky drafts the quote (owner, 24 Nov 2026: "Let sparky draft quotes put in what prebuilds it can (have it put prebuilds in and create prebuilds that don't exist) if it doesn't have the materials then draft rfqs for suppliers"):
 
-1. Stage 1 (draw by hand) first and usable, then Sparky drafting as stage 2: right, or hold it all until Sparky can draft?
-2. Should the app suggest the size? With the plan's scale set, each room's area gives a rough kW (a rule of thumb kept in Settings), added up for a ducted unit.
-3. Brands and who does the refrigerant work (your own ARC licence or a subcontractor)? It sets the job tasks.
+1. **Draft the quote** on step 3, from the plan's schedule and the step 1 answers. Sparky adds the prebuilds that already exist, with the counts and metres from the plan.
+2. **Missing prebuilds are made.** Where no prebuild fits (a 14 kW ducted unit, a 200 mm outlet), Sparky creates it in the library with its parts and labour (the existing parts guesser, `suggest-prebuild-components.js`), marked "Drafted by Sparky" until a pricing role opens and saves it. A drafted prebuild shows on the quote with a flag, and the ready-to-send check will not pass while one is unchecked or has a part with no price.
+3. **No material, no price: a request to suppliers is drafted.** Parts that are not in Stock or have no current price go onto a draft request on the quote's Supplier quotes tab (the existing RFQ, numbered RFQ plus the Q number), with the suppliers who sell that brand already picked and the plan attached. Nothing is emailed: a person opens it and presses Send. When the supplier's prices come back (read by the existing supplier quote reader), the drafted prebuilds take them.
+4. **What Sparky did is listed** at the top of step 3: added 9 prebuilds, made 3 new ones to check, asked 2 suppliers for 5 items, with Undo for the whole draft.
+5. The same Draft the quote works from an electrical plan on a New Build (item 115).
+
+**Owner's answers (24 Nov 2026)**
+
+1. Stage order: taken as hand drawing first (stage 1), then Sparky drafting the layout (stage 2) and the quote (stage 3), since stage 3 needs the plan's schedule. The owner's answer was stage 3 itself; say if all three should land together.
+2. Yes: the app suggests the size from each room's area, by a rule of thumb kept in Settings.
+3. Brands: Mitsubishi Heavy Industries (MHIA), Mitsubishi Electric (ME), TCL and Daikin. The refrigerant work is done in-house, so the job tasks are ours (pressure test, vacuum, commission) and no subcontractor is booked.
 
 **Done means**
 
@@ -1227,12 +1237,13 @@ Stage 2, Sparky drafts it (item 89 parts 3 and 4, right after stage 1): a brief 
 - Save, open again: every mark still moves; switch between Duct plan and Pipe work plan.
 - Add lines from the plan: one line per item with counts and metres.
 - The client's proposal shows both plan pages and the schedule.
+- Stage 3: Draft the quote on that plan: existing prebuilds are added with the plan's counts, missing ones appear flagged "Drafted by Sparky", and a draft request sits on the Supplier quotes tab for the parts with no price, not sent.
 - Stage 2: on J7040's first floor plan, "ducted aircon upstairs, 14 kW" > Draft gives a layout close to the one drawn by hand.
 
-Touches: `public/js/supabase-client.js` (the editor: shapes saved and loaded, layers), `public/project.html` (the House plan box and Add lines from the plan in their own file, no inline code), `public/js/electrical-symbols.js`, `public/js/template-questions.js`, new `public/js/aircon-plan.js`, `public/new-project.html`, `public/quote.html`, `public/settings.html` (prebuild mapping column), `netlify/functions/_shared/template-job-tasks.js`, `netlify/functions/generate-sow.js`, `netlify/functions/generate-scope.js`, `netlify/functions/extract-email-job.js`, stage 2: new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`; one migration (the type added to the check, `plan_markups`, a prebuild column, the quote's plan documents, `get_quote_by_token` returns the plan pages).
+Touches: `public/js/supabase-client.js` (the editor: shapes saved and loaded, layers), `public/project.html` (the House plan box and Add lines from the plan in their own file, no inline code), `public/js/electrical-symbols.js`, `public/js/template-questions.js`, new `public/js/aircon-plan.js`, `public/new-project.html`, `public/quote.html`, `public/settings.html` (prebuild mapping column), `netlify/functions/_shared/template-job-tasks.js`, `netlify/functions/generate-sow.js`, `netlify/functions/generate-scope.js`, `netlify/functions/extract-email-job.js`, stage 2: new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`; stage 3: new `netlify/functions/draft-quote-background.js`, new `agents/prompts/draft-quote.js`, `netlify/functions/suggest-prebuild-components.js`, `public/js/supplier-quotes.js`, `public/js/prebuild-form.js`, `netlify/functions/check-solar-compliance.js`, an eval set in `agents/evals/`; one migration (the type added to the check, `plan_markups`, a prebuild column, the quote's plan documents, `get_quote_by_token` returns the plan pages).
 Overlaps: item 89 (this builds its parts 1 and 5, then 3 and 4 for aircon; item 89 keeps Sparky reading plans in chat and the battery and rough-in layouts), item 90 (same Sparky files, stage 2 only), item 99 and items 112 and 113 (quote steps). Build in this chat, after 113.
-Kind: feature into `staging`; migration yes; money, stock or payroll no; RLS yes (one new table).
-Size: large (stage 1 two days or more, stage 2 the same again).
+Kind: feature into `staging`; migration yes (stage 3 adds a drafted mark on prebuilds); money yes for stage 3 (it writes quote lines and prebuild prices, all as drafts a person checks; nothing is sent or invoiced by it), stock or payroll no; RLS yes (one new table).
+Size: large (stage 1 two days or more, stages 2 and 3 the same again each).
 Test on staging: Admin test login; the Done means clicks; stage 2 needs the AI key on staging.
 Simpler: the duct and pipe plan is drawn where the quote is, counted by itself and printed in the proposal, instead of drawn in another program and typed across.
 Best model: Fable 5.1, effort xhigh, because it is a migration with RLS plus a rebuild of the shared plan editor.
