@@ -1335,7 +1335,9 @@ Test on staging: Admin test login; the Done means clicks on jobs seeded with cop
 Simpler: nobody types an application into the DNSP page, checks the portal for a status, or downloads a CCEW and uploads it to the job. No toggle and no manual step added; "Pick the job" exists only for an email that fits no job or two.
 Best model: Opus 5.5, effort high, because it is a feature build with a known shape and one small migration (no money or stock).
 
-## 117. ServiceM8 deposits find their own way onto moved jobs (bug, planned 24 Nov 2026, waiting on yes)
+## 117. ServiceM8 deposits find their own way onto moved jobs (bug, planned 24 Nov 2026; step 1 done, steps 2 to 4 waiting on yes)
+
+**Step 1 done 24 Nov 2026 (owner: "Just fix that one job yeah"):** J7021's paid claim is on production as written below, backup `backup_20261124.j7021_cost_centres`. Steps 2 to 4 (the nightly check, removing the manual tick) are not built.
 
 Owner, 24 Nov 2026 (ServiceM8 screenshot of #4840 and the J7021 Invoices tab): "J7021 doesn't show the payment received I thought we fixed this bug? It's because sm8 didn't do an invoice it was paid with sm8 pay".
 
