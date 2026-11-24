@@ -1,28 +1,35 @@
-// Read-only ServiceM8 loader for the one-time open-jobs import (Settings >
-// ServiceM8 Import). Nothing in here writes to ServiceM8 - it only GETs.
+// Read-only ServiceM8 reader for the move off ServiceM8 (item 111, Settings > ServiceM8 Import).
+// Nothing in here writes to ServiceM8: it only GETs.
 //
-// Pulls every active Work Order job plus the companies, contacts and notes
-// that go with it, in a handful of bulk calls (ServiceM8's filter only
-// does "and", so asking per job would be one call per job per object and
-// blow the function's time limit), then shapes each job into the row the
-// review screen shows and sm8-import-jobs.js writes.
+// loadSm8Everything() pulls the whole account in a handful of bulk calls (ServiceM8's filter only
+// does "and", so asking per job would be several calls per job and run into its daily limit),
+// then groups everything under its main job: one record per job that comes across, holding the
+// job, its lettered claim jobs, lines, notes, payments, contacts, check-ins, checklist and file
+// list. That record is what _shared/sm8-run.js queues, writes from and keeps as the raw copy.
+// buildJobStage() and stageFromLines() turn a job's ServiceM8 lines into the one stage it gets.
 //
-// Money: the app keeps every figure ex GST, ServiceM8's job total includes
-// it, so totals are divided by 1.1. Both figures are shown on the review
-// screen and the ex GST ones can be edited before importing.
+// Money: the app keeps every figure ex GST, ServiceM8's job total includes it, so totals are
+// divided by 1.1.
 
 const fetch = require('node-fetch');
 const { getIntegrationKey } = require('./get-integration-key');
 
 const SM8_BASE = 'https://api.servicem8.com/api_1.0';
 
-async function sm8GetAll(apiKey, object, filter) {
+// ServiceM8 said slow down and kept saying it: the minute limit (about 180 calls) clears by
+// itself, the daily one (about 20,000) does not, so the caller pauses the run and comes back.
+class Sm8RateLimit extends Error {
+  constructor(what) { super(`ServiceM8 rate limit (429) on ${what}`); this.rateLimited = true; }
+}
+
+// onPage: called after each page, so a long read can show it is still alive.
+async function sm8GetAll(apiKey, object, filter, onPage) {
   // ServiceM8 pages large result sets: start with cursor=-1 and follow the
   // x-next-cursor header until it stops coming back. An account small
   // enough to fit in one page just never sends the header.
   const rows = [];
   let cursor = '-1';
-  for (let page = 0; page < 50 && cursor; page++) {
+  for (let page = 0; page < 2000 && cursor; page++) {
     // encodeURIComponent rather than URLSearchParams: the filter's spaces
     // need to go as %20, not +.
     const query = [`cursor=${encodeURIComponent(cursor)}`];
@@ -31,17 +38,19 @@ async function sm8GetAll(apiKey, object, filter) {
     let res;
     // ServiceM8 allows roughly 180 calls a minute; when it says slow down
     // (429), wait a moment and try again rather than failing the job.
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       res = await fetch(url, { headers: { 'X-API-Key': apiKey, Accept: 'application/json' } });
       if (res.status !== 429) break;
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
     }
+    if (res.status === 429) throw new Sm8RateLimit(object);
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new Error(`ServiceM8 ${object} request failed: ${res.status} ${text.slice(0, 200)}`);
     }
     const data = await res.json();
     if (Array.isArray(data)) rows.push(...data);
+    if (onPage) await onPage();
     const next = res.headers.get('x-next-cursor');
     cursor = next && next !== cursor ? next : null;
   }
@@ -102,224 +111,233 @@ function buildNotesText(job, notes) {
   return parts.join('\n\n');
 }
 
+// Which TEops client a ServiceM8 company is. { clientId, reason } when it is sure: linked on an
+// earlier import, or the same name with the same email or phone, or the same name where one side
+// has no contact details to disagree with. Otherwise { clientId: null, lookalike }: it becomes a new
+// client and the report names the client it looks like, to merge on the Clients page if it is one.
 function matchClient(company, contacts, clients) {
   const byUuid = clients.find(c => c.sm8_company_uuid && c.sm8_company_uuid === company.uuid);
-  if (byUuid) return { match: { clientId: byUuid.id, reason: 'Linked on a previous import' }, candidates: [byUuid] };
+  if (byUuid) return { clientId: byUuid.id, reason: 'Linked on a previous import' };
   clients = clients.filter(c => !c.mergedAlias); // a merged client's second listing is only for the id match above
 
   const name = normName(company.name);
   const emails = new Set([company.email, ...contacts.map(c => c.email)].map(normEmail).filter(Boolean));
   const phones = new Set([company.phone, ...contacts.flatMap(c => [c.phone, c.mobile])].map(normPhone).filter(Boolean));
+  const sameContact = (c) => emails.has(normEmail(c.email)) || phones.has(normPhone(c.phone));
+  const nothingToCompare = (c) => (!emails.size && !phones.size) || (!normEmail(c.email) && !normPhone(c.phone));
 
   const nameHits = name ? clients.filter(c => normName(c.name) === name) : [];
-  const emailHits = clients.filter(c => emails.has(normEmail(c.email)));
-  const phoneHits = clients.filter(c => phones.has(normPhone(c.phone)));
-
-  // Weaker "did you mean" candidates: one name contains the other.
-  const partialHits = name.length >= 4
-    ? clients.filter(c => { const n = normName(c.name); return n.length >= 4 && n !== name && (n.includes(name) || name.includes(n)); })
-    : [];
-
-  const seen = new Set();
-  const candidates = [...nameHits, ...emailHits, ...phoneHits, ...partialHits]
-    .filter(c => (seen.has(c.id) ? false : seen.add(c.id)))
-    .slice(0, 8);
-
-  let match = null;
-  if (nameHits.length === 1) match = { clientId: nameHits[0].id, reason: 'Same name' };
-  else if (nameHits.length > 1) {
-    const both = nameHits.find(c => emailHits.includes(c) || phoneHits.includes(c));
-    match = both
-      ? { clientId: both.id, reason: 'Same name and contact details' }
-      : { clientId: nameHits[0].id, reason: `Same name (${nameHits.length} clients share it, check this one)`, ambiguous: true };
-  } else if (emailHits.length) match = { clientId: emailHits[0].id, reason: 'Same email, different name', ambiguous: true };
-  else if (phoneHits.length) match = { clientId: phoneHits[0].id, reason: 'Same phone, different name', ambiguous: true };
-
-  return { match, candidates };
+  const withContact = nameHits.find(sameContact);
+  if (withContact) return { clientId: withContact.id, reason: 'Same name and contact details' };
+  if (nameHits.length === 1 && nothingToCompare(nameHits[0])) return { clientId: nameHits[0].id, reason: 'Same name' };
+  if (nameHits.length) return { clientId: null, lookalike: `Same name as an existing client (${nameHits[0].name}) with different contact details` };
+  const other = clients.find(sameContact);
+  if (other) return { clientId: null, lookalike: `Same email or phone as ${other.name}` };
+  return { clientId: null, lookalike: null };
 }
 
-// Returns { rows, summary } - one row per open ServiceM8 job, and per open
-// quote dated in the last quotesSinceMonths months (kind 'job' / 'quote'),
-// ready for the review screen.
-async function loadSm8OpenJobs(supabaseAdmin, { quotesSinceMonths = 6 } = {}) {
-  const apiKey = await getIntegrationKey('servicem8');
+const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01';
+const dateOf = (v) => { const d = String(v || '').slice(0, 10); return isDate(d) ? d : ''; };
 
-  const [workOrders, quoteJobs, companies, companyContacts, jobContacts, notes] = await Promise.all([
-    sm8GetAll(apiKey, 'job', "status eq 'Work Order' and active eq 1"),
-    sm8GetAll(apiKey, 'job', "status eq 'Quote' and active eq 1"),
-    sm8GetAll(apiKey, 'company', 'active eq 1'),
-    sm8GetAll(apiKey, 'companycontact', 'active eq 1'),
-    sm8GetAll(apiKey, 'jobcontact', 'active eq 1'),
-    sm8GetAll(apiKey, 'note', "related_object eq 'job' and active eq 1"),
-  ]);
+// What a ServiceM8 job comes across as, by its own status. Unsuccessful (and anything else) stays behind.
+const KIND_BY_STATUS = { Quote: 'quote', 'Work Order': 'job', Completed: 'completed' };
 
-  // Partial invoices: ServiceM8 splits a job into lettered jobs numbered
-  // after the main one - 4515 is the job, 4515A the deposit, 4515B progress
-  // claim 1 and so on - and takes each one off the main job as a negative
-  // "Partial invoice #4515A" line. A Completed claim has been invoiced.
-  // Here we only need each claim's status (its value comes from that line
-  // on the main job, see buildJobStage). A Completed claim is not in the
-  // Work Order list, so fetch every job dated after the day before the
-  // oldest open main job ('gt', ServiceM8 has no 'ge').
-  const mainJobs = workOrders.filter(j => !claimOf(j));
-  const openNumbers = new Set(mainJobs.map(j => String(j.generated_job_id)));
-  const dates = mainJobs.map(j => String(j.date || '').slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01').sort();
-  const since = new Date(new Date(`${dates[0] || '2015-01-02'}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
-  const recentJobs = mainJobs.length ? await sm8GetAll(apiKey, 'job', `active eq 1 and date gt '${since}'`) : [];
-  const claimsByNumber = new Map();
-  const seenClaims = new Set();
-  for (const j of [...workOrders, ...recentJobs]) {
-    const claim = claimOf(j);
-    if (!claim || seenClaims.has(j.uuid) || !openNumbers.has(claim.base)) continue;
-    // Unsuccessful (voided) claims are kept so the review screen can say so;
-    // only Completed ones count as invoiced.
-    if (j.status === 'Quote') continue;
-    seenClaims.add(j.uuid);
-    (claimsByNumber.get(claim.base) || claimsByNumber.set(claim.base, []).get(claim.base)).push({
-      number: String(j.generated_job_id),
-      letter: claim.letter,
-      status: j.status,
-      description: clean(j.job_description),
-      date: String(j.date || '').slice(0, 10),
-      total: r2(j.total_invoice_amount),
-      totalExGst: exGst(j.total_invoice_amount),
-      invoiceSent: isOn(j.invoice_sent),
-      paymentAmount: r2(j.payment_amount),
-    });
-  }
-  // Open claims whose main job is not open (finished in ServiceM8, or the
-  // claim numbering is off) - listed so they are not silently dropped.
-  const orphanClaims = workOrders
-    .filter(j => { const c = claimOf(j); return c && !openNumbers.has(c.base); })
-    .map(j => String(j.generated_job_id));
-  const jobs = mainJobs;
+// The whole ServiceM8 account, grouped for the run. Returns:
+//   companies  [{ uuid, name, email, phone, address, contacts: [{ name, email, phone, type }] }]
+//   jobs       [{ uuid, number, kind ('quote' | 'job' | 'completed'), payload }], one per main job
+//              that comes across; payload is the raw record described at the top of this file
+//   left       jobs staying behind, counted by reason, and the lettered jobs with no main job
+async function loadSm8Everything(apiKey, onPage) {
+  // One after another, not all at once: nine paged lists side by side trip the minute limit.
+  const get = (object, filter) => sm8GetAll(apiKey, object, filter, onPage);
+  const allJobs = await get('job', 'active eq 1');
+  const companies = await get('company', 'active eq 1');
+  const companyContacts = await get('companycontact', 'active eq 1');
+  const jobContacts = await get('jobcontact', 'active eq 1');
+  const notes = await get('note', "related_object eq 'job' and active eq 1");
+  const materials = await get('jobmaterial', 'active eq 1');
+  const bundles = await get('jobmaterialbundle', 'active eq 1');
+  const payments = await get('jobpayment', 'active eq 1');
+  const activities = await get('jobactivity', 'active eq 1');
+  const checklist = await get('jobchecklist', 'active eq 1');
+  const attachments = await get('attachment', "related_object eq 'job' and active eq 1");
+  const taxRates = await get('taxrate');
+  const staff = await get('staff');
 
-  const [{ data: clients, error: clientsErr }, { data: imported, error: importedErr }] = await Promise.all([
-    supabaseAdmin.from('clients').select('id, name, email, phone, address, sm8_company_uuid').limit(10000),
-    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, cost_centres(imported_claims)').not('sm8_job_uuid', 'is', null),
-  ]);
-  if (clientsErr) throw clientsErr;
-  // A client merged into another (item 110) keeps matching by its old ServiceM8 company: the kept
-  // client is listed once more under the old company id.
-  const { data: mergedClients } = await supabaseAdmin.from('client_merges').select('into_client_id, from_sm8_company_uuid').not('from_sm8_company_uuid', 'is', null);
-  (mergedClients || []).forEach((m) => {
-    const kept = clients.find(c => c.id === m.into_client_id);
-    if (kept && kept.sm8_company_uuid !== m.from_sm8_company_uuid) clients.push({ ...kept, sm8_company_uuid: m.from_sm8_company_uuid, mergedAlias: true });
-  });
-  if (importedErr) throw importedErr;
-
-  const companyByUuid = new Map(companies.map(c => [c.uuid, c]));
   const group = (list, key) => list.reduce((m, x) => { (m.get(x[key]) || m.set(x[key], []).get(x[key])).push(x); return m; }, new Map());
   const contactsByCompany = group(companyContacts, 'company_uuid');
   const contactsByJob = group(jobContacts, 'job_uuid');
   const notesByJob = group(notes, 'related_object_uuid');
-  const importedByUuid = new Map((imported || []).map(p => [p.sm8_job_uuid, p]));
+  const materialsByJob = group(materials, 'job_uuid');
+  const bundlesByJob = group(bundles, 'job_uuid');
+  const paymentsByJob = group(payments, 'job_uuid');
+  const activitiesByJob = group(activities, 'job_uuid');
+  const checklistByJob = group(checklist, 'job_uuid');
+  const attachmentsByJob = group(attachments, 'related_object_uuid');
+  const companyByUuid = new Map(companies.map(c => [c.uuid, c]));
+  const staffNames = Object.fromEntries(staff.map(s => [s.uuid, `${clean(s.first)} ${clean(s.last)}`.trim() || 'Unknown ServiceM8 staff']));
 
-  // ServiceM8 marks a quote as sent (quote_sent, with the time in
-  // quote_sent_stamp) the same way it marks invoices.
-  const quoteSentDate = (job) => {
-    const d = String(job.quote_sent_stamp || '').slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== '0000-00-00' ? d : '';
-  };
-  const quoteCutoff = new Date(Date.now() - quotesSinceMonths * 30.5 * 86400000).toISOString().slice(0, 10);
-  const quotes = quotesSinceMonths > 0
-    ? quoteJobs.filter(q => !claimOf(q) && String(q.quote_date || q.date || '').slice(0, 10) >= quoteCutoff)
-    : [];
+  // Lettered jobs (4515A deposit, 4515B claim...) belong to the main job of the same number.
+  const mainJobs = allJobs.filter(j => !claimOf(j));
+  const mainByNumber = new Map(mainJobs.map(j => [String(j.generated_job_id || '').trim(), j]));
+  const letteredByMain = new Map();
+  const orphanClaims = [];
+  for (const j of allJobs) {
+    const claim = claimOf(j);
+    if (!claim) continue;
+    const main = mainByNumber.get(claim.base);
+    if (main) (letteredByMain.get(main.uuid) || letteredByMain.set(main.uuid, []).get(main.uuid)).push(j);
+    else if (KIND_BY_STATUS[j.status]) orphanClaims.push(String(j.generated_job_id));
+  }
 
-  const shape = (job, kind) => {
-    const company = companyByUuid.get(job.company_uuid) || { uuid: job.company_uuid || '', name: '' };
-    const coContacts = contactsByCompany.get(company.uuid) || [];
-    const jContacts = contactsByJob.get(job.uuid) || [];
-    const warnings = [];
-
-    // Job contact first (who to call about this job), then the company's
-    // primary contact, then anyone at the company.
-    const pick = (field) => {
-      const order = [
-        ...jContacts.filter(c => String(c.type || '').toUpperCase() === 'JOB'),
-        ...jContacts,
-        ...coContacts.filter(c => isOn(c.is_primary_contact)),
-        ...coContacts,
-      ];
-      const hit = order.find(c => clean(c[field]));
-      return hit ? clean(hit[field]) : '';
-    };
-    const clientEmail = clean(company.email) || pick('email');
-    const clientPhone = pick('mobile') || pick('phone') || clean(company.phone);
-
-    let companyName = clean(company.name);
-    if (!companyName) {
-      companyName = contactName(jContacts[0] || coContacts[0] || {}) || 'Unknown client';
-      warnings.push('ServiceM8 has no client company on this job');
+  const left = { byStatus: {}, orphanClaims, letteredOfLeftJobs: 0 };
+  const jobs = [];
+  for (const job of mainJobs) {
+    const kind = KIND_BY_STATUS[job.status];
+    const lettered = (letteredByMain.get(job.uuid) || [])
+      .sort((a, b) => String(a.generated_job_id).length - String(b.generated_job_id).length || String(a.generated_job_id).localeCompare(String(b.generated_job_id)));
+    if (!kind) {
+      left.byStatus[job.status || 'No status'] = (left.byStatus[job.status || 'No status'] || 0) + 1;
+      left.letteredOfLeftJobs += lettered.length;
+      continue;
     }
-
-    const jobNotes = (notesByJob.get(job.uuid) || [])
-      .map(n => ({ date: noteDate(n), text: clean(n.note) }))
-      .filter(n => n.text)
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    const sm8Total = r2(job.total_invoice_amount);
-    const invoiceSent = isOn(job.invoice_sent);
-    const paymentAmount = r2(job.payment_amount);
-    const claims = (claimsByNumber.get(String(job.generated_job_id)) || []).sort((a, b) => a.letter.length - b.letter.length || a.letter.localeCompare(b.letter));
-    const mainTitle = shortTitle(job.job_description);
-
-    const { match, candidates } = matchClient({ ...company, name: companyName }, [...coContacts, ...jContacts], clients || []);
-    if (match?.ambiguous) warnings.push(`Client match needs checking: ${match.reason}`);
-    // Name the job after the client as the app already knows them, unless
-    // the match is only a guess.
-    const matchedName = match && !match.ambiguous ? (candidates.find(c => c.id === match.clientId)?.name || companyName) : companyName;
-
-    const already = importedByUuid.get(job.uuid);
-
-    return {
-      sm8JobUuid: job.uuid,
-      sm8JobNumber: String(job.generated_job_id || ''),
+    const uuids = [job.uuid, ...lettered.map(l => l.uuid)];
+    const every = (byJob) => uuids.flatMap(u => byJob.get(u) || []);
+    const jobActivities = every(activitiesByJob);
+    jobs.push({
+      uuid: job.uuid,
+      number: String(job.generated_job_id || '').trim(),
       kind,
-      sm8Date: String((kind === 'quote' ? job.quote_date : job.work_order_date) || job.date || '').slice(0, 10),
-      quoteSent: kind === 'quote' ? (isOn(job.quote_sent) || !!quoteSentDate(job)) : null,
-      quoteSentDate: kind === 'quote' ? quoteSentDate(job) : null,
-      companyUuid: company.uuid || '',
-      companyName,
-      companyAddress: clean(company.address || company.billing_address),
-      clientEmail,
-      clientPhone,
-      siteAddress: clean(job.job_address) || clean(company.address),
-      description: clean(job.job_description),
-      suggestedName: `${matchedName} - ${mainTitle}`,
-      sm8Total,
-      invoiceSent,
-      paymentAmount,
-      // Only the claims' status here - the line items step (loadSm8JobLines)
-      // works out each claim's value and builds the job's stage.
-      claims: claims.map(c => ({ number: c.number, status: c.status, totalExGst: c.totalExGst, date: c.date, paymentAmount: c.paymentAmount })),
-      notes: jobNotes,
-      notesText: buildNotesText(job, jobNotes),
-      clientMatch: match ? { clientId: match.clientId, reason: match.reason, ambiguous: !!match.ambiguous } : null,
-      candidates: candidates.map(c => ({ id: c.id, name: c.name, email: c.email || '', phone: c.phone || '', address: c.address || '' })),
-      // claimNumbers: the ServiceM8 claims and deposits already on the job's stages, so the review
-      // screen can offer only a deposit the job is missing (item 71)
-      alreadyImported: already ? {
-        projectId: already.id, jobNumber: already.job_number, quoteNumber: already.quote_number,
-        claimNumbers: (already.cost_centres || []).flatMap(c => (Array.isArray(c.imported_claims) ? c.imported_claims : []).map(x => String(x.number))),
-      } : null,
-      warnings,
-    };
+      payload: {
+        job,
+        letteredJobs: lettered,
+        company: companyByUuid.get(job.company_uuid) || null,
+        companyContacts: contactsByCompany.get(job.company_uuid) || [],
+        jobContacts: contactsByJob.get(job.uuid) || [],
+        notes: notesByJob.get(job.uuid) || [],
+        // lines and payments are the main job's own: a claim's sit on the claim job
+        materials: materialsByJob.get(job.uuid) || [],
+        bundles: bundlesByJob.get(job.uuid) || [],
+        payments: paymentsByJob.get(job.uuid) || [],
+        // check-ins, checklists and files on the lettered jobs are part of the job too
+        activities: jobActivities,
+        checklist: every(checklistByJob),
+        attachments: every(attachmentsByJob),
+        taxRates: Object.fromEntries(taxRates.map(t => [t.uuid, num(t.amount)])),
+        staffNames: Object.fromEntries([...new Set(jobActivities.map(a => a.staff_uuid).filter(Boolean))].map(u => [u, staffNames[u] || 'Unknown ServiceM8 staff'])),
+      },
+    });
+  }
+
+  const contactRow = (c) => ({ name: contactName(c), email: clean(c.email), phone: clean(c.mobile) || clean(c.phone), type: String(c.type || '').toUpperCase(), primary: isOn(c.is_primary_contact) });
+  return {
+    companies: companies.filter(c => c.uuid).map(c => {
+      const contacts = (contactsByCompany.get(c.uuid) || []).map(contactRow);
+      const first = contacts.find(x => x.primary) || contacts[0] || {};
+      return {
+        uuid: c.uuid,
+        name: clean(c.name) || first.name || 'Unknown client',
+        email: clean(c.email) || (contacts.find(x => x.email) || {}).email || '',
+        phone: clean(c.phone) || (contacts.find(x => x.phone) || {}).phone || '',
+        address: clean(c.address || c.billing_address),
+        contacts,
+      };
+    }),
+    jobs,
+    left,
   };
-  const byNumber = (a, b) => (Number(a.sm8JobNumber) || 0) - (Number(b.sm8JobNumber) || 0);
-  const rows = [...jobs.map(j => shape(j, 'job')).sort(byNumber), ...quotes.map(q => shape(q, 'quote')).sort(byNumber)];
+}
+
+// The row _shared/sm8-job-writer.js writes, from a job's raw record. client: the TEops client it
+// belongs to ({ id, name }), already settled by the run. tierNames: the rate tier names, to tell
+// labour lines from materials.
+function shapeSm8Job(kind, payload, tierNames) {
+  const { job, letteredJobs = [], company, companyContacts = [], jobContacts = [], notes = [] } = payload;
+  const number = String(job.generated_job_id || '').trim();
+  const pick = (field) => {
+    const order = [
+      ...jobContacts.filter(c => String(c.type || '').toUpperCase() === 'JOB'),
+      ...jobContacts,
+      ...companyContacts.filter(c => isOn(c.is_primary_contact)),
+      ...companyContacts,
+    ];
+    const hit = order.find(c => clean(c[field]));
+    return hit ? clean(hit[field]) : '';
+  };
+  const jobNotes = notes
+    .map(n => ({ date: noteDate(n), text: clean(n.note) }))
+    .filter(n => n.text)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const quoteSentDate = dateOf(job.quote_sent_stamp);
+
+  const claims = letteredJobs.filter(l => l.status !== 'Quote').map(l => ({ number: String(l.generated_job_id), status: l.status, date: dateOf(l.date) }));
+  const deposits = depositsFrom({ number }, payload.payments);
+  const totalIncGst = r2(job.total_invoice_amount);
+  const stage = buildJobStage(
+    { number, totalIncGst, invoiceSent: isOn(job.invoice_sent) }, claims, payload.materials || [], payload.bundles || [], tierNames,
+    new Map(Object.entries(payload.taxRates || {})), deposits,
+  );
+  const warnings = [...stage.warnings];
+  if (!company) warnings.push('ServiceM8 has no client company on this job');
+
+  // The claims the job arrives with. An open job: the Completed claims and the deposits paid, so
+  // only the balance is left to invoice. A Completed job was invoiced in full in ServiceM8: its
+  // lettered claims, then one claim for whatever is left, so it can never be invoiced again here.
+  const dateByNumber = new Map(claims.map(c => [c.number.toLowerCase(), c.date]));
+  let quoted = stage.lines.length ? stage.quotedExGst : exGst(totalIncGst);
+  let importedClaims = stage.claimsUsed.filter(c => c.invoiced).map(c => ({
+    number: c.number, amount: c.valueExGst, date: c.date || dateByNumber.get(String(c.number).toLowerCase()) || null,
+    ...(c.paid ? { paid: c.paid, method: c.method, ...(c.amountIncGst ? { amount_inc: c.amountIncGst } : {}) } : {}),
+  }));
+  let owing = 0;
+  if (kind === 'completed') {
+    const completedOn = dateOf(job.completion_date) || dateOf(job.date) || null;
+    const lettered = stage.claimsUsed.filter(c => c.invoiced && c.status !== 'Paid' && String(c.number) !== number);
+    const letteredTotal = r2(lettered.reduce((t, c) => t + c.valueExGst, 0));
+    const paidIncGst = r2(deposits.reduce((t, d) => t + d.amountIncGst, 0));
+    const last = deposits[deposits.length - 1];
+    owing = Math.max(0, r2(totalIncGst - paidIncGst));
+    if (quoted < 0) { warnings.push(`ServiceM8 has this job at less than $0 ($${quoted.toFixed(2)}): brought across at $0`); quoted = 0; }
+    importedClaims = letteredTotal <= quoted + 0.01
+      ? lettered.map(c => ({ number: c.number, amount: c.valueExGst, date: dateByNumber.get(String(c.number).toLowerCase()) || null }))
+      : [];
+    if (letteredTotal > quoted + 0.01) warnings.push(`ServiceM8's claims ($${letteredTotal.toFixed(2)}) come to more than the job ($${quoted.toFixed(2)}): brought across as one claim for the whole job`);
+    const balance = r2(quoted - importedClaims.reduce((t, c) => t + c.amount, 0));
+    if (balance > 0.005) {
+      importedClaims.push({
+        number, amount: balance, date: completedOn,
+        ...(last && last.date && owing <= 0.01 ? { paid: last.date, method: last.method } : {}),
+      });
+    }
+  }
 
   return {
-    rows,
-    summary: {
-      workOrders: rows.filter(r => r.kind === 'job').length,
-      quotes: rows.filter(r => r.kind === 'quote').length,
-      alreadyImported: rows.filter(r => r.alreadyImported).length,
-      quotesNotImported: quoteJobs.filter(q => !claimOf(q)).length - quotes.length,
-      quotesSinceMonths,
-      claimsFound: seenClaims.size,
-      orphanClaims,
+    row: {
+      sm8JobUuid: job.uuid,
+      sm8JobNumber: number,
+      kind,
+      name: shortTitle(job.job_description),
+      description: clean(job.job_description),
+      notesText: buildNotesText(job, jobNotes),
+      siteAddress: clean(job.job_address) || clean(company && company.address),
+      clientEmail: clean(company && company.email) || pick('email'),
+      clientPhone: pick('mobile') || pick('phone') || clean(company && company.phone),
+      contactName: contactName(jobContacts[0] || companyContacts[0] || {}),
+      quoteSent: kind === 'quote' ? (isOn(job.quote_sent) || !!quoteSentDate) : false,
+      quoteSentDate,
+      sm8Date: dateOf(kind === 'quote' ? job.quote_date : job.work_order_date) || dateOf(job.date),
+      completedOn: kind === 'completed' ? (dateOf(job.completion_date) || dateOf(job.date)) : '',
+      stage: {
+        quotedExGst: quoted,
+        invoicedExGst: kind === 'quote' ? 0 : r2(importedClaims.reduce((t, c) => t + c.amount, 0)),
+        lines: stage.lines,
+        groups: stage.groups,
+        claims: kind === 'quote' ? [] : importedClaims,
+        stcs: stage.stcs,
+      },
     },
+    warnings,
+    owing,
   };
 }
 
@@ -513,41 +531,4 @@ function stageFromLines(lines) {
   };
 }
 
-// Line items for a handful of jobs (the review screen asks a few at a
-// time, paced to stay under ServiceM8's per-minute limit): two ServiceM8
-// calls per job, two jobs at once, plus the tax rates once.
-async function loadSm8JobLines(apiKey, jobs, tierNames) {
-  const rates = await sm8GetAll(apiKey, 'taxrate');
-  // ServiceM8 calls the percentage 'amount' (10 for GST on Income, 0 for GST free).
-  const taxRates = new Map(rates.map(t => [t.uuid, num(t.amount)]));
-  const out = {};
-  let i = 0;
-  async function worker() {
-    while (i < jobs.length) {
-      const job = jobs[i++];
-      try {
-        // Payments are read only when ServiceM8 says the job has some (no extra call on most
-        // jobs). A job already in the app is only checked for a deposit it is missing.
-        const [mats, bundles, payments] = await Promise.all([
-          job.paymentsOnly ? [] : sm8GetAll(apiKey, 'jobmaterial', `job_uuid eq '${job.uuid}' and active eq 1`),
-          job.paymentsOnly ? [] : sm8GetAll(apiKey, 'jobmaterialbundle', `job_uuid eq '${job.uuid}' and active eq 1`),
-          num(job.paymentAmount) > 0 ? sm8GetAll(apiKey, 'jobpayment', `job_uuid eq '${job.uuid}' and active eq 1`) : [],
-        ]);
-        const deposits = depositsFrom(job, payments);
-        if (job.paymentsOnly) {
-          // its own invoice sent with no claims: the payments are that invoice's, not a deposit
-          const invoiceOnly = isOn(job.invoiceSent) && !(job.claims || []).some(c => c.status === 'Completed');
-          out[job.uuid] = { ok: true, paymentsOnly: true, deposits: invoiceOnly ? [] : deposits };
-          continue;
-        }
-        out[job.uuid] = { ok: true, ...buildJobStage(job, job.claims || [], mats, bundles, tierNames, taxRates, deposits) };
-      } catch (err) {
-        out[job.uuid] = { ok: false, error: err.message, rateLimited: /\b429\b/.test(err.message) };
-      }
-    }
-  }
-  await Promise.all([worker(), worker()]);
-  return out;
-}
-
-module.exports = { stcsText, loadSm8OpenJobs, loadSm8JobLines, buildJobStage, stageFromLines, sm8GetAll, SM8_BASE };
+module.exports = { stcsText, loadSm8Everything, shapeSm8Job, matchClient, buildJobStage, stageFromLines, sm8GetAll, Sm8RateLimit, SM8_BASE, clean, isOn, r2 };

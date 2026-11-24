@@ -1,6 +1,5 @@
-// ServiceM8 import, labour and checklists: run by
-// sm8-copy-attachments-background.js before the docs and photos, for every
-// job already imported (projects.sm8_job_uuid). Only reads from ServiceM8.
+// ServiceM8 labour and checklists for one job (item 111), written by _shared/sm8-run.js from the
+// job's raw ServiceM8 record. Tables: time_entries, job_tasks. Nothing is asked of ServiceM8 here.
 //
 // Labour: each recorded check-in/check-out on the job (jobactivity with
 // activity_was_recorded = 1; scheduled bookings are skipped) becomes a time
@@ -13,7 +12,9 @@
 //
 // Checklists: every checklist item, ticked or not, becomes a task on the
 // job, ticked if it was ticked in ServiceM8. Nobody is assigned, so nobody
-// gets a notification for 100 old tasks.
+// gets a notification for 100 old tasks. On a Completed (archived) job the
+// items left unticked are closed too, with a note saying so, so years of old
+// checklist items do not land on the Tasks page as open work.
 //
 // Lettered jobs (4515A deposit, 4515B claim...) are part of the main job
 // (see sm8-import.js), and staff often check in, tick checklists and take
@@ -25,9 +26,6 @@
 // corrected on the job are never overwritten, and entries an admin deleted
 // (sm8_deleted_activities, migration 20261125000000) are not re-added.
 
-const { sm8GetAll } = require('./sm8-import');
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const isOn = (v) => v === 1 || v === '1' || v === true;
 const clean = (s) => String(s || '').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
@@ -67,11 +65,15 @@ async function copyJobLabour(supabaseAdmin, project, activities, profileByStaff,
     const clockOut = sm8DateToIso(a.end_date);
     if (!clockIn || !clockOut || clockOut <= clockIn) { summary.timeSkippedNoTimes++; continue; }
     const staffId = profileByStaff.get(a.staff_uuid);
+    const hours = (new Date(clockOut) - new Date(clockIn)) / 3600000;
+    summary.hoursSeen += hours;
     if (!staffId) {
       summary.timeSkippedUnmatched++;
-      summary.unmatchedStaff[a.staff_uuid || 'none'] = (summary.unmatchedStaff[a.staff_uuid || 'none'] || 0) + 1;
+      summary.hoursUnmatched += hours;
+      summary.unmatchedStaff[a.staff_uuid || 'none'] = (summary.unmatchedStaff[a.staff_uuid || 'none'] || 0) + hours;
       continue;
     }
+    summary.hoursMatched += hours;
     const had = existingByUuid.get(a.uuid);
     if (had) {
       if (had.staff_id !== staffId) {
@@ -120,7 +122,9 @@ function groupOf(item) {
   return { key: 'name:checklist', name: 'Checklist' };
 }
 
-async function copyJobChecklist(supabaseAdmin, userId, project, items, profileByStaff, summary) {
+// closeOpen: an ISO time. Set on an archived job: items never ticked in ServiceM8 are closed at
+// that time with a note saying so.
+async function copyJobChecklist(supabaseAdmin, userId, project, items, profileByStaff, summary, closeOpen = null) {
   const { data: existing, error } = await supabaseAdmin.from('job_tasks')
     .select('id, completed, parent_task_id, sm8_checklist_uuid').eq('project_id', project.id).not('sm8_checklist_uuid', 'is', null);
   if (error) throw error;
@@ -145,8 +149,9 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
     const completedAt = sm8DateToIso(item.completed_timestamp);
     const createdAt = sm8DateToIso(item.create_date) || sm8DateToIso(item.timestamp);
     const fields = {
-      completed: !!completedAt,
-      completed_at: completedAt,
+      completed: !!completedAt || !!closeOpen,
+      completed_at: completedAt || closeOpen,
+      ...(closeOpen && !completedAt ? { notes: 'From the ServiceM8 checklist. Not ticked in ServiceM8: closed when the finished job was brought across.' } : {}),
       completed_by: completedAt ? profileByStaff.get(item.completed_by_staff_uuid) || null : null,
       created_by: profileByStaff.get(item.created_by_staff_uuid) || userId,
     };
@@ -189,8 +194,9 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
     groupOrder++;
     const heading = byUuid.get(g.key);
     const subs = g.items.filter(i => clean(i.name));
-    const allDone = subs.length > 0 && subs.every(i => sm8DateToIso(i.completed_timestamp));
-    const lastDone = allDone ? subs.map(i => sm8DateToIso(i.completed_timestamp)).sort().pop() : null;
+    const doneAt = (i) => sm8DateToIso(i.completed_timestamp) || closeOpen;
+    const allDone = subs.length > 0 && subs.every(doneAt);
+    const lastDone = allDone ? subs.map(doneAt).sort().pop() : null;
     const parentRow = {
       description: clean(heading && heading.name) || g.name || 'Checklist',
       sort_order: groupOrder,
@@ -217,109 +223,41 @@ async function copyJobChecklist(supabaseAdmin, userId, project, items, profileBy
   }
 }
 
-// Every ServiceM8 job uuid that belongs to each imported job: its own, plus
-// its lettered jobs ("4515" -> 4515A, 4515b...). Same lookup as the import's
-// dry run: one call per imported job for its date, then every job dated
-// after the oldest ('gt', ServiceM8 has no 'ge'), since a lettered job is
-// always made after its main job. Returns Map project id -> [uuids].
-async function sm8JobGroups(apiKey, projects) {
-  const groups = new Map(projects.map(p => [p.id, [p.sm8_job_uuid]]));
-  if (!projects.length) return groups;
-  const byNumber = new Map(projects.filter(p => p.sm8_job_number).map(p => [String(p.sm8_job_number).toLowerCase(), p.id]));
-  const dates = [];
-  for (const p of projects) {
-    const [job] = await sm8GetAll(apiKey, 'job', `uuid eq '${p.sm8_job_uuid}'`);
-    const d = String((job && job.date) || '').slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d > '2000-01-01') dates.push(d);
-    await sleep(350);
-  }
-  dates.sort();
-  const since = new Date(new Date(`${dates[0] || '2015-01-02'}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
-  const jobs = await sm8GetAll(apiKey, 'job', `active eq 1 and date gt '${since}'`);
-  for (const j of jobs) {
-    const m = String(j.generated_job_id || '').trim().match(/^(\d+)[a-z]+$/i);
-    const projectId = m && byNumber.get(m[1].toLowerCase());
-    if (projectId && !groups.get(projectId).includes(j.uuid)) groups.get(projectId).push(j.uuid);
-  }
-  return groups;
+const newLabourSummary = () => ({
+  activitiesSeen: 0, checklistSeen: 0, hoursSeen: 0, hoursMatched: 0, hoursUnmatched: 0,
+  timeAdded: 0, timeAlready: 0, timeMoved: 0, timeSkippedUnmatched: 0, timeSkippedNoTimes: 0, timeDeleted: 0, unmatchedStaff: {},
+  checklistAdded: 0, checklistAlready: 0, checklistTicked: 0,
+});
+
+// Where a job's ServiceM8 time and checklist land: the job itself, or, when it has been merged
+// into another (item 47), that job, on the stage that came from it when there is just one.
+async function labourTarget(supabaseAdmin, projectId) {
+  const { data: p, error } = await supabaseAdmin.from('projects')
+    .select('id, job_number, quote_number, sm8_job_uuid, sm8_job_number, pipeline_stage, completed_at, merged_into_project_id, cost_centres(id)').eq('id', projectId).maybeSingle();
+  if (error) throw error;
+  if (!p || !p.merged_into_project_id) return p;
+  const { data: into, error: intoErr } = await supabaseAdmin.from('projects')
+    .select('id, job_number, quote_number, pipeline_stage, completed_at, cost_centres(id, name)').eq('id', p.merged_into_project_id).maybeSingle();
+  if (intoErr) throw intoErr;
+  if (!into) return p;
+  const fromStages = (into.cost_centres || []).filter(c => String(c.name || '').startsWith(`J${p.job_number}: `));
+  return { ...p, id: into.id, job_number: into.job_number, quote_number: into.quote_number, pipeline_stage: into.pipeline_stage, completed_at: into.completed_at, cost_centres: fromStages };
 }
 
-// summary is filled in place so the caller can save it even if this throws.
-async function copyLabourAndChecklists(supabaseAdmin, apiKey, userId, summary, groups) {
-  Object.assign(summary, {
-    jobs: 0, letteredJobs: 0, jobErrors: [], activitiesSeen: 0, checklistSeen: 0,
-    timeAdded: 0, timeAlready: 0, timeMoved: 0, timeSkippedUnmatched: 0, timeSkippedNoTimes: 0, timeDeleted: 0, unmatchedStaff: {},
-    checklistAdded: 0, checklistAlready: 0, checklistTicked: 0,
-  });
-
-  const [{ data: projects, error }, { data: linked, error: linkErr }] = await Promise.all([
-    supabaseAdmin.from('projects').select('id, job_number, quote_number, sm8_job_uuid, sm8_job_number, merged_into_project_id, cost_centres(id)').not('sm8_job_uuid', 'is', null),
-    supabaseAdmin.from('profiles').select('id, sm8_staff_uuid').not('sm8_staff_uuid', 'is', null),
-  ]);
-  if (error) throw error;
-  if (linkErr) throw linkErr;
-  const profileByStaff = new Map((linked || []).map(p => [p.sm8_staff_uuid, p.id]));
-  // A job merged into another (item 47): its ServiceM8 time and checklist land on the merged job, on
-  // the stage that came from it when there is just one ("J7010: ...").
-  const intoIds = [...new Set((projects || []).map(p => p.merged_into_project_id).filter(Boolean))];
-  const { data: intoRows, error: intoErr } = intoIds.length
-    ? await supabaseAdmin.from('projects').select('id, job_number, quote_number, cost_centres(id, name)').in('id', intoIds)
-    : { data: [] };
-  if (intoErr) throw intoErr;
-  const intoById = new Map((intoRows || []).map(r => [r.id, r]));
-  const syncTarget = (p) => {
-    const into = p.merged_into_project_id && intoById.get(p.merged_into_project_id);
-    if (!into) return p;
-    const fromStages = (into.cost_centres || []).filter(c => String(c.name || '').startsWith(`J${p.job_number}: `));
-    return { ...p, id: into.id, job_number: into.job_number, quote_number: into.quote_number, cost_centres: fromStages };
-  };
-
-  // Per job rather than one bulk call: ServiceM8's filter has no "in", and
-  // the whole account's history of check-ins can be far bigger than the
-  // imported jobs' share. Paced to stay under ~180 calls a minute.
-  for (const project of projects || []) {
-    try {
-      const activities = [], items = [];
-      const uuids = groups.get(project.id) || [project.sm8_job_uuid];
-      summary.letteredJobs += uuids.length - 1;
-      for (const uuid of uuids) {
-        const [a, c] = await Promise.all([
-          sm8GetAll(apiKey, 'jobactivity', `job_uuid eq '${uuid}' and active eq 1`),
-          sm8GetAll(apiKey, 'jobchecklist', `job_uuid eq '${uuid}' and active eq 1`),
-        ]);
-        activities.push(...a);
-        items.push(...c);
-        await sleep(500);
-      }
-      summary.activitiesSeen += activities.length;
-      // A few raw records kept in the run summary, to check ServiceM8's
-      // field names against what this code expects.
-      if (!summary.samples) summary.samples = { checklist: [], activity: [] };
-      if (!summary.samples.checklist.length) summary.samples.checklist = items.slice(0, 6);
-      if (!summary.samples.activity.length) summary.samples.activity = activities.slice(0, 2);
-      summary.checklistSeen += items.length;
-      // A job with one stage puts the time on it; otherwise it is left
-      // unassigned to a stage, like a clock-in that picked none.
-      const target = syncTarget(project);
-      const centreId = (target.cost_centres || []).length === 1 ? target.cost_centres[0].id : null;
-      await copyJobLabour(supabaseAdmin, target, activities.filter(a => isOn(a.activity_was_recorded)), profileByStaff, centreId, summary);
-      await copyJobChecklist(supabaseAdmin, userId, target, items, profileByStaff, summary);
-      summary.jobs++;
-    } catch (err) {
-      console.error('sm8-labour job error:', project.sm8_job_uuid, err.message);
-      summary.jobErrors.push({ jobNumber: project.job_number, ref: project.job_number ? `J${project.job_number}` : `Q${project.quote_number}`, error: String(err.message).slice(0, 300) });
-    }
-    await sleep(800);
-  }
-
-  // Name the staff with no match, for the import screen.
-  const unmatched = Object.keys(summary.unmatchedStaff);
-  if (unmatched.length) {
-    const staff = await sm8GetAll(apiKey, 'staff').catch(() => []);
-    const nameOf = new Map(staff.map(s => [s.uuid, `${s.first || ''} ${s.last || ''}`.trim()]));
-    summary.unmatchedStaff = Object.fromEntries(unmatched.map(u => [nameOf.get(u) || 'Unknown ServiceM8 staff', summary.unmatchedStaff[u]]));
-  }
+// One job's check-ins and checklist, from its raw record. Returns the summary (counts and hours).
+async function copyJobRecords(supabaseAdmin, userId, projectId, { activities = [], checklist = [] }, profileByStaff) {
+  const summary = newLabourSummary();
+  const target = await labourTarget(supabaseAdmin, projectId);
+  if (!target) throw new Error('The job is no longer in the app');
+  summary.activitiesSeen = activities.length;
+  summary.checklistSeen = checklist.length;
+  // A job with one stage puts the time on it; otherwise it is left unassigned to a stage, like a
+  // clock-in that picked none.
+  const centreId = (target.cost_centres || []).length === 1 ? target.cost_centres[0].id : null;
+  await copyJobLabour(supabaseAdmin, target, activities.filter(a => isOn(a.active) && isOn(a.activity_was_recorded)), profileByStaff, centreId, summary);
+  const archived = target.pipeline_stage === 'archived';
+  await copyJobChecklist(supabaseAdmin, userId, target, checklist.filter(c => isOn(c.active)), profileByStaff, summary, archived ? (target.completed_at || new Date().toISOString()) : null);
   return summary;
 }
 
-module.exports = { copyLabourAndChecklists, copyJobChecklist, sm8JobGroups, sm8DateToIso };
+module.exports = { copyJobRecords, sm8DateToIso };

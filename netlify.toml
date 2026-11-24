@@ -73,6 +73,11 @@
 [functions.remind-leads]
   schedule = "20 20,21 * * *"
 
+# The move off ServiceM8 (item 111): restarts the run if its worker stopped. Does nothing
+# when no run is going. Remove with the rest of the ServiceM8 import once ServiceM8 is cancelled.
+[functions.sm8-run-sweep]
+  schedule = "*/15 * * * *"
+
 # Every 15 minutes: brings each job's Formbay form up to date (stage, NMI, serials, equipment, photos,
 # the CCEW) - see formbay-poll-background.js (item 101). Reads from Formbay only.
 [functions.formbay-poll-background]
