@@ -1334,3 +1334,33 @@ Size: medium (a morning to a day).
 Test on staging: Admin test login; the Done means clicks on jobs seeded with copies of the real emails (staging has no Gmail key, so the emails are loaded as rows).
 Simpler: nobody types an application into the DNSP page, checks the portal for a status, or downloads a CCEW and uploads it to the job. No toggle and no manual step added; "Pick the job" exists only for an email that fits no job or two.
 Best model: Opus 5.5, effort high, because it is a feature build with a known shape and one small migration (no money or stock).
+
+## 117. ServiceM8 deposits find their own way onto moved jobs (bug, planned 24 Nov 2026, waiting on yes)
+
+Owner, 24 Nov 2026 (ServiceM8 screenshot of #4840 and the J7021 Invoices tab): "J7021 doesn't show the payment received I thought we fixed this bug? It's because sm8 didn't do an invoice it was paid with sm8 pay".
+
+Found (read only, production):
+1. J7021 (ServiceM8 #4840, moved 20 Oct 2026, Client Handover): three stages, $12,887.77 ex GST quoted, `invoiced_amount` 0 on each, no imported claim, no invoice. ServiceM8 shows "Payment Received, ServiceM8 Pay $6,064.88, deposit paid with Visa" on 7 Oct 2026.
+2. Item 71 (10 Nov 2026) fixed new imports and J7016 by hand. For jobs already moved it left a manual step: open Import from ServiceM8, find the job under "Deposits to add", tick it, press Import. That was never run for the other jobs.
+3. It could not have worked for J7021 anyway: the import page reads ServiceM8 jobs with status Work Order only (`loadSm8OpenJobs`), and #4840 is now Unsuccessful in ServiceM8. Any moved job since closed off in ServiceM8 is invisible to the check.
+4. Of 49 jobs moved from ServiceM8, only J7016 carries a deposit claim (J7086 carries a paid invoice). Any other with a ServiceM8 Pay deposit has the same gap; a cloud session cannot reach ServiceM8 to list them.
+
+Plan (bug fix into `main`, no migration):
+1. **J7021 on production (owner's yes first, backup `backup_20261124.j7021_cost_centres`):** one paid claim on its first stage "quote #4840": `{ number: "4840 deposit", amount: 5513.53, amount_inc: 6064.88, date: "2026-10-07", paid: "2026-10-07", method: "ServiceM8 Pay", source: "servicem8" }`, `invoiced_amount` 0 to 5,513.53. Left to invoice becomes $7,374.24 ex GST ($8,111.66 inc). Opening the job then raises the deposit invoice in Xero and allocates ServiceM8's prepayment by itself (item 71's `sync-sm8-deposits-to-xero`, already live).
+2. **A nightly check, no clicks.** New scheduled function `sm8-deposits-nightly.js`: one ServiceM8 read of all payments, grouped by job, matched to every moved job by `sm8_job_uuid` whatever its ServiceM8 status. A payment not on the job's stages yet goes onto its first stage as a paid claim (the same `addMissingDeposits`, moved into `_shared/sm8-import.js`, matched by claim number so twice adds nothing). Limits checked on the server: skipped and reported, not added, when the job's own ServiceM8 invoice was sent (the payment is that invoice's), when the job is archived, or when it would take invoiced past quoted. Admins get one notification per run that added or skipped something ("J7021: 4840 deposit $5,513.53 added").
+3. **The manual path goes.** "Deposits to add" and its tick come off `sm8-import.html`; a job already in the app just reads "already imported as J7021".
+4. The first nightly run is the sweep of the other 47 jobs. It ends when ServiceM8 is cancelled (item 111 removes the schedule).
+
+Done means:
+- J7021 > Cost Centres: the claims card shows "4840 deposit, $5,513.53, 07/10/2026, Paid, ServiceM8 Pay".
+- J7021 > Invoices: Invoiced $5,513.53, Left to invoice $7,374.24, and Invoice project offers only the balance.
+- Xero > Sales > Invoices: a paid deposit invoice "J7021 deposit" for $6,064.88 with the prepayment allocated.
+- The morning after: a notification lists any other job a deposit was added to, and a second night adds nothing.
+
+Touches: `netlify/functions/_shared/sm8-import.js`, `netlify/functions/sm8-import-jobs.js`, `netlify/functions/sm8-import-lines.js`, `public/sm8-import.html`, new `netlify/functions/sm8-deposits-nightly.js`, `netlify.toml`; production data on J7021.
+Overlaps: item 111 (leave ServiceM8, waiting on yes) touches the same import files; this is small and goes first, 111 builds on top. No open branch touches them.
+Kind: bug fix (into `main`); migration no; money yes (invoiced to date and the claim cap on live jobs), backup before the J7021 fix.
+Size: small to medium (two to three hours).
+Test on staging: the nightly logic is proved in node against the shared module with stand-in payments (cloud sessions cannot reach ServiceM8); admin@staging.test, J9002 > Cost Centres for the paid claim card. The first real run is the first night on production.
+Simpler: nobody has to notice a missing ServiceM8 deposit, open the import page, tick a job and press Import; the step is removed and nothing is added.
+Best model: Fable 5.1, effort xhigh, because it changes invoiced to date on live jobs with a production data fix in the same go.
