@@ -32,10 +32,10 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 106 | Greentech STC catch-up for Xero: read every MMEM statement and tax invoice for account 248045 from March 2026, work out the bills, the STC payments and the GST credits by BAS quarter, give the accountant a report and Xero a bills file | Planned 21 Nov 2026, waiting on yes | N | Accountant (Adrian) confirms the GST treatment; owner says how the old customer invoices show the STC |
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
 | 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
-| 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, waiting on yes and five answers | Y (part B only) | None |
+| 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y (part B only) | None |
 | 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar, and the hot water form made in Formbay the same as solar | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | None |
 | 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, answers in 24 Nov 2026 (Sparky also drafts the quote: prebuilds, new prebuilds, draft supplier requests), waiting on yes | Y | None |
-| 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, waiting on yes and two answers | Y | Item 114 stage 1 first (the shared plan base) |
+| 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | Item 114 first (the shared plan base; it lands whole) |
 
 ## Owner to-dos left over from shipped items
 
@@ -1118,7 +1118,7 @@ Today the Service Work type reads as a call-out for a fault: its questions are U
 2. The job's tasks follow the kind: "Photograph the work before and after" for everything; the root cause task only on a repeat fault.
 3. The type's description on New quote reads "General electrical work: repairs, upgrades, additions and maintenance", the AI scope of works is told the kind of work, and the email reader's rule for picking this type is widened the same way.
 4. The referral form's "Service work" choice already asks "What do they need?"; no change.
-5. The type keeps the name Service Work unless the owner wants it renamed (question 5).
+5. The type is called Electrical work on screen (owner, 24 Nov 2026); the saved value stays `service_work`.
 
 **Suggested lists (all editable in Settings; owner to confirm or change)**
 
@@ -1128,13 +1128,15 @@ Today the Service Work type reads as a call-out for a fault: its questions are U
 - **New Build.** Photos: the block or slab; builder's temporary supply; where the meter goes; the plans. Questions: plans supplied; new connection or Level 2 work needed (task); mains run, metres, overhead or underground; who digs the trench; stage of the build (slab, frame, lock-up); solar or EV provision; data and NBN.
 - **Service Work and Quick Estimate** (one list, general electrical: owner 24 Nov 2026, "service work is for general electrical not always faults could be upgrades"). Photos: property front; the work area, wide; the work area, close up; switchboard, cover off; meter box; the equipment or its nameplate (what is there now, or what is being replaced); the cable route; access (roof space, under floor, height). A fault adds: the fault or damage. Questions: what we found on site; room in the switchboard for it, or an upgrade needed (task); safety switches on the circuits being worked on; cable run, metres; roof space or under floor access; ladder, lift or roof access needed; OK to switch the power off (fills the quote); parts or equipment to order (task); two people needed; hours it should take; asbestos (task); site induction (fills the quote); anything to make good after (patching, painting).
 
-**Open questions for the owner**
+**Owner's answers (24 Nov 2026)**
 
-1. Quick Estimate shares the Service Work list, and New Build gets its own short list (above). Right?
-2. Off-grid: an extra list that joins a Solar inspection when the grid answer is Off grid (generator, shed or plant room, the loads, distance from the array to the shed)?
-3. Who gets the tasks an inspection makes: the person who booked the inspection (suggested), or the office?
-4. Are the lists above right, or what should change? They can be edited in Settings later either way.
-5. Keep the name Service Work, or rename the type to General Electrical on screen (the saved value stays the same, so old quotes are untouched)?
+1. Quick Estimate shares the general electrical list; New Build gets its own short list.
+2. Yes to an off-grid list that joins a Solar inspection when the grid answer is Off grid: photos of the generator and its nameplate, the shed or plant room, the spot for the batteries and inverters, the run from the array to the shed; questions on the loads (pumps, welders, aircon, anything three phase), generator size and auto start, distance from the array to the shed in metres, phone signal on site, truck access.
+3. The tasks an inspection makes go to the person who booked it.
+4. Build with the lists as written; the owner edits them in Settings after.
+5. The Service Work type is called **Electrical work** on screen (the saved value stays `service_work`, so old quotes are untouched).
+
+No questions left on this item.
 
 **Done means**
 
@@ -1226,7 +1228,7 @@ Stage 3, Sparky drafts the quote (owner, 24 Nov 2026: "Let sparky draft quotes p
 
 **Owner's answers (24 Nov 2026)**
 
-1. Stage order: taken as hand drawing first (stage 1), then Sparky drafting the layout (stage 2) and the quote (stage 3), since stage 3 needs the plan's schedule. The owner's answer was stage 3 itself; say if all three should land together.
+1. The three stages land **all together** (owner, 24 Nov 2026): nothing goes to `staging` until hand drawing, Sparky's layout and Sparky's quote draft are all finished. They are still built in that order on the one branch.
 2. Yes: the app suggests the size from each room's area, by a rule of thumb kept in Settings.
 3. Brands: Mitsubishi Heavy Industries (MHIA), Mitsubishi Electric (ME), TCL and Daikin. The refrigerant work is done in-house, so the job tasks are ours (pressure test, vacuum, commission) and no subcontractor is booked.
 
@@ -1263,10 +1265,12 @@ Owner, 24 Nov 2026: "Same for new builds allow us to upload the plan and either 
 5. **To the quote.** Add lines from the plan: one line per symbol with its count, and cable metres, against the mapped prebuilds; per stage (rough in, fit off) where the prebuild says so. A plan changed later offers the difference, not a second set.
 6. **In the proposal:** the marked plan prints as its own pages with the schedule.
 
-**Open questions for the owner**
+**Owner's answers (24 Nov 2026)**
 
-1. The standard for suggested spots: do you have your own points per room, or shall I draft one for you to correct in Settings?
-2. Count only what the plan shows, or count and also flag what looks missing against the standard (a bedroom with no smoke alarm)?
+1. Draft a points per room standard for him to correct in Settings.
+2. Count also flags what looks missing against the standard (a bedroom with no smoke alarm), listed separately so it can be offered to the client as an extra.
+
+No questions left on this item.
 
 **Done means**
 
