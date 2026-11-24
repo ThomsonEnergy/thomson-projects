@@ -261,7 +261,7 @@ begin
       values ('project', p_job, 'staff_link_no_bonus', format('Lead from %s''s link, no link bonus: %s.', v_first,
         case when v_lead.already_client then 'already ours (' || coalesce(v_lead.already_reason, 'matched') || ')'
              when not coalesce(v_who.active, false) then 'they no longer work here'
-             when coalesce(v_total, 0) < coalesce(v_min, 0) then format('the job is under $%s', v_min)
+             when coalesce(v_total, 0) < coalesce(v_min, 0) then format('the job is under $%s', to_char(v_min, 'FM999,999,990'))
              when coalesce(v_amount, 0) <= 0 then 'the link bonus is set to $0'
              else 'one was already earned on this lead' end));
     end if;
