@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 24 Nov 2026 (item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 24 Nov 2026 (items 113 and 114, Hot Water and Air Conditioning quote types, planned and waiting on yes; item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -33,6 +33,8 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 107 | Formbay payments post themselves to Xero (Part L phase 3): importing a Payment Advice makes the one Xero entry that matches the bank line, 2003 cleared at the booked price, the gain to 2003-1, the fee to 2003-2 with its GST | Planned 21 Nov 2026, waiting on yes | Y (Xero ids on the advice, a fee mapping row) | Accountant confirms the method and tax codes |
 | 111 | Leave ServiceM8 for good: every Work Order job, every quote and every Completed job brought across in one run (Completed ones land Archived under their old ServiceM8 number with photos, documents, labour, notes and line items), a check report that proves nothing is missing, then cancel ServiceM8 | Planned 24 Nov 2026, five answers in, waiting on the yes to build | N | Owner marks unwanted jobs Unsuccessful in ServiceM8 first and sorts the phone before cancelling |
 | 112 | Statement email button and send history (bug fix), and site inspections that suggest instead of block: nothing required, many labelled photos, notes, tasks suggested from the answers, photos into the job's Photos tab with their labels, one checklist per proposal type | Planned 24 Nov 2026, waiting on yes and five answers | Y (part B only) | None |
+| 113 | Hot Water quote type: STCs set from the unit, other rebates (ESCs, PRCs) from a Settings list, and the saving off the bill for a timer, a solar diverter (CatchPower) or a daytime plan, with or without solar | Planned 24 Nov 2026, waiting on yes and three answers | Y | How the NSW certificates are claimed (owner) |
+| 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, waiting on yes and three answers | Y | None |
 
 ## Owner to-dos left over from shipped items
 
@@ -1149,3 +1151,85 @@ Size: part A small; part B large.
 Test on staging: the Admin test login; the clicks are the Done means list. No keys needed (the statement email needs Gmail on staging to actually send; the button shows in the composer's preview either way).
 Simpler: nobody picks a checklist, nobody is stopped by a missing photo, nobody copies inspection answers, photos or follow-ups onto the quote by hand, nobody wonders whether a statement went. No toggle or manual step added.
 Best model: Fable 5.1, effort xhigh, because part B is a migration with a new table, RLS and a database function plus code in one go.
+
+## 113. Hot Water quote type (planned 24 Nov 2026, waiting on yes)
+
+Owner, 24 Nov 2026: "create 2 more quote templates, one for hot water units it should show stcs and any additional prcs or rebates we can offer and should show how much they will save off the bill based on if they have solar and using catch power or timer or a special energy plan."
+
+**Today (from the code).** Six quote types (`TEMPLATE_INFO` in `public/js/template-questions.js`, the database check on `projects.proposal_template`). STC and BSTC credits sit on the quote and only show on Solar and Battery. The savings estimate (`public/js/solar-roi.js`) runs the home hour by hour from the bill reading and the plan's rates, and the plan finder lists other retailers' plans. Nothing in the app knows about hot water, ESCs or PRCs.
+
+**Plan**
+
+1. **New type "Hot Water"** on New quote: single stage, deposit, the bill card shown (the same bill upload and reading as Solar).
+2. **Questions (step 1):** the heater there now (electric on the full rate, electric on controlled load, gas mains, LPG bottles, solar hot water, none); its size and age; people in the home; the new unit (heat pump or electric storage, litres); where it goes and whether that is the same spot; solar on the roof now (filled from the bill or the existing system answer); how it will be run (see 5); tempering valve needed; plumber: ours, theirs or a subcontractor.
+3. **STCs by themselves.** A hot water prebuild carries its STC count per zone (typed once per model from the Clean Energy Regulator's register, in the prebuild form). Adding the unit to the quote sets the quote's STC count and credit, at the Settings price per STC. The STC block shows on this type.
+4. **Other rebates as data.** Settings > Rebates: a list (name, state, what it applies to, a fixed amount or certificates times a price, the wording the client sees, on or off). A quote offers the ones that fit its type and the site's state, ticked by default; each prints on the proposal as its own line under the STC credit ("NSW energy savings certificates", "Peak reduction certificates"). Nothing is typed into code, so a scheme that changes is one edit. Which schemes Thomson can actually offer, and how the money comes back, is question 2: until that is answered a rebate prints as a discount line only.
+5. **The saving off the bill.** The hot water becomes a load in the same hour by hour estimate: what the old heater costs a year on their plan, then the new one, run each way so the client sees the choices side by side: as it is now; on a timer in the solar hours; on a solar diverter (CatchPower: the element takes the spare solar first); on a plan with free or cheap daytime power (picked from the plan finder). With no solar on the roof the solar rows do not show. A heat pump uses about a third to a quarter of the power of an element (the figure is on the prebuild); a diverter is offered for element tanks and a timer or relay for heat pumps. The proposal shows the yearly saving, the payback after the rebates, and lists its assumptions, as the solar one does.
+6. **Job tasks at approval:** order the unit, book the plumber, create the STCs after install, the rebate paperwork for each ticked rebate, old unit taken away.
+7. **Inspection list (item 112):** photos of the old heater and its nameplate, the spot for the new one, the switchboard, the hot water circuit and its breaker, the meter (controlled load or not), the pipe run, drainage for the relief valve, access for the unit; questions on circuit size, distance to the board, a slab or base needed, noise near a bedroom or a neighbour (heat pump).
+
+**Open questions for the owner**
+
+1. Which units do you sell: heat pumps only (which brands), or electric storage as well?
+2. The NSW certificates (ESCs and PRCs): do you create them yourself or go through a certificate provider (who), and are you paid like STCs (it comes off the client's price and you claim it back)? Any Queensland rebate you offer?
+3. Is the list of heaters to compare against right (electric full rate, electric controlled load, gas, LPG, old solar hot water)?
+
+**Done means**
+
+- New quote > Hot Water: the hot water questions and the bill card show.
+- Add a heat pump prebuild: the STC count and credit fill themselves; the NSW rebates are ticked and print as their own lines.
+- With a bill read in and solar on the roof: the preview shows the old heater's yearly cost and four ways of running the new one, each with its saving.
+- With no solar: only "as now", timer off-peak and the plan row show.
+- Approve it: the job has the order, plumber, STC and rebate tasks.
+
+Touches: `public/project.html` (no new inline code: the type shows the existing bill and STC blocks, the hot water card is its own file), `public/js/supabase-client.js`, `public/settings.html` (a Rebates tab as its own file), `public/js/template-questions.js`, `public/js/solar-roi.js`, new `public/js/hot-water.js`, `public/js/prebuild-form.js`, `public/new-project.html`, `public/quote.html` (the proposal), `netlify/functions/_shared/template-job-tasks.js`, `netlify/functions/_shared/solar-compliance-rules.js`, `netlify/functions/generate-sow.js`, `netlify/functions/generate-scope.js`, `netlify/functions/extract-email-job.js`, one migration (the type added to the check, `rebates` table, STC and efficiency columns on prebuilds, the quote's ticked rebates, `get_quote_by_token` returns them).
+Overlaps: item 112 (same chat, `template-questions.js`), item 99 (quote steps in `project.html`), item 114. Build in this chat after 112.
+Kind: feature into `staging`; migration yes; money yes (a rebate changes what the client pays, and how it is invoiced and reaches Xero depends on question 2), so a backup before the production migration.
+Size: large.
+Test on staging: Admin test login; the Done means clicks; the bill reading needs the AI key on staging.
+Simpler: nobody works out STCs, rebates or the saving by hand or in a spreadsheet. One list to keep: Settings > Rebates, because the schemes change and only the owner knows what he offers.
+Best model: Fable 5.1, effort xhigh, because it touches money and a migration plus code.
+
+## 114. Air Conditioning quote type with the duct and pipe plan (planned 24 Nov 2026, waiting on yes)
+
+Owner, 24 Nov 2026: "The other template is for air conditioners and it should allow us to upload a plan of their house and draw up the duct plan and pipe work plan. For either splits or ducted aircons. Like the one you did for my house j7040."
+
+**Today (from the code).** The plan markup editor (`openPdfViewer` in `supabase-client.js`, `public/js/electrical-symbols.js`) draws 23 electrical symbols and measured cable runs on a PDF and saves a new PDF, but the marks are flattened: a saved plan cannot be reopened and moved. There is one "Air conditioner" symbol and no duct or pipe. The J7040 duct plan (Daikin 14 kW ducted, hall return, outlets in every ceiling, outdoor unit under Bed 2) was drawn outside the app. Item 89 (Sparky draws on plans, waiting on yes) is the plan for marks as data and for Sparky drafting a layout.
+
+**Plan, two stages**
+
+Stage 1, the type and drawing by hand:
+
+1. **New type "Air Conditioning"** on New quote, with a first question **Split or Ducted** (a quote can hold both).
+2. **Questions:** rooms to be cooled or heated; storeys; ceiling type and roof space access (ducted); where the outdoor unit can go; single or three phase and room in the board; brand preferred; zones and controller (ducted); Wi-Fi control; an old system to remove; who does the refrigerant work.
+3. **House plan on the quote.** A "House plan" box on step 1: upload the PDF or a photo of a sketch, one per floor. Draw on plan opens the editor on it.
+4. **Aircon drawing set** in the editor (it shows first on this type): ducted indoor unit, ceiling outlet (round or linear, with its size), return air grille, zone damper, controller, outdoor unit, wall split head, cassette, isolator; and runs: flexible duct (drawn at width, with its diameter), refrigerant pipe, condensate drain, power feed. Runs are measured from the plan's scale as cable is today. Two layers, **Duct plan** and **Pipe work plan**, shown together or one at a time.
+5. **Marks stay movable** (item 89 part 1 built here): the shapes are saved as data, so the plan reopens with everything movable and deletable; Save still makes the PDF.
+6. **The schedule becomes the quote:** outlets, grilles, units, metres of each duct size, pipe and drain are offered as quote lines against prebuilds, one tap (item 89 part 5).
+7. **In the proposal:** the duct plan and the pipe work plan print as their own pages, with the schedule beside them.
+8. **Job tasks and inspection list (item 112):** photos of each room, the roof space and manhole, the outdoor unit spot, the switchboard, the pipe route, the drain point; questions on roof space height, truss or rafter roof, ceiling insulation, wall type at the pipe penetration, drain fall.
+
+Stage 2, Sparky drafts it (item 89 parts 3 and 4, right after stage 1): a brief ("ducted upstairs, 14 kW") and Draft: Sparky reads the plan, puts an outlet in every room sized by area, the return in the hall, the outdoor unit where the brief says, the duct and pipe runs, then people move, delete and ask for changes. This is how J7040's was done, inside the app.
+
+**Open questions for the owner**
+
+1. Stage 1 (draw by hand) first and usable, then Sparky drafting as stage 2: right, or hold it all until Sparky can draft?
+2. Should the app suggest the size? With the plan's scale set, each room's area gives a rough kW (a rule of thumb kept in Settings), added up for a ducted unit.
+3. Brands and who does the refrigerant work (your own ARC licence or a subcontractor)? It sets the job tasks.
+
+**Done means**
+
+- New quote > Air Conditioning > Ducted: the questions and the House plan box show.
+- Upload a floor plan, Draw on plan: place the indoor unit, six outlets, the return and the outdoor unit, draw duct and pipe runs: lengths show.
+- Save, open again: every mark still moves; switch between Duct plan and Pipe work plan.
+- Add lines from the plan: one line per item with counts and metres.
+- The client's proposal shows both plan pages and the schedule.
+- Stage 2: on J7040's first floor plan, "ducted aircon upstairs, 14 kW" > Draft gives a layout close to the one drawn by hand.
+
+Touches: `public/js/supabase-client.js` (the editor: shapes saved and loaded, layers), `public/project.html` (the House plan box and Add lines from the plan in their own file, no inline code), `public/js/electrical-symbols.js`, `public/js/template-questions.js`, new `public/js/aircon-plan.js`, `public/new-project.html`, `public/quote.html`, `public/settings.html` (prebuild mapping column), `netlify/functions/_shared/template-job-tasks.js`, `netlify/functions/generate-sow.js`, `netlify/functions/generate-scope.js`, `netlify/functions/extract-email-job.js`, stage 2: new `netlify/functions/plan-markup-background.js`, new `agents/prompts/plan-markup.js`; one migration (the type added to the check, `plan_markups`, a prebuild column, the quote's plan documents, `get_quote_by_token` returns the plan pages).
+Overlaps: item 89 (this builds its parts 1 and 5, then 3 and 4 for aircon; item 89 keeps Sparky reading plans in chat and the battery and rough-in layouts), item 90 (same Sparky files, stage 2 only), item 99 and items 112 and 113 (quote steps). Build in this chat, after 113.
+Kind: feature into `staging`; migration yes; money, stock or payroll no; RLS yes (one new table).
+Size: large (stage 1 two days or more, stage 2 the same again).
+Test on staging: Admin test login; the Done means clicks; stage 2 needs the AI key on staging.
+Simpler: the duct and pipe plan is drawn where the quote is, counted by itself and printed in the proposal, instead of drawn in another program and typed across.
+Best model: Fable 5.1, effort xhigh, because it is a migration with RLS plus a rebuild of the shared plan editor.
