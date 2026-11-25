@@ -84,10 +84,10 @@
         .limit(60);
 
       const myRole = await getMyRole();
-      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole);
+      render(supplier, summary, bills || [], flaggedItems || [], pos || [], myRole, docketsByBill);
     }
 
-    function render(supplier, summary, bills, flaggedItems, pos, myRole) {
+    function render(supplier, summary, bills, flaggedItems, pos, myRole, docketsByBill = {}) {
       const canPay = isFinanceRole(myRole);
       const sm = (v) => (summary ? money(v) : 'n/a'); // the tiles say n/a when the function refused (Staff)
       const dayText = (iso) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
