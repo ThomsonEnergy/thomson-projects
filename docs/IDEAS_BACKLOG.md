@@ -300,6 +300,14 @@ Open-Meteo (includes BOM model data; check commercial terms) or Willy Weather AP
 - **Texts:** SMS tab in the inbox (beside Sales / Mine), matched by phone number, auto-tagged by the tagger. Push to opted-in staff inside their hours.
 - **Calls:** ring all opted-in staff inside their hours; first to answer wins. Caller ID shows customer and open J numbers if known.
 
+### Texts link to jobs like team chat (owner's rule, 25 Nov 2026)
+Owner: "1 text message part will show all texts with clients and each text will be linked to a job and only the linked ones will show in jobs eg just like the chat currently works."
+- **One place:** the Inbox Texts tab holds every text with every client, one conversation per client (matched on phone number), three panes like team chat (conversations, the texts, the client's jobs, quotes and invoices).
+- **Every text carries a job tag,** the same way a chat message does (`chat_set_tag`, Sparky's tagger): a client with one open job is tagged by itself; with more than one, Sparky tags when sure and asks Yes / No when guessing, with Undo; staff can tag or change it; the reply box shows which J number the reply is about.
+- **A job shows only its own texts:** the job's Feed tab gets "From texts" beside "From team chat", listing only texts tagged to that J number, with a line saying how many other texts with the client are elsewhere. A reply sent from the job is tagged to it by itself.
+- **No job:** a text from a new number or about nothing in particular stays in Texts until tagged (one tap to create a lead).
+- Picture of the call screens and the texts screens (example data, nothing built): `docs/mockups/item-7-calls-and-texts.html`, also published as a private artifact for the owner.
+
 ### Incoming call screen (owner requirement, 17 Oct 2026)
 Staff must see at a glance: (1) it is a work call, (2) which client is calling, (3) that client's jobs, so they have the info ready.
 - **Ringing (iPhone lock screen, CallKit):** iOS only allows one line of caller text. Shows "Thomson Energy" as the calling app, plus the client name and their main open J number, e.g. "Jane Smith, J7006". Distinct TEops ringtone. Unknown number: "New caller" plus the number.

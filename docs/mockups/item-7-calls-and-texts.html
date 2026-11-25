@@ -1,0 +1,407 @@
+<title>TEops Calls and Texts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a walk-through of backlog item 7. Each screen sits in a device frame (laptop or phone)
+   drawn with the app's own colours from public/css/style.css, so it reads as TEops, not a new design. */
+:root {
+  --bg: #f3f5f9; --surface: #ffffff; --surface-2: #eef1f7; --border: #dde3ee;
+  --text: #1a2030; --muted: #5b6577; --accent: #3b3486; --accent-dim: #e6e3f7;
+  --btn-bg: #3b3486; --link: #3b3486; --green: #15803d; --green-dim: #e9f9ee;
+  --red: #c0272d; --red-dim: #fdecec; --amber: #92400e; --amber-dim: #fef3c7;
+  --frame: #1a2030; --out-bubble: #3b3486; --out-text: #ffffff;
+  --radius: 10px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #000000; --surface: #1a2029; --surface-2: #212938; --border: #2c3444;
+  --text: #eef1f6; --muted: #a3adbf; --accent: #2f9bdb; --accent-dim: #16324a;
+  --btn-bg: #1673b3; --link: #6cc4f5; --green: #4ade80; --green-dim: rgba(74,222,128,.12);
+  --red: #f87171; --red-dim: rgba(220,38,38,.16); --amber: #fbbf24; --amber-dim: rgba(251,191,36,.14);
+  --frame: #3a4356; --out-bubble: #1673b3; --out-text: #ffffff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #000000; --surface: #1a2029; --surface-2: #212938; --border: #2c3444;
+  --text: #eef1f6; --muted: #a3adbf; --accent: #2f9bdb; --accent-dim: #16324a;
+  --btn-bg: #1673b3; --link: #6cc4f5; --green: #4ade80; --green-dim: rgba(74,222,128,.12);
+  --red: #f87171; --red-dim: rgba(220,38,38,.16); --amber: #fbbf24; --amber-dim: rgba(251,191,36,.14);
+  --frame: #3a4356; --out-bubble: #1673b3; --out-text: #ffffff; color-scheme: dark }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.45; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 22px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 30px; }
+h1 { font-size: 26px; margin: 0 0 6px; text-wrap: balance; }
+h2 { font-size: 19px; margin: 0; }
+h3 { font-size: 14px; margin: 0; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 66ch; }
+.eg { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--amber); background: var(--amber-dim); padding: 2px 9px; border-radius: 999px; }
+section { display: flex; flex-direction: column; gap: 16px; }
+.shot { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.shot figcaption b { display: block; font-size: 15px; }
+.shot figcaption span { color: var(--muted); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+
+/* rules strip */
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; padding: 0; margin: 0; list-style: none; }
+.rules li { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; }
+.rules b { display: block; margin-bottom: 2px; }
+
+/* shared app bits */
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--accent); background: var(--accent-dim); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.chip.none { color: var(--amber); background: var(--amber-dim); }
+.badge { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.badge.green { color: var(--green); background: var(--green-dim); }
+.badge.amber { color: var(--amber); background: var(--amber-dim); }
+.badge.red { color: var(--red); background: var(--red-dim); }
+.lnk { color: var(--link); font-size: 12px; font-weight: 600; }
+.sec { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 7px 12px; font-size: 13px; font-weight: 600; text-align: center; }
+.btn.go { background: var(--green); border-color: var(--green); color: #fff; }
+.btn.stop { background: var(--red); border-color: var(--red); color: #fff; }
+.btn.pri { background: var(--btn-bg); border-color: var(--btn-bg); color: #fff; }
+:root[data-theme="dark"] .btn.go, :root[data-theme="dark"] .btn.stop { color: #06130a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.go, :root:not([data-theme="light"]) .btn.stop { color: #06130a; } }
+.num { font-variant-numeric: tabular-nums; }
+
+/* job rows: one line each */
+.jrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.jrow:first-of-type { border-top: 0; }
+.jrow .jn { font-weight: 700; color: var(--link); }
+.jrow .jd { min-width: 0; }
+.jrow .jd b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.jrow .jd span { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jrow .jm { text-align: right; font-size: 12px; }
+.phone .jrow { grid-template-columns: auto minmax(0, 1fr); }
+.phone .jrow .jm { grid-column: 2; text-align: left; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
+.phone .jrow .jd b { white-space: normal; }
+
+/* laptop frame */
+.fit { overflow-x: auto; }
+.desk { width: 1040px; border: 2px solid var(--frame); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.tb { display: flex; align-items: center; gap: 4px; height: 46px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.tb span { padding: 6px 10px; font-size: 13px; font-weight: 600; color: var(--muted); border-radius: 8px; }
+.tb span.on { color: var(--accent); background: var(--accent-dim); }
+.tb .logo { margin-left: auto; font-weight: 800; letter-spacing: .04em; color: var(--text); }
+.tb .logo i { font-style: normal; color: var(--accent); }
+
+/* phone frame */
+.phone { width: 290px; max-width: 100%; height: 620px; border: 8px solid var(--frame); border-radius: 38px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); flex: none; }
+.phone .pad { padding: 10px 12px; }
+
+/* 1 lock screen (fixed look: it is the iPhone, not the app) */
+.lock { flex: 1; display: flex; flex-direction: column; align-items: center; color: #fff; padding: 46px 18px 26px;
+  background: linear-gradient(170deg, #10163a 0%, #2b3990 55%, #1c87c9 130%); }
+.lock .app { font-size: 13px; opacity: .85; display: flex; align-items: center; gap: 6px; }
+.lock .app i { width: 16px; height: 16px; border-radius: 4px; background: #f2a53a; display: inline-block; }
+.lock .who { font-size: 30px; font-weight: 600; text-align: center; margin-top: 10px; line-height: 1.15; text-wrap: balance; }
+.lock .sub { font-size: 13px; opacity: .8; margin-top: 6px; }
+.lock .slide { margin-top: auto; width: 100%; height: 58px; border-radius: 999px; background: rgba(255,255,255,.18); display: flex; align-items: center; padding: 5px; gap: 14px; font-size: 16px; color: rgba(255,255,255,.85); }
+.lock .slide i { width: 48px; height: 48px; border-radius: 50%; background: #34c759; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 20px; }
+.lock .opts { display: flex; justify-content: space-between; width: 100%; padding: 14px 14px 0; font-size: 12px; opacity: .85; }
+
+/* in-call screen */
+.callbar { background: var(--green); color: #fff; padding: 8px 12px; font-size: 13px; font-weight: 700; display: flex; justify-content: space-between; }
+:root[data-theme="dark"] .callbar { color: #06130a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .callbar { color: #06130a; } }
+.who2 b { font-size: 19px; display: block; }
+.who2 > span { color: var(--muted); font-size: 13px; display: block; }
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.keys .btn { padding: 9px 2px; font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+
+/* 2 desktop ringing */
+.behind { position: relative; height: 430px; padding: 14px; }
+.ghost { display: flex; flex-direction: column; gap: 7px; opacity: .45; }
+.ghost div { height: 30px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
+.pops { position: absolute; inset: 0; display: flex; gap: 20px; align-items: center; justify-content: center; padding: 20px; background: rgba(10, 14, 30, .38); }
+.pop { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: 0 14px 40px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 10px; }
+.pop.known { width: 560px; }
+.pop.new { width: 300px; }
+.ring { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: .05em; }
+.ring i { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* texts, three panes like Team chat */
+.inbox { display: grid; grid-template-columns: 270px minmax(0, 1fr) 290px; height: 630px; }
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pane.side { background: var(--surface); border-right: 1px solid var(--border); }
+.pane.info { background: var(--surface); border-left: 1px solid var(--border); padding: 12px; gap: 10px; overflow: hidden; }
+.tabs { display: flex; gap: 4px; padding: 10px 12px 6px; }
+.tabs span { font-size: 13px; font-weight: 600; color: var(--muted); padding: 5px 10px; border-radius: 999px; }
+.tabs span.on { background: var(--accent-dim); color: var(--accent); }
+.tabs em { font-style: normal; background: var(--accent); color: #fff; border-radius: 999px; font-size: 10.5px; padding: 0 6px; margin-left: 3px; }
+.find { margin: 0 12px 6px; border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; color: var(--muted); font-size: 13px; background: var(--bg); }
+.conv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 8px 12px; border-left: 3px solid transparent; }
+.conv.on { background: var(--accent-dim); border-left-color: var(--accent); }
+.conv b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv time { font-size: 11.5px; color: var(--muted); }
+.conv .last { grid-column: 1 / -1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv .tags { grid-column: 1 / -1; display: flex; gap: 4px; flex-wrap: wrap; }
+.conv.unread b { font-weight: 800; }
+.conv.unread .last { color: var(--text); }
+.chead { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.chead .t { flex: 1; min-width: 0; }
+.chead .t b { display: block; font-size: 15px; }
+.chead .t span { font-size: 12px; color: var(--muted); }
+.filter { display: flex; gap: 6px; align-items: center; padding: 7px 14px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.filter .chip.off { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.msgs { flex: 1; min-height: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; gap: 9px; justify-content: flex-end; }
+.day { align-self: center; font-size: 11.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 1px 10px; }
+.m { max-width: 78%; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.m.out { align-self: flex-end; align-items: flex-end; }
+.m .b { background: var(--surface); border: 1px solid var(--border); border-radius: 14px 14px 14px 4px; padding: 7px 11px; font-size: 13.5px; }
+.m.out .b { background: var(--out-bubble); border-color: var(--out-bubble); color: var(--out-text); border-radius: 14px 14px 4px 14px; }
+.m .meta { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.m.out .meta { justify-content: flex-end; }
+.comp { border-top: 1px solid var(--border); background: var(--surface); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.comp .line { display: flex; gap: 8px; align-items: center; }
+.comp .box { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 999px; padding: 7px 13px; color: var(--muted); background: var(--bg); font-size: 13px; }
+.quick { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); align-items: center; }
+.quick span.q { border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; color: var(--text); }
+
+/* job page */
+.jhead { padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.jhead b { font-size: 16px; }
+.jtabs { display: flex; gap: 4px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.jtabs span { font-size: 13px; font-weight: 600; color: var(--muted); padding: 4px 10px; border-radius: 8px; }
+.jtabs span.on { color: var(--accent); background: var(--accent-dim); }
+.feed { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 12px; padding: 12px; height: 380px; }
+.col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.col h3 { padding: 9px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.col .in { padding: 10px 12px; display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.note { font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding: 8px 12px; }
+.act { font-size: 13px; display: flex; flex-direction: column; gap: 1px; }
+.act span { font-size: 12px; color: var(--muted); }
+.tc b { font-size: 13px; }
+.tc span { font-size: 11.5px; color: var(--muted); margin-left: 6px; }
+.tc p { font-size: 13px; }
+
+.open { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.open ul { margin: 6px 0 0; padding-left: 18px; }
+.open li { margin: 3px 0; max-width: 80ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Calls and texts in TEops</h1>
+    <p class="lede">A picture of backlog item 7, drawn from the written plan and the owner's rule of 25 Nov 2026 that texts link to jobs the way team chat does. Nothing here is built yet. It looks the same whichever company carries the calls.</p>
+    <span class="eg">Example data: the people, numbers and jobs are made up</span>
+  </header>
+
+  <section>
+    <h2>Calls</h2>
+    <div class="row">
+      <figure class="shot">
+        <figcaption><b>iPhone ringing, locked</b><span>It says it is a work call, who it is and their main open job.</span></figcaption>
+        <div class="phone">
+          <div class="lock">
+            <div class="app"><i></i>Thomson Energy</div>
+            <div class="who">Jane Smith, J7006</div>
+            <div class="sub">work call</div>
+            <div class="slide"><i>&#9990;</i>slide to answer</div>
+            <div class="opts"><span>Remind me</span><span>Message</span></div>
+          </div>
+        </div>
+      </figure>
+
+      <figure class="shot">
+        <figcaption><b>Answered, on the phone</b><span>The client card opens by itself. One tap opens a job.</span></figcaption>
+        <div class="phone">
+          <div class="callbar"><span>On a call</span><span class="num">02:14</span></div>
+          <div class="pad stack" style="flex:1;min-height:0;overflow:hidden;">
+            <div class="who2"><b>Jane Smith</b><span class="num">0491 570 006</span><span>14 Riverview St, Murwillumbah</span></div>
+            <div class="keys"><div class="btn">Mute</div><div class="btn">Speaker</div><div class="btn">Keypad</div><div class="btn stop">End</div></div>
+            <div class="card">
+              <div class="sec">Jobs</div>
+              <div class="jrow"><span class="jn">J7006</span><div class="jd"><b>13.2 kW solar + 18 kWh battery</b><span>Thu 26 Nov, 7:00 am. Brad, Cooper</span></div><div class="jm"><span class="badge green">Install booked</span><div class="num">$9,480 owing</div></div></div>
+              <div class="jrow"><span class="jn">J7011</span><div class="jd"><b>EV charger</b><span>Same address. No booking yet</span></div><div class="jm"><span class="badge amber">Waiting on parts</span><div class="num">$0 owing</div></div></div>
+            </div>
+            <div class="card">
+              <div class="sec">Open quotes</div>
+              <div class="jrow"><span class="jn">Q2231</span><div class="jd"><b>Extra 9 kWh battery</b></div><div class="jm num">$5,750, sent 18 Nov</div></div>
+            </div>
+            <div class="card">
+              <div class="sec">Unpaid invoices</div>
+              <div class="jrow"><span class="jn">SI1184</span><div class="jd"><b>Deposit, J7006</b></div><div class="jm num">$2,220, due 28 Nov</div></div>
+            </div>
+          </div>
+        </div>
+      </figure>
+    </div>
+
+    <figure class="shot">
+      <figcaption><b>Ringing on the laptop</b><span>Left: a client we know, with everything needed before saying hello. Right: a number we do not know.</span></figcaption>
+      <div class="fit"><div class="desk">
+        <div class="tb"><span>Home</span><span class="on">Jobs</span><span>Quotes</span><span>Schedule</span><span>Inbox</span><span>Chat</span><span class="logo">THOMSON <i>ENERGY</i></span></div>
+        <div class="behind">
+          <div class="ghost"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
+          <div class="pops">
+            <div class="pop known">
+              <div class="ring"><i></i>Incoming work call</div>
+              <div class="who2"><b>Jane Smith</b><span><span class="num">0491 570 006</span>, 14 Riverview St, Murwillumbah</span></div>
+              <div>
+                <div class="sec">Jobs</div>
+                <div class="jrow"><span class="jn">J7006</span><div class="jd"><b>13.2 kW solar + 18 kWh battery</b><span>Next: Thu 26 Nov, 7:00 am. Crew: Brad, Cooper</span></div><div class="jm"><span class="badge green">Install booked</span> <span class="num">$9,480 owing</span></div></div>
+                <div class="jrow"><span class="jn">J7011</span><div class="jd"><b>EV charger</b><span>Same address. No booking yet</span></div><div class="jm"><span class="badge amber">Waiting on parts</span> <span class="num">$0 owing</span></div></div>
+              </div>
+              <div class="two">
+                <div><div class="sec">Open quotes</div><div class="jrow"><span class="jn">Q2231</span><div class="jd"><b>Extra 9 kWh battery</b></div><div class="jm num">$5,750</div></div></div>
+                <div><div class="sec">Unpaid invoices</div><div class="jrow"><span class="jn">SI1184</span><div class="jd"><b>Deposit, due 28 Nov</b></div><div class="jm num">$2,220</div></div></div>
+              </div>
+              <div class="acts"><div class="btn go">Answer</div><div class="btn stop">Decline</div></div>
+            </div>
+            <div class="pop new">
+              <div class="ring"><i></i>Incoming work call</div>
+              <div class="who2"><b>New caller</b><span class="num">0491 570 110</span><span>Not a client or a lead yet</span></div>
+              <div class="acts"><div class="btn go">Answer</div><div class="btn stop">Decline</div></div>
+              <div class="btn pri">Create a lead</div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Texts</h2>
+    <ul class="rules">
+      <li><b>One place for every text</b>Inbox, Texts tab. Every text with every client, one conversation per client.</li>
+      <li><b>Every text carries a job number</b>One open job: tagged by itself. More than one: Sparky tags when sure and asks Yes or No when guessing, as in team chat.</li>
+      <li><b>A job shows only its own texts</b>The job's Feed lists the texts tagged to that J number and nothing else.</li>
+      <li><b>No job, no problem</b>A text from a new number or about nothing in particular stays in Texts until someone tags it.</li>
+    </ul>
+
+    <figure class="shot">
+      <figcaption><b>Inbox, Texts tab</b><span>Three panes like team chat: conversations, the texts with a job chip under each, and the client's jobs beside them.</span></figcaption>
+      <div class="fit"><div class="desk">
+        <div class="tb"><span>Home</span><span>Jobs</span><span>Quotes</span><span>Schedule</span><span class="on">Inbox</span><span>Chat</span><span class="logo">THOMSON <i>ENERGY</i></span></div>
+        <div class="inbox">
+          <div class="pane side">
+            <div class="tabs"><span>Sales</span><span>Mine</span><span class="on">Texts<em>2</em></span></div>
+            <div class="find">Search texts, names, J numbers</div>
+            <div class="conv on unread"><b>Jane Smith</b><time>9:41 am</time><div class="last">Do you also service air con?</div><div class="tags"><span class="chip">J7006</span><span class="chip">J7011</span></div></div>
+            <div class="conv unread"><b class="num">0491 570 110</b><time>9:12 am</time><div class="last">Hi, do you do off grid systems out near Kyogle?</div><div class="tags"><span class="chip none">No job yet</span></div></div>
+            <div class="conv"><b>Mark Daley</b><time>Tue</time><div class="last">You: On my way, about 20 minutes.</div><div class="tags"><span class="chip">J6988</span></div></div>
+            <div class="conv"><b>Priya Nair</b><time>Tue</time><div class="last">Paid the invoice just now, thanks</div><div class="tags"><span class="chip">J6941</span></div></div>
+            <div class="conv"><b>Tom Reilly</b><time>Mon</time><div class="last">You: Your quote Q2240 is ready, link below.</div><div class="tags"><span class="chip">Q2240</span></div></div>
+            <div class="conv"><b>Hillcrest Dairy</b><time>Fri</time><div class="last">Gate code is the same as last time</div><div class="tags"><span class="chip">J6902</span></div></div>
+          </div>
+
+          <div class="pane">
+            <div class="chead"><div class="t"><b>Jane Smith</b><span class="num">0491 570 006. She sees our number, 0455 415 464</span></div><div class="btn">Call</div></div>
+            <div class="filter">Show: <span class="chip">All texts</span><span class="chip off">J7006</span><span class="chip off">J7011</span></div>
+            <div class="msgs">
+              <div class="day">Monday</div>
+              <div class="m out"><div class="b">Hi Jane, Brad from Thomson Energy. You're booked for Thursday 7 am for the solar and battery install.</div><div class="meta">Brad, 4:02 pm <span class="chip">&#128204; J7006</span></div></div>
+              <div class="day">Tuesday</div>
+              <div class="m"><div class="b">Great. Has the EV charger arrived yet?</div><div class="meta">8:15 am <span class="chip">&#128204; J7011</span> tagged by Sparky <span class="lnk">Undo</span></div></div>
+              <div class="m out"><div class="b">Not yet, it's due next week. We'll text you when it lands.</div><div class="meta">Jade, 8:40 am <span class="chip">&#128204; J7011</span></div></div>
+              <div class="day">Today</div>
+              <div class="m"><div class="b">Is Thursday still on? There's rain forecast.</div><div class="meta">9:38 am. Sparky thinks this is <span class="chip">J7006</span> <span class="lnk">Yes</span> <span class="lnk">No</span></div></div>
+              <div class="m"><div class="b">Do you also service air con?</div><div class="meta">9:41 am <span class="chip none">No job</span> <span class="lnk">Tag a job</span></div></div>
+            </div>
+            <div class="comp">
+              <div class="quick">About <span class="chip">&#128204; J7006 &#9662;</span> <span class="q">On my way</span><span class="q">Running late</span><span class="q">Quote follow-up</span></div>
+              <div class="line"><div class="box">Text Jane</div><div class="btn pri">Send</div></div>
+            </div>
+          </div>
+
+          <div class="pane info">
+            <div class="who2"><b>Jane Smith</b><span>14 Riverview St, Murwillumbah</span></div>
+            <div>
+              <div class="sec">Jobs</div>
+              <div class="jrow"><span class="jn">J7006</span><div class="jd"><b>Solar + battery</b><span>Thu 26 Nov, 7:00 am</span></div><div class="jm"><span class="badge green">Booked</span></div></div>
+              <div class="jrow"><span class="jn">J7011</span><div class="jd"><b>EV charger</b><span>No booking yet</span></div><div class="jm"><span class="badge amber">Parts</span></div></div>
+            </div>
+            <div><div class="sec">Open quotes</div><div class="jrow"><span class="jn">Q2231</span><div class="jd"><b>Extra 9 kWh battery</b></div><div class="jm num">$5,750</div></div></div>
+            <div><div class="sec">Unpaid invoices</div><div class="jrow"><span class="jn">SI1184</span><div class="jd"><b>Deposit, due 28 Nov</b></div><div class="jm num">$2,220</div></div></div>
+            <div><div class="sec">Calls</div><div class="act" style="padding-top:5px;">Mon 3:51 pm, answered by Brad<span class="num">2 min 14, J7006</span></div></div>
+          </div>
+        </div>
+      </div></div>
+    </figure>
+
+    <figure class="shot">
+      <figcaption><b>On job J7006, Feed tab</b><span>Only the texts tagged J7006 are here, next to the team chat about the same job. A reply from here is tagged J7006 by itself.</span></figcaption>
+      <div class="fit"><div class="desk">
+        <div class="tb"><span>Home</span><span class="on">Jobs</span><span>Quotes</span><span>Schedule</span><span>Inbox</span><span>Chat</span><span class="logo">THOMSON <i>ENERGY</i></span></div>
+        <div class="jhead"><b>J7006</b><span>Jane Smith, 13.2 kW solar + 18 kWh battery</span><span class="badge green">Install booked</span></div>
+        <div class="jtabs"><span>Summary</span><span class="on">Feed</span><span>Files</span><span>Invoices</span></div>
+        <div class="feed">
+          <div class="col">
+            <h3>From texts <span class="chip">&#128204; J7006 only</span></h3>
+            <div class="in" style="justify-content:flex-end;">
+              <div class="m out"><div class="b">Hi Jane, Brad from Thomson Energy. You're booked for Thursday 7 am for the solar and battery install.</div><div class="meta">Brad, Mon 4:02 pm</div></div>
+              <div class="m"><div class="b">Is Thursday still on? There's rain forecast.</div><div class="meta">Jane, today 9:38 am</div></div>
+            </div>
+            <div class="note">3 other texts with Jane are not shown: 2 on J7011, 1 with no job. <span class="lnk">Open all texts</span></div>
+            <div class="comp"><div class="line"><div class="box">Text Jane about J7006</div><div class="btn pri">Send</div></div></div>
+          </div>
+          <div class="col">
+            <h3>From team chat</h3>
+            <div class="in">
+              <div class="tc"><b>Cooper</b><span>Tue 2:10 pm, General</span><p>Battery for J7006 is on the ute, rails are at the shed.</p></div>
+              <div class="tc"><b>Brad</b><span>today 9:44 am, General</span><p>J7006 customer asking about rain Thursday. Roof work first, we go ahead unless it's heavy.</p></div>
+            </div>
+          </div>
+          <div class="col">
+            <h3>Calls and activity</h3>
+            <div class="in">
+              <div class="act">Call from Jane Smith, answered by Brad<span class="num">Mon 3:51 pm, 2 min 14</span></div>
+              <div class="act">Missed call, voicemail left<span>Fri 5:32 pm. "Hi, it's Jane, just checking what time Thursday..."</span></div>
+              <div class="act">Text sent by Brad<span>Mon 4:02 pm</span></div>
+              <div class="act">Deposit invoice SI1184 sent<span>Fri 14 Nov</span></div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </figure>
+
+    <div class="row">
+      <figure class="shot">
+        <figcaption><b>Texts on the phone</b><span>One column at a time, reply box always in reach.</span></figcaption>
+        <div class="phone">
+          <div class="chead"><span class="lnk" style="font-size:20px;">&#8249;</span><div class="t"><b>Jane Smith</b><span class="num">0491 570 006</span></div><div class="btn">Call</div></div>
+          <div class="filter"><span class="chip">All</span><span class="chip off">J7006</span><span class="chip off">J7011</span></div>
+          <div class="msgs">
+            <div class="m out"><div class="b">Not yet, it's due next week. We'll text you when it lands.</div><div class="meta">Jade, Tue <span class="chip">&#128204; J7011</span></div></div>
+            <div class="day">Today</div>
+            <div class="m"><div class="b">Is Thursday still on? There's rain forecast.</div><div class="meta">9:38 am. Sparky thinks <span class="chip">J7006</span> <span class="lnk">Yes</span> <span class="lnk">No</span></div></div>
+            <div class="m"><div class="b">Do you also service air con?</div><div class="meta">9:41 am <span class="chip none">No job</span> <span class="lnk">Tag a job</span></div></div>
+          </div>
+          <div class="comp">
+            <div class="quick">About <span class="chip">&#128204; J7006 &#9662;</span> <span class="q">On my way</span></div>
+            <div class="line"><div class="box">Text Jane</div><div class="btn pri">Send</div></div>
+          </div>
+        </div>
+      </figure>
+
+      <div class="open" style="flex:1;min-width:260px;">
+        <h3>Still to decide</h3>
+        <ul>
+          <li>Who owns a reply: one shared thread per client that every opted-in person sees (drawn here), or the last person who texted.</li>
+          <li>Whether calls are recorded. That needs a "this call may be recorded" message and the staff notice.</li>
+          <li>Voicemail and auto-reply wording.</li>
+          <li>Ring the job's crew first, then everyone, or everyone at once.</li>
+          <li>Who carries the calls and the number (our own Twilio build, or Pear Telco feeding TEops). The screens above do not change either way, but texts on 0455 415 464 need a carrier that lets TEops send and receive them.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Laptop frames are drawn 1040px wide. On a narrower screen shrink them to fit, down to 62%,
+// and let the rest scroll sideways inside their own box.
+function fitFrames() {
+  document.querySelectorAll('.fit').forEach(function (w) {
+    var d = w.firstElementChild;
+    d.style.zoom = Math.max(0.62, Math.min(1, w.clientWidth / 1044));
+  });
+}
+fitFrames();
+window.addEventListener('resize', fitFrames);
+</script>
