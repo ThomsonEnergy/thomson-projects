@@ -339,6 +339,13 @@ Staff must see at a glance: (1) it is a work call, (2) which client is calling, 
 - [ ] One business number, or extra numbers?
 - [ ] SMS replies: shared thread, or owned by whoever last texted?
 
+### Pear Telco alternative (looked at 25 Nov 2026, no decision)
+Pear Telco (Sydney, hosted phone system "Hosted-X") quoted 3 users, month to month, with a setup fee and a 90 day refund guarantee, and offered to connect it to TEops (client file opens on a call, transcript lands on the file). Quote QP261125 is in the owner's Gmail (25 Nov 2026); prices are not copied here.
+- For it: live in weeks, does not wait on the native app or Apple, unlimited calls, somebody else keeps the phones up.
+- Against it: the quote has no SMS (half of this item); the TEops link is not scoped or priced; transcripts are a paid add-on ("Aria Scribe"); a fee per user, where this plan rings every opted-in staff member; a second system for staff to live in unless the link is good.
+- Ask Pear before deciding: (1) can 0455 415 464, a mobile number, sit on Hosted-X, and can TEops send and receive texts on it; (2) does Hosted-X call a web address of ours when a call rings and ends (caller number, who answered, recording); (3) a fixed price in writing for the TEops link and for transcripts; (4) does their iPhone app ring when the phone is locked; (5) can the number be ported out again; (6) the refund guarantee in writing (the quote says "after 90 days", the email says "90-day").
+- If Pear carries the calls, this item shrinks to SMS plus a small "call came in" link, and the 17 Oct "no interim phase" decision is reversed. Owner's call.
+
 ## 9. Staff policy set (gaps and fixes)
 
 Reviewed 18 Oct 2026 against `policies/`. Have: Code of Conduct, Company Property, Staff Training and Development (all dated 28.10.2024), Surveillance Notice, AI consent, Location consent (drafts), Short Form Employment Contract.
