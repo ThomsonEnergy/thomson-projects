@@ -73,7 +73,7 @@ section { display: flex; flex-direction: column; gap: 16px; }
 .jrow .jd span { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jrow .jm { text-align: right; font-size: 12px; }
 .phone .jrow { grid-template-columns: auto minmax(0, 1fr); }
-.phone .jrow .jm { grid-column: 2; text-align: left; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.phone .jrow .jm { grid-column: 2; text-align: left; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
 .phone .jrow .jd b { white-space: normal; }
 
 /* laptop frame */
@@ -86,7 +86,7 @@ section { display: flex; flex-direction: column; gap: 16px; }
 .tb .logo i { font-style: normal; color: var(--accent); }
 
 /* phone frame */
-.phone { width: 290px; max-width: 100%; height: 590px; border: 8px solid var(--frame); border-radius: 38px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); flex: none; }
+.phone { width: 290px; max-width: 100%; height: 620px; border: 8px solid var(--frame); border-radius: 38px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); flex: none; }
 .phone .pad { padding: 10px 12px; }
 
 /* 1 lock screen (fixed look: it is the iPhone, not the app) */
@@ -221,11 +221,11 @@ section { display: flex; flex-direction: column; gap: 16px; }
             </div>
             <div class="card">
               <div class="sec">Open quotes</div>
-              <div class="jrow"><span class="jn">Q2231</span><div class="jd"><b>Extra 9 kWh battery</b><span>Sent 18 Nov</span></div><div class="jm num">$5,750</div></div>
+              <div class="jrow"><span class="jn">Q2231</span><div class="jd"><b>Extra 9 kWh battery</b></div><div class="jm num">$5,750, sent 18 Nov</div></div>
             </div>
             <div class="card">
               <div class="sec">Unpaid invoices</div>
-              <div class="jrow"><span class="jn">SI1184</span><div class="jd"><b>Deposit, J7006</b><span>Due 28 Nov</span></div><div class="jm num">$2,220</div></div>
+              <div class="jrow"><span class="jn">SI1184</span><div class="jd"><b>Deposit, J7006</b></div><div class="jm num">$2,220, due 28 Nov</div></div>
             </div>
           </div>
         </div>
