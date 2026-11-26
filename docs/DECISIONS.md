@@ -2,6 +2,10 @@
 
 Newest first. One line per decision, scope change, idea or finished task, with where the detail lives. Every chat (cloud, laptop, planning) adds its lines before it ends; see "Keep every chat in the loop" in `CLAUDE.md`. Read this first to catch up. This file keeps the last month; older months roll into `docs/archive/DECISIONS_<yyyy-mm>.md` (October 2026 is there).
 
+## 26 Nov 2026
+
+- Planned 26 Nov 2026, waiting on yes (owner: "allow them to request hours off ... the annual leave would be a top up to 8 hours max"): **item 118, leave by the hour.** An Hours box on a one day leave request (blank is the whole day), hours worked plus leave never more than 8 for the day, enforced on the server at Push timesheets, sent to Xero with the hours stated. Feature into `staging`, one migration (`leave_requests.hours`). Nothing built. Detail: `docs/IDEAS_BACKLOG.md` item 118.
+
 ## 25 Nov 2026
 
 - Found and fixed 25 Nov 2026, waiting on the owner's yes to merge (owner: "Supplier page isn't loading"; bug fix into `main`, no migration): **a supplier's page stayed blank for any supplier with at least one bill.** Since item 83 (PR 539, 20 Nov) the page looked up packing slips in one function and used them in another that could not see them, so drawing stopped with an error after every request had succeeded (seen on Haymans, 3 bills). Suppliers with no bills opened fine, and the Suppliers list was never affected. Fix: `public/supplier-detail.html` passes the packing slips into the drawing function. Proved on stand-in data only (before: error, after: bill and Open docket drawn); the build session cannot open the site.
