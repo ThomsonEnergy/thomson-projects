@@ -120,6 +120,7 @@
   </div>
 
   <script src="/js/supabase-client.js?v=151"></script>
+  <script src="/js/leave-hours.js?v=1"></script>
   <script src="/js/template-questions.js?v=9"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
@@ -478,7 +479,7 @@
 
       const [{ data: assignments }, { data: leave }] = await Promise.all([
         supabaseClient.from('schedule_assignments').select('*, projects(name, job_number, quote_number)').eq('staff_id', myUserId).gte('assignment_date', todayStrVal).lte('assignment_date', rangeEndStr).order('assignment_date').order('start_time'),
-        supabaseClient.from('leave_requests').select('start_date, end_date, leave_type').eq('staff_id', myUserId).eq('status', 'approved').lte('start_date', rangeEndStr).gte('end_date', todayStrVal),
+        supabaseClient.from('leave_requests').select('start_date, end_date, leave_type, hours').eq('staff_id', myUserId).eq('status', 'approved').lte('start_date', rangeEndStr).gte('end_date', todayStrVal),
       ]);
 
       const days = [];
@@ -486,12 +487,16 @@
 
       container.innerHTML = days.map(dateStr => {
         const dayAssignments = (assignments || []).filter(a => a.assignment_date === dateStr);
-        const onLeave = (leave || []).find(l => l.start_date <= dateStr && l.end_date >= dateStr);
+        const leaveToday = (leave || []).find(l => l.start_date <= dateStr && l.end_date >= dateStr);
+        // Leave by the hour (item 118) is a line on the day, the bookings still show.
+        const partLeave = LeaveHours.isPartDay(leaveToday) ? leaveToday : null;
+        const onLeave = partLeave ? null : leaveToday;
         const dayLabel = new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
         return `
           <div style="padding:8px 0; border-bottom:1px solid var(--border);">
             <p style="margin:0 0 4px; font-weight:600; font-size:13px;">${dateStr === todayStrVal ? 'Today - ' : ''}${dayLabel}</p>
-            ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${onLeave.leave_type || 'approved'})</p>` : dayAssignments.length ? dayAssignments.map(a => {
+            ${partLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">${LeaveHours.label(partLeave)} leave (${escapeHtml(partLeave.leave_type || 'approved')})</p>` : ''}
+            ${onLeave ? `<p class="subtitle" style="margin:0; color:var(--red);">On leave (${escapeHtml(onLeave.leave_type || 'approved')})</p>` : dayAssignments.length ? dayAssignments.map(a => {
               const link = linkForAssignment(a);
               const inner = `${a.start_time.slice(0, 5)}-${a.end_time.slice(0, 5)} &middot; ${escapeHtml(labelForAssignment(a))}`;
               return link ? `<a class="link-quiet" href="${link}" style="display:block; font-size:13px; margin:2px 0;">${inner}</a>` : `<p class="subtitle" style="margin:2px 0; font-size:13px;">${inner}</p>`;

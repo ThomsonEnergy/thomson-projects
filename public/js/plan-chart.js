@@ -40,7 +40,7 @@ const PlanChart = (() => {
       q(supabaseClient.from('company_settings').select('plan_day_hours, plan_crew_size, plan_lead_weeks, plan_slip_days').eq('id', 1)),
       q(supabaseClient.from('public_holidays').select('holiday_date').gte('holiday_date', from)),
       q(supabaseClient.from('profiles').select('id, full_name, role, on_tools').eq('active', true).order('full_name')),
-      q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').gte('end_date', from)),
+      q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').is('hours', null).gte('end_date', from)),
       // only the rows the plan draws (a request returns at most 1,000 rows, and every quote opened
       // keeps one): jobs with site work ahead, sent quotes, and the job or quote it was opened on
       q(supabaseClient.from(W).select(WCOLS).not('projects.job_number', 'is', null).in('projects.pipeline_stage', P.ACTIVE_STAGES)),

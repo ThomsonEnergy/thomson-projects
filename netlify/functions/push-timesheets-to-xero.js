@@ -39,6 +39,9 @@
 // Approved leave requests that fall in the period go to Xero too, as
 // leave applications (annual, sick, unpaid), once each: the Xero id is
 // kept on the request, and one Xero no longer holds is sent again.
+// Leave by the hour (leave_requests.hours, item 118) goes with its hours
+// stated, cut back here so hours worked plus leave is 8 at most for the
+// day (LeaveHours.topUp), and only once that day is over.
 //
 // LAHA (living-away-from-home allowance) nights flagged at clock-out
 // (time_entries.stayed_overnight, only asked for a project with
@@ -52,6 +55,7 @@ const { requireFinanceRole } = require('./_shared/require-finance-role');
 const { xeroRequest } = require('./_shared/xero-client');
 const { getOrCreateTrackingOptionId } = require('./_shared/xero-tracking');
 const { dayBands, localDateKey, entryHours } = require('./_shared/compute-labour-cost');
+const LeaveHours = require('../../public/js/leave-hours.js');
 
 const BAND_LABELS = ['ordinary', 'ot1', 'ot2', 'publicHoliday'];
 const BAND_NAMES = { ordinary: 'Ordinary Hours', ot1: 'OT1 (1.5x)', ot2: 'OT2 (2x)', publicHoliday: 'Public holiday penalty' };
@@ -569,7 +573,7 @@ exports.handler = async (event) => {
     // it touches is pushed.
     const leaveSent = [];
     const { data: leaveRows, error: leaveErr } = await supabaseAdmin.from('leave_requests')
-      .select('id, staff_id, leave_type, start_date, end_date, notes, created_at, xero_leave_application_id, xero_units')
+      .select('id, staff_id, leave_type, start_date, end_date, hours, notes, created_at, xero_leave_application_id, xero_units')
       .eq('status', 'approved').lte('start_date', endDate).gte('end_date', startDate)
       .order('created_at');
     if (leaveErr) throw leaveErr;
@@ -598,8 +602,14 @@ exports.handler = async (event) => {
       const leaveDays = [];
       for (let d = lr.start_date; d <= lr.end_date && leaveDays.length < 400; d = addDays(d, 1)) leaveDays.push(d);
       const workedOnLeave = (allEntries || []).filter(e => e.staff_id === lr.staff_id && !e.sm8_activity_uuid && leaveDays.includes(localDateKey(e.clock_in)));
-      if (workedOnLeave.length) warnings.push(`${staffName} also clocked ${round2(workedOnLeave.reduce((s, e) => s + entryHours(e), 0))}h on ${title} days (${span}): check the leave hours in Xero.`);
+      // A part day (item 118): hours worked plus leave stops at a full day, so leave never makes overtime.
+      const partDay = LeaveHours.isPartDay(lr);
+      const workedHours = round2(workedOnLeave.reduce((s, e) => s + entryHours(e), 0));
+      const partUnits = partDay ? LeaveHours.topUp(lr.hours, workedHours) : null;
+      const asked = partDay ? `${LeaveHours.label(lr)} of ${title} ${span}` : '';
+      if (workedOnLeave.length && !partDay) warnings.push(`${staffName} also clocked ${round2(workedOnLeave.reduce((s, e) => s + entryHours(e), 0))}h on ${title} days (${span}): check the leave hours in Xero.`);
       const holidaysInLeave = leaveDays.filter(d => holidaySet.has(d) && isWeekday(d));
+      if (partDay && lr.xero_leave_application_id && Number(lr.xero_units) > partUnits) warnings.push(`${staffName}: ${asked} is in Xero as ${round2(lr.xero_units)}h, but ${workedHours}h is now clocked that day so only ${partUnits}h fits in ${LeaveHours.FULL_DAY} hours. Change the leave in Xero.`);
       if (holidaysInLeave.length) warnings.push(`${staffName}: ${holidaysInLeave.map(fmtYmd).join(', ')} is a public holiday inside their ${title}, check Xero pays it as the holiday, not leave.`);
 
       if (lr.leave_type === 'other') { warnings.push(`${staffName}: "other" leave ${span} is approved but has no Xero leave type, add it in Xero by hand if it is paid.`); continue; }
@@ -618,6 +628,12 @@ exports.handler = async (event) => {
         warnings.push(`${staffName}: a second approved ${title} request covers ${span}, not sent. Decline the duplicate on the Leave card.`);
         continue;
       }
+      if (partDay) {
+        if (holidaysInLeave.length || !isWeekday(lr.start_date)) { skipped.push(`${staffName}: ${asked} not sent, that day is not an ordinary working day.`); continue; }
+        // The day has to be over first, or the hours worked are not known yet.
+        if (lr.start_date >= localDateKey(new Date().toISOString())) { held.push(`${staffName}: ${asked} waits until the day is over, so it can be set against the hours worked.`); continue; }
+        if (!(partUnits > 0)) { skipped.push(`${staffName}: ${asked} not sent, ${workedHours}h was worked that day so there is no room for leave (${LeaveHours.FULL_DAY} hours in the day).`); continue; }
+      }
       let leaveTypeId;
       try { leaveTypeId = await leaveTypeIdFor(lr.leave_type); }
       catch (err) { skipped.push(`${staffName}: ${title} ${span} not sent, could not read Xero's leave types (${err.message})`); continue; }
@@ -633,6 +649,8 @@ exports.handler = async (event) => {
             EndDate: lr.end_date,
             Title: `${LEAVE_TITLES[lr.leave_type]} (TEops)`,
             Description: String(lr.notes || '').slice(0, 200) || undefined,
+            // Stated hours need the pay period's own dates, or Xero works the hours out itself.
+            LeavePeriods: partDay ? [{ PayPeriodStartDate: startDate, PayPeriodEndDate: endDate, NumberOfUnits: partUnits }] : undefined,
           }],
         });
         app = result?.LeaveApplications?.[0] || {};
@@ -651,8 +669,9 @@ exports.handler = async (event) => {
         warnings.push(`${staffName}: ${title} ${span} went to Xero (id ${app.LeaveApplicationID || '?'}) but the app could not record it (${saveErr.message}). Do not push again until that is fixed, or it goes twice.`);
         continue;
       }
-      leaveSent.push(`${staffName}: ${title} ${span} sent to Xero, ${units}h.`);
-      if (!(units > 0)) warnings.push(`${staffName}: Xero worked out 0 hours for that leave. Check their hours per day in Xero (Payroll > Employees > Employment) and the leave application.`);
+      leaveSent.push(`${staffName}: ${title} ${span} sent to Xero, ${units}h.${partDay && partUnits < Number(lr.hours) ? ` Asked for ${LeaveHours.label(lr)}, worked ${workedHours}h, so ${partUnits}h tops the day up to ${LeaveHours.FULL_DAY}.` : ''}`);
+      if (partDay && Math.abs(units - partUnits) > 0.01) warnings.push(`${staffName}: Xero recorded ${units}h for ${asked}, not the ${partUnits}h sent. Change it in Xero: Payroll > Employees > ${staffName} > Leave.`);
+      else if (!(units > 0)) warnings.push(`${staffName}: Xero worked out 0 hours for that leave. Check their hours per day in Xero (Payroll > Employees > Employment) and the leave application.`);
     }
 
     // LAHA nights in the period, one per person per day, whether or not the

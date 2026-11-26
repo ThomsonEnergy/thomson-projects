@@ -96,12 +96,14 @@
               <option value="other">Other</option>
             </select>
           </div>
-          <div style="display:flex; align-items:end;">
-            <button id="request-leave-btn" style="width:100%;">Request</button>
+          <div>
+            <label style="margin-top:0">Hours (blank for the whole day)</label>
+            <input type="number" id="leave-hours" min="0.25" max="7.75" step="0.25" inputmode="decimal" placeholder="Whole day" />
           </div>
         </div>
         <label>Notes (optional)</label>
         <input id="leave-notes" placeholder="Anything worth flagging" />
+        <button id="request-leave-btn" style="width:100%; margin-top:8px;">Request</button>
         <div id="leave-msg"></div>
       </div>
       <div class="card">
@@ -134,6 +136,10 @@
                 <option value="unpaid">Unpaid leave</option>
                 <option value="other">Other</option>
               </select>
+            </div>
+            <div>
+              <label style="margin-top:0">Hours (blank for the whole day)</label>
+              <input type="number" id="add-leave-hours" min="0.25" max="7.75" step="0.25" inputmode="decimal" placeholder="Whole day" />
             </div>
           </div>
           <label>Notes (optional)</label>
@@ -188,6 +194,7 @@
 
   <script src="/js/supabase-client.js?v=151"></script>
   <script src="/js/split-sliders.js?v=2"></script>
+  <script src="/js/leave-hours.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let myUserId = null;
@@ -348,7 +355,7 @@
 
       const { data: leave } = await supabaseClient
         .from('leave_requests')
-        .select('start_date, end_date, leave_type')
+        .select('start_date, end_date, leave_type, hours')
         .eq('staff_id', myUserId)
         .eq('status', 'approved')
         .lte('start_date', localDateStr(addDays(weekStart, 6)))
@@ -398,8 +405,9 @@
           }).join('');
           const breakNote = breakNoteHtml(breakInfoFor(dayEntries));
           if (breakNote) bodyHtml += `<div style="margin-top:2px;">${breakNote}</div>`;
+          if (LeaveHours.isPartDay(onLeave)) bodyHtml += `<p class="subtitle" style="margin:4px 0 0;">${LeaveHours.label(onLeave)} ${escapeHtml(onLeave.leave_type)} leave</p>`;
         } else if (onLeave) {
-          bodyHtml = `<p class="subtitle" style="margin:4px 0 0;">On ${onLeave.leave_type} leave</p>`;
+          bodyHtml = `<p class="subtitle" style="margin:4px 0 0;">${LeaveHours.isPartDay(onLeave) ? LeaveHours.label(onLeave) + ' ' : 'On '}${escapeHtml(onLeave.leave_type)} leave</p>`;
         } else {
           bodyHtml = `<p class="subtitle" style="margin:4px 0 0;">No entry</p>`;
         }
@@ -1273,13 +1281,16 @@
       btn.disabled = true;
       btn.textContent = 'Requesting...';
       try {
-      const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes });
+      const part = await leaveHoursFor(myUserId, start_date, end_date, 'leave-hours');
+      if (part.problem) { msg.innerHTML = `<div class="error-box">${escapeHtml(part.problem)}</div>`; return; }
+      const { error } = await supabaseClient.from('leave_requests').insert({ staff_id: myUserId, start_date, end_date, leave_type, notes, hours: part.hours });
       msg.innerHTML = error
         ? `<div class="error-box">${escapeHtml(friendlyError(error))}</div>`
         : `<div class="success-box">Requested. You'll see it below once it's actioned.</div>`;
       if (!error) {
         document.getElementById('leave-start').value = '';
         document.getElementById('leave-end').value = '';
+        document.getElementById('leave-hours').value = '';
         document.getElementById('leave-notes').value = '';
         await loadMyLeave();
       }
@@ -1295,6 +1306,42 @@
       if (!/^20\d\d-\d\d-\d\d$/.test(start) || !/^20\d\d-\d\d-\d\d$/.test(end)) return 'Check the year on those dates.';
       return '';
     }
+
+    // The Hours box on a leave form (item 118): blank is the whole day. Looks up what the rules in
+    // leave-hours.js need (hours already clocked that day, public holiday) and returns
+    // { hours, problem }. The cap that counts is applied again at Push timesheets.
+    async function leaveHoursFor(staffId, start, end, inputId) {
+      const typed = document.getElementById(inputId).value;
+      if (typed.trim() === '') return { hours: null, problem: '' };
+      let worked = 0, isHoliday = false;
+      if (start === end) {
+        const [{ data: entries, error }, { data: holiday }] = await Promise.all([
+          supabaseClient.from('time_entries').select('clock_in, clock_out, break_taken, break_minutes')
+            .eq('staff_id', staffId).is('sm8_activity_uuid', null).not('clock_out', 'is', null)
+            .gte('clock_in', sydneyMidnightUtc(start).toISOString()).lt('clock_in', sydneyMidnightUtc(nextDayKey(start)).toISOString()),
+          supabaseClient.from('public_holidays').select('holiday_date').eq('holiday_date', start),
+        ]);
+        if (error) return { hours: null, problem: friendlyError(error) };
+        worked = (entries || []).reduce((s, e) => s + Math.max(0, new Date(e.clock_out) - new Date(e.clock_in) - (e.break_taken && e.break_minutes ? e.break_minutes * 60000 : 0)), 0) / 3600000;
+        isHoliday = !!(holiday && holiday.length);
+      }
+      const problem = LeaveHours.problem({ start, end, hours: typed, worked, isHoliday });
+      return { hours: problem ? null : LeaveHours.round2(typed), problem };
+    }
+    // Hours can only be typed for one day: the box switches itself off across two dates.
+    function wireLeaveHoursBox(startId, endId, hoursId) {
+      const box = document.getElementById(hoursId);
+      const sync = () => {
+        const start = document.getElementById(startId).value, end = document.getElementById(endId).value;
+        const off = !!start && !!end && start !== end;
+        box.disabled = off;
+        box.placeholder = off ? 'One day only' : 'Whole day';
+        if (off) box.value = '';
+      };
+      [startId, endId].forEach(id => document.getElementById(id).addEventListener('change', sync));
+    }
+    wireLeaveHoursBox('leave-start', 'leave-end', 'leave-hours');
+    wireLeaveHoursBox('add-leave-start', 'add-leave-end', 'add-leave-hours');
 
     async function loadMyLeave() {
       const listEl = document.getElementById('my-leave-list');
@@ -1353,7 +1400,7 @@
       for (let d = l.start_date; d <= l.end_date && n < 400; d = nextDayKey(d)) { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); if (dow >= 1 && dow <= 5) n++; }
       return n;
     }
-    function leaveDaysLabel(l) { const n = leaveWeekdays(l); return `${n} working day${n === 1 ? '' : 's'}`; }
+    function leaveDaysLabel(l) { if (LeaveHours.isPartDay(l)) return `${LeaveHours.label(l)} of the day`; const n = leaveWeekdays(l); return `${n} working day${n === 1 ? '' : 's'}`; }
     function leaveDecidedLabel(l) {
       if (l.status === 'pending' || !l.decided_at) return '';
       const who = l.decider && l.decider.full_name ? ` by ${escapeHtml(l.decider.full_name)}` : '';
@@ -1490,7 +1537,9 @@
         if (!staff_id) { msg.innerHTML = `<div class="error-box">Pick who the leave is for.</div>`; return; }
         const dateProblem = leaveDateProblem(start_date, end_date);
         if (dateProblem) { msg.innerHTML = `<div class="error-box">${dateProblem}</div>`; return; }
-        const row = { staff_id, start_date, end_date, leave_type, notes };
+        const part = await leaveHoursFor(staff_id, start_date, end_date, 'add-leave-hours');
+        if (part.problem) { msg.innerHTML = `<div class="error-box">${escapeHtml(part.problem)}</div>`; return; }
+        const row = { staff_id, start_date, end_date, leave_type, notes, hours: part.hours };
         if (approved) Object.assign(row, { status: 'approved', decided_by: myUserId, decided_at: new Date().toISOString() });
         btn.disabled = true;
         btn.textContent = 'Adding...';
@@ -1498,8 +1547,8 @@
           const { error: insErr } = await supabaseClient.from('leave_requests').insert(row);
           const name = staffSel.options[staffSel.selectedIndex].text;
           if (insErr) { msg.innerHTML = `<div class="error-box">${escapeHtml(friendlyError(insErr))}</div>`; return; }
-          msg.innerHTML = `<div class="success-box">Added: ${escapeHtml(name)}, ${LEAVE_TYPE_LABEL[leave_type] || 'leave'} ${leaveSpanLabel(row)}${approved ? ', approved.' + (leave_type !== 'other' ? ' It goes to Xero with the next timesheet push.' : '') : ', waiting for approval.'}</div>`;
-          ['add-leave-start', 'add-leave-end', 'add-leave-notes'].forEach(id => { document.getElementById(id).value = ''; });
+          msg.innerHTML = `<div class="success-box">Added: ${escapeHtml(name)}, ${LEAVE_TYPE_LABEL[leave_type] || 'leave'} ${leaveSpanLabel(row)}${LeaveHours.isPartDay(row) ? ' (' + LeaveHours.label(row) + ')' : ''}${approved ? ', approved.' + (leave_type !== 'other' ? ' It goes to Xero with the next timesheet push.' : '') : ', waiting for approval.'}</div>`;
+          ['add-leave-start', 'add-leave-end', 'add-leave-hours', 'add-leave-notes'].forEach(id => { document.getElementById(id).value = ''; });
           await loadApprovals(myRole);
           if (staff_id === myUserId) await loadMyLeave();
         } finally {
@@ -1561,7 +1610,7 @@
                 <td data-label="Who"><strong>${escapeHtml(who(l))}</strong><div class="subtitle small">${balanceLine(balances[l.staff_id])}</div>${l.notes ? `<div class="subtitle small">${escapeHtml(l.notes)}</div>` : ''}</td>
                 <td data-label="Leave">${l.leave_type === 'sick' ? '<span style="color:var(--red);">' : ''}${LEAVE_TYPE_LABEL[l.leave_type] || 'Leave'}${l.leave_type === 'sick' ? '</span>' : ''}</td>
                 <td data-label="When">${leaveSpanLabel(l)}</td>
-                <td class="num" data-label="Days">${leaveWeekdays(l)}</td>
+                <td class="num" data-label="Days">${LeaveHours.isPartDay(l) ? LeaveHours.label(l) : leaveWeekdays(l)}</td>
                 <td data-label="Status"><span class="badge ${LEAVE_BADGE[l.status] || 'draft'}">${LEAVE_STATUS_LABEL[l.status] || l.status}</span>${leaveDecidedLabel(l) ? `<div class="subtitle small">${leaveDecidedLabel(l).replace(/^ &middot; /, '')}</div>` : ''}</td>
                 <td data-label="Xero">${l.xero_pushed_at ? `Sent${Number(l.xero_units) > 0 ? ` (${Number(l.xero_units)}h)` : ''}` : (l.status === 'approved' ? '<span class="subtitle">With the next push</span>' : '<span class="subtitle">-</span>')}</td>
                 <td>${l.status === 'pending' ? `

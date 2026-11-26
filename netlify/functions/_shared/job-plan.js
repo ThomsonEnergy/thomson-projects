@@ -25,7 +25,7 @@ async function planContext(admin) {
     admin.from('company_settings').select('plan_day_hours, plan_crew_size, plan_lead_weeks, plan_slip_days').eq('id', 1).maybeSingle(),
     admin.from('public_holidays').select('holiday_date').gte('holiday_date', today),
     admin.from('profiles').select('id, role, on_tools').eq('active', true),
-    admin.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').gte('end_date', today),
+    admin.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').is('hours', null).gte('end_date', today),
   ]);
   const s = settings.data || {};
   return {

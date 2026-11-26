@@ -1,6 +1,6 @@
 # TEops Ideas Backlog
 
-Last updated 26 Nov 2026 (item 118, leave by the hour, planned and waiting on yes; item 7, texts and calls, planned in five PRs and waiting on yes; item 115, New Build plan count and suggest, planned and waiting on yes; items 113 and 114, Hot Water and Air Conditioning quote types, planned and waiting on yes; item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
+Last updated 26 Nov 2026 (item 118, leave by the hour, live and moved to the archive; item 7, texts and calls, planned in five PRs and waiting on yes; item 115, New Build plan count and suggest, planned and waiting on yes; items 113 and 114, Hot Water and Air Conditioning quote types, planned and waiting on yes; item 112, statement email and site inspections, planned and waiting on yes; item 111, leave ServiceM8 for good, planned and waiting on yes; item 110, merge two clients, planned; item 109, price list jobs, LIVE, write-up in the built file; item 92 job plan LIVE, write-up in the built file; item 74 point 9a, a client asks for a date and time on a job from the portal, LIVE 18 Nov; item 74 PR 2 (requests for work, job messages, People card, portal links) LIVE 18 Nov; PR 3 split in three by the owner (18 Nov): 3a referral link LIVE, 3b money and 3c payroll next; item 93, NETCC Approved Seller on solar and battery proposals, built and on staging, in the built file; item 92, the job plan Gantt, planned and waiting on yes; item 88 live and in the built file; a first slice of item 84 offered, waiting on yes; items 87, 89, 90 and 91 waiting on yes)
 
 Open work only: planned, waiting on yes, partly built, or built with something still to do. Code is the source of truth: if something here is built, move it to `docs/PROJECT_SPEC.md` and its write-up to `docs/archive/IDEAS_BACKLOG_BUILT.md` (same item number) in the PR that ships it, so this file stays short for every chat that reads it.
 
@@ -37,7 +37,6 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, answers in 24 Nov 2026 (Sparky also drafts the quote: prebuilds, new prebuilds, draft supplier requests), waiting on yes | Y | None |
 | 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | Item 114 first (the shared plan base; it lands whole) |
 | 116 | Network applications and CCEWs follow themselves: TEops reads the Essential Connections and BCNSW eCert emails it already holds, so the job's network application (reference, status, approval PDF) and its CCEW file themselves; then a ready to lodge sheet for the Essential Connections form | Part A planned 24 Nov 2026, waiting on yes; part B waiting on the portal's form questions | Y | None for part A |
-| 118 | Leave by the hour: ask for part of a day, topped up to 8 hours at most with what was worked | Planned 26 Nov 2026, waiting on yes | N | A Xero key on staging to prove the hours reach Xero |
 
 ## Owner to-dos left over from shipped items
 
@@ -1412,24 +1411,3 @@ Size: small to medium (two to three hours).
 Test on staging: the nightly logic is proved in node against the shared module with stand-in payments (cloud sessions cannot reach ServiceM8); admin@staging.test, J9002 > Cost Centres for the paid claim card. The first real run is the first night on production.
 Simpler: nobody has to notice a missing ServiceM8 deposit, open the import page, tick a job and press Import; the step is removed and nothing is added.
 Best model: Fable 5.1, effort xhigh, because it changes invoiced to date on live jobs with a production data fix in the same go.
-
-## 118. Leave by the hour, topped up to 8 hours (planned 26 Nov 2026, waiting on yes)
-
-Owner, 26 Nov 2026: "Annual leave only allows employees to request a full day off, allow them to request hours off if they want 2 hours annual leave for a day. Also don't allow them to go into overtime for the day so the annual leave would be a top up to 8 hours max."
-
-Today a request is whole days only (`leave_requests` has dates, no hours) and Xero works the hours out from the person's ordinary hours.
-
-1. **Hours on a one day request.** Timesheets > Request leave gets an Hours box. Blank means the whole day, as now. Hours can be typed only when the start and end date are the same weekday (not a weekend or public holiday, where every hour is overtime), more than 0 and less than 8. Same box on Add leave for someone (Admin and Finance). Read by this chat as: all leave types, not only annual (to confirm).
-2. **Never past 8 hours in the day.** Hours worked plus leave is 8 at most. Checked when asking (if the day is already clocked) and again on the server at Push timesheets, which is the one that counts: leave sent to Xero is the lesser of what was asked and 8 minus the hours clocked that day. A trimmed request says so on the push result and on the request ("asked 2h, paid 1.5h, worked 6.5h"); nothing left means nothing is sent. Nobody has to work it out.
-3. **Xero.** A part day goes as a leave application with the hours stated (`LeavePeriods.NumberOfUnits`) instead of letting Xero work them out. Not proven until a push on staging with a Xero key.
-4. **Everywhere leave shows.** Schedule, My Day and the Timesheets week show "2h annual leave" on the day and the person can still be booked and clock in; the booking clash check and the job plan count them as at work. The Leave lists show hours in place of days.
-
-Done means: (1) ask for 2 hours on one weekday: it saves and reads "2h" in My leave requests; (2) pick two different dates: the Hours box is off; (3) type 9, or 3 on a day with 6h clocked: refused with the reason; (4) approve it, the Schedule shows "2h leave" and the person can still be booked; (5) Push timesheets on a day with 6.5h clocked and 2h asked: 1.5h goes to Xero and the result says why.
-
-Touches: `public/timesheets.html`, `public/schedule.html`, `public/my-day.html`, `public/js/job-schedule.js`, `public/js/plan-chart.js`, `public/js/job-window.js`, `netlify/functions/push-timesheets-to-xero.js`, `netlify/functions/_shared/job-plan.js`, one new migration (`leave_requests.hours` with its check).
-Overlaps: none that matter (`origin/claude/sleepy-carson-kpbe9s`, item 113, only bumps a `?v=` on `timesheets.html`).
-Kind: feature (into `staging`); migration yes; payroll yes (leave hours into Xero), backup of `leave_requests` before the production migration.
-Size: medium (a morning).
-Test on staging: a staff login asks for 2 hours, admin@staging.test approves on Timesheets > Leave, check the Schedule, then Push timesheets (needs the Xero key on staging).
-Simpler: nobody takes a whole day for a two hour appointment or fixes the hours in Xero by hand, and leave can never push a day into overtime; adds one optional box, blank is the old behaviour.
-Best model: Fable 5.1, effort xhigh, because it is a migration plus payroll hours into Xero in one go.
