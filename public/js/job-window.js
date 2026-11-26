@@ -21,7 +21,7 @@ async function initJobWindow(project) {
       q(supabaseClient.from('company_settings').select('plan_day_hours, plan_crew_size, plan_lead_weeks').eq('id', 1)),
       q(supabaseClient.from('public_holidays').select('holiday_date').gte('holiday_date', today)),
       q(supabaseClient.from('profiles').select('id, role, on_tools').eq('active', true)),
-      q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').gte('end_date', today)),
+      q(supabaseClient.from('leave_requests').select('staff_id, start_date, end_date').eq('status', 'approved').is('hours', null).gte('end_date', today)),
       // only jobs with site work ahead (what the load counts); this quote's own row is read below
       q(supabaseClient.from('job_windows').select('*, projects!inner(job_number, pipeline_stage)').not('projects.job_number', 'is', null).in('projects.pipeline_stage', PlanCalc.ACTIVE_STAGES)),
       q(supabaseClient.from('cost_centres').select('id, variation_entry_id, cost_centre_line_items(item_type, quantity)').eq('project_id', project.id)),

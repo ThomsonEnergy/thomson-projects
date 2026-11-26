@@ -37,7 +37,7 @@ Open work only: planned, waiting on yes, partly built, or built with something s
 | 114 | Air Conditioning quote type, split or ducted: upload the house plan, draw the duct plan and the pipe work plan with marks that stay movable, schedule to quote lines, plans in the proposal; then Sparky drafts it (item 89) | Planned 24 Nov 2026, answers in 24 Nov 2026 (Sparky also drafts the quote: prebuilds, new prebuilds, draft supplier requests), waiting on yes | Y | None |
 | 115 | New Build quote: upload the plan, Sparky counts the electrical already drawn on it (a mark on each point) or puts points in the suggested spots from a standard in Settings, people edit and add, the schedule becomes quote lines | Planned 24 Nov 2026, answers in 24 Nov 2026, waiting on yes | Y | Item 114 first (the shared plan base; it lands whole) |
 | 116 | Network applications and CCEWs follow themselves: TEops reads the Essential Connections and BCNSW eCert emails it already holds, so the job's network application (reference, status, approval PDF) and its CCEW file themselves; then a ready to lodge sheet for the Essential Connections form | Part A planned 24 Nov 2026, waiting on yes; part B waiting on the portal's form questions | Y | None for part A |
-| 118 | Leave by the hour: ask for part of a day, topped up to 8 hours at most with what was worked | Planned 26 Nov 2026, waiting on yes | N | A Xero key on staging to prove the hours reach Xero |
+| 118 | Leave by the hour: ask for part of a day, topped up to 8 hours at most with what was worked | Built 26 Nov 2026 as a bug fix into `main` (owner: "It's a bug so straight to main"), waiting on the owner's yes to the SQL | N | The first real Push timesheets proves Xero takes the stated hours |
 
 ## Owner to-dos left over from shipped items
 
@@ -1413,7 +1413,11 @@ Test on staging: the nightly logic is proved in node against the shared module w
 Simpler: nobody has to notice a missing ServiceM8 deposit, open the import page, tick a job and press Import; the step is removed and nothing is added.
 Best model: Fable 5.1, effort xhigh, because it changes invoiced to date on live jobs with a production data fix in the same go.
 
-## 118. Leave by the hour, topped up to 8 hours (planned 26 Nov 2026, waiting on yes)
+## 118. Leave by the hour, topped up to 8 hours (built 26 Nov 2026, waiting on yes to the SQL)
+
+Building in: `claude/annual-leave-hourly-requests-6v3jkz` (bug fix into `main`, owner 26 Nov 2026: "It's a bug so straight to main"). Migration `20261224000000_leave_hours.sql` is on staging (tested: 2h on a weekday saves; two dates, 8h, 0h and a Saturday are refused), not on production yet.
+
+As built, where it differs from the plan below: (a) a part day goes to Xero only once that day is over, so the hours worked are known; (b) times offered to a client still skip a person with any approved leave that day, part day included (the database rule `time_offer_person_busy` is unchanged), while the Schedule itself lets them be booked by hand and the job plan counts them as at work; (c) the rules live in `public/js/leave-hours.js`, used by the pages and the push; (d) the `timesheets.html` page budget went from 725 KB to 735 KB for it. Not clicked through in a browser by the build chat, and Xero taking the stated hours is not proven until the first real push.
 
 Owner, 26 Nov 2026: "Annual leave only allows employees to request a full day off, allow them to request hours off if they want 2 hours annual leave for a day. Also don't allow them to go into overtime for the day so the annual leave would be a top up to 8 hours max."
 

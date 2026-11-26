@@ -298,6 +298,7 @@
 
 
   <script src="/js/supabase-client.js?v=151"></script>
+  <script src="/js/leave-hours.js?v=1"></script>
   <script src="/js/theme.js?v=2"></script>
   <script>
     let viewYear, viewMonth; // month view state (0-indexed month)
@@ -405,7 +406,7 @@
             const g = groups.get(key);
             if (!g.names.includes(first)) g.names.push(first);
           });
-          const chips = dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (leave)</span>`).join('')
+          const chips = dayLeave.map(l => `<span class="cal-chip leave">${escapeHtml((l.profiles && l.profiles.full_name) || 'Staff')} (${LeaveHours.isPartDay(l) ? LeaveHours.label(l) + ' ' : ''}leave)</span>`).join('')
             + [...groups.values()].map(g => {
               const text = `${g.label} \u00b7 ${g.names.join(', ')}`;
               return `<span class="cal-chip" title="${escapeHtml(text)}">${escapeHtml(text)}</span>`;
@@ -548,9 +549,11 @@
         activeStaff.forEach(staff => {
           const staffAssignments = liveAssignments.filter(a => a.staff_id === staff.id);
           const staffLeave = (leave || []).find(l => l.staff_id === staff.id || (l.profiles && l.profiles.id === staff.id));
+          // Leave by the hour (item 118) leaves the day open for bookings: it shows beside the name.
+          const partLeaveTag = LeaveHours.isPartDay(staffLeave) ? `<span class="you-tag" style="color:var(--red);">${LeaveHours.label(staffLeave)} leave</span>` : '';
 
           let blocksHtml = '';
-          if (staffLeave) {
+          if (staffLeave && !partLeaveTag) {
             blocksHtml += `<div class="day-block leave" style="left:0; width:${timelineWidth}px;">${escapeHtml(staff.full_name)} - leave (${escapeHtml(staffLeave.leave_type || 'approved')})</div>`;
           }
           staffAssignments.forEach(a => {
@@ -580,7 +583,7 @@
 
           rowsHtml += `
             <div class="staff-row ${isHoliday ? 'holiday-row' : ''}" style="min-width:${90 + timelineWidth}px;">
-              <div class="staff-name-col"><span class="staff-name">${escapeHtml(staff.full_name || 'Unnamed')}</span>${staff.id === myId ? '<span class="you-tag">(you)</span>' : ''}</div>
+              <div class="staff-name-col"><span class="staff-name">${escapeHtml(staff.full_name || 'Unnamed')}</span>${staff.id === myId ? '<span class="you-tag">(you)</span>' : ''}${partLeaveTag}</div>
               <div class="staff-timeline" data-staff-id="${staff.id}" style="width:${timelineWidth}px; --hour-count:${hourCount};">
                 ${blocksHtml}
               </div>
@@ -613,7 +616,7 @@
 
         let entriesHtml = '';
         if (staffLeave) {
-          entriesHtml += `<div class="mobile-entry leave"><span>Leave (${staffLeave.leave_type || 'approved'})</span></div>`;
+          entriesHtml += `<div class="mobile-entry leave"><span>${LeaveHours.isPartDay(staffLeave) ? LeaveHours.label(staffLeave) + ' leave' : 'Leave'} (${escapeHtml(staffLeave.leave_type || 'approved')})</span></div>`;
         }
         staffAssignments.forEach(a => {
           const reconciled = reconciledById[a.id];
